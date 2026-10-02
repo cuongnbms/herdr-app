@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useApp, selectedPane } from "./app";
+import { chosenLens, useApp, selectedPane } from "./app";
 import type { MachineView } from "../lib/types";
 
 const machine: MachineView = {
@@ -29,6 +29,18 @@ describe("app store", () => {
     const sel = selectedPane(useApp.getState());
     expect(sel?.workspace.label).toBe("herdr-app");
     expect(sel?.pane.title).toBe("pi");
+  });
+  it("an automatic lens override is not persisted and an explicit choice clears it", () => {
+    useApp.setState({ lens: {}, lensOverride: {} });
+    useApp.getState().setLensOverride("k", "terminal");
+    expect(chosenLens(useApp.getState(), "k")).toBe("terminal");
+    expect(localStorage.getItem("herdr-app:ui") ?? "").not.toContain('"k"');
+    useApp.getState().setLens("k", "chat");
+    expect(useApp.getState().lensOverride).toEqual({});
+    expect(chosenLens(useApp.getState(), "k")).toBe("chat");
+    // The override wins over a remembered choice while it lasts.
+    useApp.getState().setLensOverride("k", "terminal");
+    expect(chosenLens(useApp.getState(), "k")).toBe("terminal");
   });
   it("returns null when the selected pane disappeared", () => {
     useApp.getState().upsertMachine(machine);

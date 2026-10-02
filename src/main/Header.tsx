@@ -1,13 +1,13 @@
 import { useShallow } from "zustand/react/shallow";
 import { StatusDot } from "../sidebar/StatusDot";
-import { selectedPane, useApp } from "../store/app";
+import { chosenLens, selectedPane, useApp } from "../store/app";
 import type { Lens } from "../store/app";
 import { paneKey } from "../lib/types";
 import { defaultLens } from "../lens";
 
 export function Header() {
   const sel = useApp(useShallow(selectedPane));
-  const remembered = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined));
+  const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const setLens = useApp((s) => s.setLens);
   if (!sel) return null;
   const lens = defaultLens(sel.pane, remembered);

@@ -40,6 +40,10 @@ export interface AppState {
   /** One-line notes shown in the Terminal lens, e.g. after a Chat lens fallback. Not persisted. */
   lensNote: Record<string, string>;
   setLensNote: (key: string, note: string | null) => void;
+  /** Automatic lens choices (the Chat lens falling back to Terminal). Not persisted; they win
+   *  over `lens` until the user picks a lens again. */
+  lensOverride: Record<string, Lens>;
+  setLensOverride: (key: string, lens: Lens | null) => void;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -52,6 +56,7 @@ export const useApp = create<AppState>((set, get) => ({
   order: [],
   selected: null,
   lensNote: {},
+  lensOverride: {},
   ...load(),
   setLensNote: (key, note) =>
     set((s) => {
@@ -73,8 +78,17 @@ export const useApp = create<AppState>((set, get) => ({
       };
     }),
   select: (ref) => set({ selected: ref }),
+  setLensOverride: (key, lens) =>
+    set((s) => {
+      const { [key]: _old, ...rest } = s.lensOverride;
+      return { lensOverride: lens ? { ...rest, [key]: lens } : rest };
+    }),
+  // An explicit choice: persisted, and it ends any automatic override.
   setLens: (key, lens) => {
-    set((s) => ({ lens: { ...s.lens, [key]: lens } }));
+    set((s) => {
+      const { [key]: _old, ...lensOverride } = s.lensOverride;
+      return { lens: { ...s.lens, [key]: lens }, lensOverride };
+    });
     save(get());
   },
   // `current` is the effective (possibly defaulted) open state of the node.
@@ -83,6 +97,11 @@ export const useApp = create<AppState>((set, get) => ({
     save(get());
   },
 }));
+
+/** The lens chosen for a pane (automatic override first, then the remembered choice). */
+export function chosenLens(state: Pick<AppState, "lens" | "lensOverride">, key: string): Lens | undefined {
+  return state.lensOverride[key] ?? state.lens[key];
+}
 
 export interface SelectedPane {
   machine: MachineView;

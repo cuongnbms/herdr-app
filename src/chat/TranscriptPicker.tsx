@@ -20,6 +20,14 @@ export function rememberTranscript(paneKey: string, path: string) {
   }
 }
 
+export function forgetTranscript(paneKey: string) {
+  try {
+    localStorage.removeItem(transcriptKey(paneKey));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function TranscriptPicker({ located, onChoose }: { located: Located; onChoose: (path: string) => void }) {
   if (!located.ambiguous) return null;
   const options = located.candidates.includes(located.path) ? located.candidates : [located.path, ...located.candidates];

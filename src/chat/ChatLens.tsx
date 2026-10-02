@@ -4,12 +4,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { chatPage } from "../lib/ipc";
 import { paneKey, type AppError, type ChatEvent, type ChatItem, type Located, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
-import { openChat } from "./chatSession";
+import { onOpenFailure, openChat, watchMachine } from "./chatSession";
 import { BlockedPanel } from "./BlockedPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
 import { Composer } from "./Composer";
-import { rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
+import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
 type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
 const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a));
@@ -18,8 +18,10 @@ type ToolResult = Extract<ChatItem, { kind: "tool_result" }>;
 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
-  const setLens = useApp((s) => s.setLens);
+  const setLensOverride = useApp((s) => s.setLensOverride);
   const setLensNote = useApp((s) => s.setLensNote);
+  const machineState = useApp((s) => s.machines[pane.machine_id]?.state);
+  const sawDown = useRef(false);
   const [state, dispatch] = useReducer(reducer, emptyChat);
   const [located, setLocated] = useState<Located | null>(null);
   const [openError, setOpenError] = useState<AppError | null>(null);
@@ -35,6 +37,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const open = useCallback(
     (path: string | null) => {
       const gen = ++generation.current;
+      setOpenError(null);
       const channel = new Channel<ChatEvent>();
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
@@ -52,14 +55,32 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         })
         .catch((e: AppError) => {
           if (gen !== generation.current) return;
-          if (e?.code === "not_found") {
-            setLensNote(key, "No conversation transcript found for this pane; showing the terminal.");
-            setLens(key, "terminal");
-          } else setOpenError(e);
+          const machine = useApp.getState().machines[pane.machine_id]?.state;
+          switch (onOpenFailure(path, e, machine)) {
+            case "retry_auto":
+              forgetTranscript(key);
+              open(null);
+              break;
+            case "fallback":
+              // In memory only: a fresh pane's transcript appears after its first prompt.
+              setLensNote(key, "No conversation transcript found for this pane; showing the terminal.");
+              setLensOverride(key, "terminal");
+              break;
+            case "error":
+              setOpenError(e);
+          }
         });
     },
-    [pane, key, setLens, setLensNote],
+    [pane, key, setLensOverride, setLensNote],
   );
+
+  // The tail dies with an ssh drop: reopen once the Machine is back.
+  useEffect(() => {
+    const w = watchMachine(sawDown.current, machineState);
+    sawDown.current = w.sawDown;
+    if (w.reopen) open(rememberedTranscript(key));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineState]);
 
   useEffect(() => {
     open(rememberedTranscript(key));

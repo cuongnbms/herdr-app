@@ -1,6 +1,6 @@
 import type { Channel } from "@tauri-apps/api/core";
 import * as ipc from "../lib/ipc";
-import { paneKey, type ChatEvent, type Located, type PaneRef } from "../lib/types";
+import { paneKey, type AppError, type ChatEvent, type Located, type MachineState, type PaneRef } from "../lib/types";
 
 export interface ChatDeps {
   chatOpen: (p: PaneRef, path: string | null, events: Channel<ChatEvent>) => Promise<Located>;
@@ -40,4 +40,21 @@ export function openChat(pane: PaneRef, path: string | null, events: Channel<Cha
     });
   };
   return { opened, close };
+}
+
+/**
+ * What a failed chat open leads to: a remembered transcript that is gone is forgotten and the
+ * transcript located again (once: that retry has no path); no transcript at all falls back to
+ * the Terminal lens (in memory only). A Machine that is not connected is just an error: the
+ * chat reopens when the Machine comes back.
+ */
+export function onOpenFailure(path: string | null, e: AppError | null | undefined, machine: MachineState | undefined): "retry_auto" | "fallback" | "error" {
+  if (e?.code !== "not_found" || machine !== "connected") return "error";
+  return path !== null ? "retry_auto" : "fallback";
+}
+
+/** Tracks a Machine going down and back up; `reopen` is true on the down -> connected edge. */
+export function watchMachine(sawDown: boolean, machine: MachineState | undefined): { sawDown: boolean; reopen: boolean } {
+  if (machine !== "connected") return { sawDown: true, reopen: false };
+  return { sawDown: false, reopen: sawDown };
 }

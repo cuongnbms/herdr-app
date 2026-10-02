@@ -8,7 +8,7 @@ import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
-import { selectedPane, useApp } from "./store/app";
+import { chosenLens, selectedPane, useApp } from "./store/app";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
@@ -59,7 +59,7 @@ const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   const sel = useApp(useShallow(selectedPane));
-  const remembered = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined));
+  const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const note = useApp((s) => (s.selected ? s.lensNote[paneKey(s.selected)] : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
 
