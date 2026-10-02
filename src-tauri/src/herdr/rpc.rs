@@ -19,6 +19,9 @@ use tokio::{
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Event name forwarded in place of a subscription frame that could not be decoded.
+pub const UNDECODABLE: &str = "__undecodable";
+
 /// Message prefix of the error for a peer that closes before answering.
 const CLOSED_EARLY: &str = "connection closed before response to";
 
@@ -115,7 +118,14 @@ pub async fn subscribe(socket: &Path, subscriptions: Vec<Value>) -> AppResult<Su
                     }
                 }
                 Ok(_) => {}
-                Err(e) => tracing::warn!("dropping undecodable herdr frame: {e}"),
+                Err(e) => {
+                    // We cannot tell what we missed: the watcher refetches on any unknown event.
+                    tracing::warn!("undecodable herdr frame, asking for a refetch: {e}");
+                    let ev = EventFrame { event: UNDECODABLE.into(), data: Value::Null };
+                    if tx.send(ev).await.is_err() {
+                        return;
+                    }
+                }
             }
         }
     });
@@ -150,6 +160,25 @@ mod tests {
         assert!(closed_early(&call(&sock, "session.snapshot", json!({})).await.unwrap_err()));
         let missing = call(std::path::Path::new("/tmp/definitely-not-here.sock"), "x", json!({})).await.unwrap_err();
         assert!(!closed_early(&missing));
+    }
+    #[tokio::test]
+    async fn undecodable_subscription_frame_is_forwarded_as_a_synthetic_event() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let sock = d.path().join("u.sock");
+        let l = tokio::net::UnixListener::bind(&sock).unwrap();
+        tokio::spawn(async move {
+            let (s, _) = l.accept().await.unwrap();
+            let (r, mut w) = s.into_split();
+            let line = BufReader::new(r).lines().next_line().await.unwrap().unwrap();
+            let id = serde_json::from_str::<Value>(&line).unwrap()["id"].clone();
+            let started = json!({"id": id, "result": {"type": "subscription_started"}});
+            w.write_all(format!("{started}\nnot json at all\n{}\n", json!({"event":"pane_created","data":{}})).as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+        let mut sub = subscribe(&sock, vec![json!({"type":"pane.created"})]).await.unwrap();
+        assert_eq!(sub.rx.recv().await.unwrap().event, UNDECODABLE);
+        assert_eq!(sub.rx.recv().await.unwrap().event, "pane_created", "later frames still arrive");
     }
     #[tokio::test]
     async fn missing_socket_is_io_error() {
