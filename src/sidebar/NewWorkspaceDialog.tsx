@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
 import { setFolder } from "../workspaces/folder";
+import { AgentChoice } from "../agents/AgentChoice";
 
 type Agent = "none" | "claude" | "pi";
+const AGENTS: readonly Agent[] = ["none", "claude", "pi"];
 
 interface WorkspaceCreated {
   workspace?: { workspace_id: string };
@@ -70,14 +72,7 @@ export function NewWorkspaceDialog({
           Label (optional)
           <input value={label} onChange={(e) => setLabel(e.target.value)} />
         </label>
-        <label>
-          Agent
-          <select value={agent} onChange={(e) => setAgent(e.target.value as Agent)}>
-            <option value="none">none</option>
-            <option value="claude">claude</option>
-            <option value="pi">pi</option>
-          </select>
-        </label>
+        <AgentChoice options={AGENTS} value={agent} onChange={setAgent} />
         <div className="actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn btn-primary">Create</button>

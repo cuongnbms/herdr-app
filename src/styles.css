@@ -385,6 +385,22 @@ kbd {
 }
 .dialog input:focus, .dialog select:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .dialog input::placeholder, .composer textarea::placeholder, .palette input::placeholder { color: var(--fg-3); }
+.dialog fieldset.agent-choice { margin: 0; padding: 0; border: 0; min-width: 0; }
+.agent-choice legend { padding: 0; margin-bottom: 6px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.agent-choice .seg { display: grid; grid-template-columns: repeat(var(--n), 1fr); }
+.agent-choice .seg-thumb { width: calc((100% - 4px) / var(--n)); transform: translateX(calc(var(--i) * 100%)); }
+.dialog .seg-option {
+  position: relative; flex-direction: row; align-items: center; justify-content: center; gap: 8px;
+  height: 30px; padding: 0 12px; border-radius: 6px;
+  color: var(--fg-3); font-size: 13px; font-weight: 500; cursor: pointer; transition: color var(--t-fast);
+}
+.dialog .seg-option:hover { color: var(--fg-2); }
+.dialog .seg-option:has(input:checked) { color: var(--fg); }
+.dialog .seg-option:has(input:focus-visible) { box-shadow: var(--ring); }
+.dialog .seg-option input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; padding: 0; border: 0; pointer-events: none; }
+.seg-option .agent-tile { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 5px; }
+.seg-option .agent-tile svg { width: 12px; height: 12px; }
+.seg-option .agent-tile-bare svg { width: 100%; height: 100%; }
 .dialog details { color: var(--fg-2); }
 .dialog details summary { cursor: pointer; font-size: 12px; }
 .dialog details[open] summary { margin-bottom: 10px; }

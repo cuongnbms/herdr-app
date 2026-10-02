@@ -3,8 +3,10 @@ import { herdrCall } from "../lib/ipc";
 import type { WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { getFolder, setFolder, suggestFolder } from "../workspaces/folder";
+import { AgentChoice } from "./AgentChoice";
 
 type Agent = "claude" | "pi";
+const AGENTS: readonly Agent[] = ["claude", "pi"];
 
 interface TabCreated {
   root_pane: { pane_id: string };
@@ -60,13 +62,7 @@ export function NewAgentDialog({
         }}
       >
         <h3>New agent in {workspace.label}</h3>
-        <label>
-          Agent
-          <select autoFocus={stored !== null} value={agent} onChange={(e) => setAgent(e.target.value as Agent)}>
-            <option value="claude">claude</option>
-            <option value="pi">pi</option>
-          </select>
-        </label>
+        <AgentChoice options={AGENTS} value={agent} onChange={setAgent} autoFocus={stored !== null} />
         {stored === null && (
           <label>
             Folder

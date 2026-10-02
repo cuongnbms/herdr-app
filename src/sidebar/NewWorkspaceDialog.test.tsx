@@ -28,7 +28,7 @@ describe("NewWorkspaceDialog", () => {
     vi.mocked(herdrCall).mockImplementation((_m, _s, method) =>
       Promise.resolve(method === "workspace.create" ? { type: "workspace_created", root_pane: { pane_id: "w8:p1" } } : undefined));
     render(<NewWorkspaceDialog machineId="local" session="default" defaultCwd="/srv/api" onClose={() => {}} onError={onError} />);
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "claude" } });
+    fireEvent.click(screen.getByRole("radio", { name: "claude" }));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "claude", kind: "claude", pane_id: "w8:p1" }));
     expect(onError).not.toHaveBeenCalled();
