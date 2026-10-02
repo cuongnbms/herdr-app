@@ -2,6 +2,7 @@
 use crate::{
     attach::AttachManager,
     error::{AppError, AppResult},
+    transcript::ChatManager,
     herdr::{
         rpc,
         types::AgentStatus,
@@ -240,6 +241,7 @@ pub struct MachineManager {
     me: Weak<MachineManager>,
     registry: PathBuf,
     attach: Mutex<Option<Arc<AttachManager>>>,
+    chats: Mutex<Option<Arc<ChatManager>>>,
     machines: Mutex<Vec<Machine>>,
     emit: Emit,
     factory: Mutex<Option<Factory>>,
@@ -281,6 +283,7 @@ impl MachineManager {
             me: me.clone(),
             registry: registry_path,
             attach: Mutex::new(None),
+            chats: Mutex::new(None),
             machines: Mutex::new(machines),
             emit,
             factory: Mutex::new(None),
@@ -295,6 +298,11 @@ impl MachineManager {
     /// Terminals are closed through this when a Machine disconnects.
     pub fn set_attach_manager(&self, a: Arc<AttachManager>) {
         *self.attach.lock().unwrap() = Some(a);
+    }
+
+    /// Chat tails are closed through this when a Machine is disconnected or removed.
+    pub fn set_chat_manager(&self, c: Arc<ChatManager>) {
+        *self.chats.lock().unwrap() = Some(c);
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // test seam: replaces the default local/ssh transports
@@ -696,6 +704,9 @@ impl MachineManager {
         let _ = self.with_machine(id, |m| m.epoch += 1);
         self.cancel_reconnect(id);
         self.teardown(id, true, true).await;
+        if let Some(c) = self.chats.lock().unwrap().clone() {
+            c.close_machine(id);
+        }
         if let Some(s) = self.ssh_of(id) {
             self.end_master(&s).await;
         }
@@ -1494,6 +1505,22 @@ mod tests {
         assert_eq!(f.calls_of("session.snapshot"), before, "other calls do not refetch");
         mgr.call("local", "default", "pane.rename", json!({"pane_id":"w1:p1","label":"x"})).await.unwrap();
         assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
+    }
+
+    #[tokio::test]
+    async fn disconnect_closes_the_machines_chats() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "").unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let chats = Arc::new(ChatManager::default());
+        mgr.set_chat_manager(chats.clone());
+        let pane = PaneRef { machine_id: "local".into(), session: "default".into(), pane_id: "w1:p1".into() };
+        let parser = crate::transcript::parser_for("claude").unwrap();
+        chats.insert(pane.clone(), crate::transcript::spawn_tail(Arc::new(LocalTransport), p.to_string_lossy().into(), parser, Arc::new(|_| {})));
+        assert!(chats.page(&pane, 0, 1).is_some());
+        mgr.disconnect("local").await;
+        assert!(chats.page(&pane, 0, 1).is_none());
     }
 
     #[tokio::test]

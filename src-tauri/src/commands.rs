@@ -222,7 +222,7 @@ pub async fn term_close(att: Att<'_>, key: AttachKey) -> Result<(), AppError> {
     Ok(())
 }
 
-type Chats<'a> = State<'a, ChatManager>;
+type Chats<'a> = State<'a, Arc<ChatManager>>;
 
 const CHAT_PAGE: usize = 200;
 

@@ -68,9 +68,11 @@ pub fn run() {
             );
             let attach = AttachManager::new(std::time::Duration::from_secs(15));
             mgr.set_attach_manager(attach.clone());
+            let chats = Arc::new(transcript::ChatManager::default());
+            mgr.set_chat_manager(chats.clone());
             app.manage(mgr.clone());
             app.manage(attach);
-            app.manage(transcript::ChatManager::default());
+            app.manage(chats);
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mgr.connect("local").await {
                     tracing::error!("connect local: {e}");

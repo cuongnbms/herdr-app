@@ -89,4 +89,44 @@ impl ChatManager {
     pub fn page(&self, pane: &PaneRef, before: usize, limit: usize) -> Option<Vec<ChatItem>> {
         self.handles.lock().unwrap().get(pane).map(|h| h.page(before, limit))
     }
+
+    /// End every tail of the Machine (it was disconnected or removed).
+    pub fn close_machine(&self, machine_id: &str) {
+        let gone: Vec<TailHandle> = {
+            let mut map = self.handles.lock().unwrap();
+            let keys: Vec<PaneRef> = map.keys().filter(|p| p.machine_id == machine_id).cloned().collect();
+            keys.into_iter().filter_map(|k| map.remove(&k)).collect()
+        };
+        drop(gone);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct NoItems;
+    impl Parser for NoItems {
+        fn push_line(&mut self, _: &str) -> ParserOutput {
+            ParserOutput::None
+        }
+    }
+
+    #[tokio::test]
+    async fn close_machine_ends_only_that_machines_tails() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "").unwrap();
+        let path: String = p.to_string_lossy().into();
+        let chats = ChatManager::default();
+        let pane = |m: &str| PaneRef { machine_id: m.into(), session: "default".into(), pane_id: "w1:p1".into() };
+        for m in ["a", "b"] {
+            let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), path.clone(), Box::new(NoItems), Arc::new(|_| {}));
+            chats.insert(pane(m), h);
+        }
+        chats.close_machine("a");
+        assert!(chats.page(&pane("a"), 0, 1).is_none());
+        assert!(chats.page(&pane("b"), 0, 1).is_some());
+    }
 }
