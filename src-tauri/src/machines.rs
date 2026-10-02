@@ -314,14 +314,12 @@ impl MachineManager {
     // ---- connection ----------------------------------------------------
 
     pub async fn connect(&self, id: &str) -> AppResult<()> {
-        let cfg = self.with_machine(id, |m| {
-            m.abort_supervisors();
-            m.sessions.clear();
-            m.cfg.clone()
-        })?;
+        let cfg = self.with_machine(id, |m| m.cfg.clone())?;
         if !cfg.enabled {
             return Err(AppError::new("invalid", format!("machine {id} is disabled")));
         }
+        // Reconnecting: stop watchers and release the old sockets first.
+        self.disconnect(id).await;
         let result = self.connect_inner(&cfg).await;
         match &result {
             Ok(()) => self.set_state(id, MachineState::Connected, None),
@@ -619,5 +617,29 @@ mod tests {
         mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"})).await.unwrap();
         assert_eq!(f.calls_of("pane.close"), 1);
         let _ = LocalTransport; // default factory type exists
+    }
+
+    struct RecT { inner: FakeT, released: Arc<Mutex<Vec<String>>> }
+    #[async_trait::async_trait]
+    impl Transport for RecT {
+        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> { self.inner.wrap(argv, tty) }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { self.inner.local_socket(s).await }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> { self.released.lock().unwrap().push(s.name.clone()); Ok(()) }
+    }
+
+    #[tokio::test]
+    async fn reconnect_releases_old_sockets() {
+        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let released: Arc<Mutex<Vec<String>>> = Arc::default();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (sock, rel) = (f.path.to_string_lossy().to_string(), released.clone());
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(RecT { inner: FakeT { sock: sock.clone() }, released: rel.clone() }) as Arc<dyn Transport>));
+        mgr.connect("local").await.unwrap();
+        assert!(released.lock().unwrap().is_empty());
+        mgr.connect("local").await.unwrap();
+        assert!(released.lock().unwrap().contains(&"default".to_string()), "{:?}", released.lock().unwrap());
+        assert_eq!(mgr.views()[0].state, MachineState::Connected);
     }
 }
