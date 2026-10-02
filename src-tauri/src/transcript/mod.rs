@@ -62,7 +62,7 @@ pub(crate) fn truncate_result(s: String) -> String {
 /// The transcript parser for an agent.
 pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
     match agent {
-        "claude" => Some(Box::new(claude::ClaudeParser::default())),
+        "claude" => Some(Box::new(claude::ClaudeParser)),
         "pi" => Some(Box::new(pi::PiParser::default())),
         _ => None,
     }

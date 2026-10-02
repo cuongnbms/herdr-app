@@ -47,10 +47,8 @@ impl Parser for ClaudeParser {
         let content = v.get("message").and_then(|m| m.get("content"));
         let mut items = vec![];
         match content {
-            Some(Value::String(s)) if kind == "user" => {
-                if user_text_ok(s) {
-                    items.push(ChatItem::User { text: s.clone() });
-                }
+            Some(Value::String(s)) if kind == "user" && user_text_ok(s) => {
+                items.push(ChatItem::User { text: s.clone() });
             }
             Some(Value::Array(blocks)) => {
                 for b in blocks {
