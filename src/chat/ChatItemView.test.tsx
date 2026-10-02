@@ -20,4 +20,20 @@ describe("ChatItemView", () => {
     expect(screen.getByText("- let a = 1;")).toBeTruthy();
     expect(screen.getByText("+ let a = 2;")).toBeTruthy();
   });
+  it("renders Write as all-added lines", () => {
+    render(<ChatItemView item={{ kind: "tool_call", id: "t3", name: "Write", input_summary: "/b.rs", input: { file_path: "/b.rs", content: "one\ntwo" } }} />);
+    fireEvent.click(screen.getByRole("button", { name: /Write/ }));
+    expect(screen.getByText("+ one")).toBeTruthy();
+    expect(screen.getByText("+ two")).toBeTruthy();
+  });
+  it("renders MultiEdit as consecutive diffs", () => {
+    render(<ChatItemView item={{ kind: "tool_call", id: "t4", name: "MultiEdit", input_summary: "/c", input: { file_path: "/c", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] } }} />);
+    fireEvent.click(screen.getByRole("button", { name: /MultiEdit/ }));
+    expect(screen.getByText("- c")).toBeTruthy();
+    expect(screen.getByText("+ d")).toBeTruthy();
+  });
+  it("highlights fenced code", () => {
+    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: "```js\nconst a = 1;\n```" }} />);
+    expect(container.querySelector("code.hljs, code .hljs-keyword")).toBeTruthy();
+  });
 });

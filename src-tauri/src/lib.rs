@@ -20,6 +20,7 @@ use tracing_subscriber::EnvFilter;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::machines_list,
             commands::machine_connect,

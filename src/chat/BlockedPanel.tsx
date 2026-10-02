@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import "../fonts/fonts.css";
 import { herdrCall } from "../lib/ipc";
 import { paneKey, type PaneRef, type PaneView } from "../lib/types";
@@ -25,6 +25,7 @@ interface ReadResult {
 export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const setLens = useApp((s) => s.setLens);
 
   useEffect(() => {
@@ -60,6 +61,7 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
       pane_id: pane.pane_id,
       source: "visible",
       format: "ansi",
+      strip_ansi: false,
     })
       .then((r) => {
         const text = r?.text ?? r?.read?.text ?? "";
@@ -75,14 +77,19 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
   }, [pane.machine_id, pane.session, pane.pane_id, view.status, view.title]);
 
   const sendKey = (key: string) =>
-    void herdrCall(pane.machine_id, pane.session, "agent.send_keys", { target: pane.pane_id, keys: [key] }).catch((e) =>
-      console.error("send_keys failed", e),
+    void herdrCall(pane.machine_id, pane.session, "agent.send_keys", { target: pane.pane_id, keys: [key] }).then(
+      () => setError(null),
+      (e) => {
+        console.error("send_keys failed", e);
+        setError(`Send failed: ${e?.message ?? String(e)}`);
+      },
     );
 
   return (
     <div className="blocked-panel">
       <div className="blocked-head">The agent is waiting for input</div>
       <div className="blocked-screen" ref={hostRef} />
+      {error && <div className="chat-error" role="alert">{error}</div>}
       <div className="blocked-keys">
         {QUICK.map((k) => (
           <button key={k.key} onClick={() => sendKey(k.key)}>

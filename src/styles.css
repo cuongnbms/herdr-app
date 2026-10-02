@@ -174,3 +174,16 @@ button { font: inherit; color: inherit; }
 .blocked-head { color: var(--amber); font-size: 12px; }
 .blocked-screen { height: 220px; background: #16171a; overflow: hidden; }
 .blocked-open { margin-left: auto; }
+.composer-error { font-size: 12px; }
+.chat-assistant a { color: #7fb0ff; }
+/* highlight.js theme (dark), scoped to the chat */
+.chat-assistant .hljs { color: #e4e5e8; background: transparent; }
+.chat-assistant .hljs-comment, .chat-assistant .hljs-quote { color: #7d8290; font-style: italic; }
+.chat-assistant .hljs-keyword, .chat-assistant .hljs-selector-tag, .chat-assistant .hljs-literal, .chat-assistant .hljs-doctag { color: #c792ea; }
+.chat-assistant .hljs-string, .chat-assistant .hljs-regexp, .chat-assistant .hljs-addition { color: #a5d6a7; }
+.chat-assistant .hljs-number, .chat-assistant .hljs-symbol, .chat-assistant .hljs-bullet { color: #f2a56b; }
+.chat-assistant .hljs-title, .chat-assistant .hljs-section, .chat-assistant .hljs-name { color: #82aaff; }
+.chat-assistant .hljs-built_in, .chat-assistant .hljs-type, .chat-assistant .hljs-class .hljs-title { color: #ffcb6b; }
+.chat-assistant .hljs-attr, .chat-assistant .hljs-attribute, .chat-assistant .hljs-variable, .chat-assistant .hljs-template-variable { color: #89ddff; }
+.chat-assistant .hljs-deletion { color: #e5898b; }
+.chat-assistant .hljs-meta { color: #8b8e97; }

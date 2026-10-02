@@ -1,9 +1,10 @@
 import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { chatClose, chatOpen, chatPage } from "../lib/ipc";
+import { chatPage } from "../lib/ipc";
 import { paneKey, type AppError, type ChatEvent, type ChatItem, type Located, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
+import { openChat } from "./chatSession";
 import { BlockedPanel } from "./BlockedPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
@@ -29,6 +30,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const anchor = useRef<number | null>(null);
   const forceBottom = useRef(true);
   const generation = useRef(0);
+  const handle = useRef<{ close: () => void } | null>(null);
 
   const open = useCallback(
     (path: string | null) => {
@@ -39,9 +41,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         if (ev.type === "reset") forceBottom.current = true;
         dispatch(ev);
       };
-      chatOpen(pane, path, channel)
+      handle.current?.close();
+      const h = openChat(pane, path, channel);
+      handle.current = h;
+      h.opened
         .then((l) => {
-          if (gen !== generation.current) return;
+          if (gen !== generation.current || !l) return;
           setLocated(l);
           setLensNote(key, null);
         })
@@ -60,17 +65,15 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     open(rememberedTranscript(key));
     return () => {
       generation.current++;
-      void chatClose(pane).catch(() => {});
+      handle.current?.close();
+      handle.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   const choose = (path: string) => {
     rememberTranscript(key, path);
-    generation.current++;
-    void chatClose(pane)
-      .catch(() => {})
-      .then(() => open(path));
+    open(path);
   };
 
   // Tool results render inside their call; standalone only when no matching call is loaded.
