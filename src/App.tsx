@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import "./styles.css";
-import { machinesList, onMachine, onPaneStatus } from "./lib/ipc";
+import { machinesList, onMachine, onPaneStatus, sessionStart } from "./lib/ipc";
 import { notifyPaneStatus } from "./notify";
 import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
@@ -9,7 +9,45 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { selectedPane, useApp } from "./store/app";
+import { Toasts } from "./ui/Toast";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
+
+function EmptyMain() {
+  const local = useApp((s) => s.machines["local"]);
+  if (local?.state === "error" && local.error?.code === "herdr_not_found") {
+    return (
+      <div className="empty">
+        <p>herdr is not installed on this Mac</p>
+        <p>
+          <a
+            href="https://herdr.dev"
+            onClick={(e) => {
+              e.preventDefault();
+              void openUrl("https://herdr.dev").catch((err) => console.error("openUrl failed", err));
+            }}
+          >
+            Install herdr
+          </a>
+        </p>
+      </div>
+    );
+  }
+  if (local?.state === "connected" && !local.sessions.some((s) => s.running)) {
+    return (
+      <div className="empty">
+        <p>No running sessions</p>
+        <button
+          type="button"
+          onClick={() => void sessionStart("local", "default").catch((err) => console.error("session_start failed", err))}
+        >
+          Start default session
+        </button>
+      </div>
+    );
+  }
+  return <p className="empty">Select a pane</p>;
+}
 
 const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
 const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
@@ -92,9 +130,10 @@ export default function App() {
             </Suspense>
           </>
         ) : (
-          <p className="empty">Select a pane</p>
+          <EmptyMain />
         )}
       </main>
+      <Toasts />
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>
   );

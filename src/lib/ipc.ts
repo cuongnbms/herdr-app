@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { showToast } from "../ui/Toast";
 import type { AttachEvent, ChatEvent, ChatItem, Located, MachineView, PaneRef, PaneStatusEvent } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
@@ -29,7 +30,10 @@ export const sessionStart = (machineId: string, session: string) =>
 export const sessionStop = (machineId: string, session: string) =>
   invoke<void>("session_stop", { machineId, session });
 export const herdrCall = <T>(machineId: string, session: string, method: string, params: unknown) =>
-  invoke<T>("herdr_call", { machineId, session, method, params });
+  invoke<T>("herdr_call", { machineId, session, method, params }).catch((e: unknown) => {
+    if ((e as { code?: string } | null)?.code === "timeout") showToast(`${method} timed out`);
+    throw e;
+  });
 
 export const onMachine = (cb: (m: MachineView) => void): Promise<UnlistenFn> =>
   listen<MachineView>("sidebar://machine", (e) => cb(e.payload));

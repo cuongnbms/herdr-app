@@ -187,3 +187,6 @@ button { font: inherit; color: inherit; }
 .chat-assistant .hljs-attr, .chat-assistant .hljs-attribute, .chat-assistant .hljs-variable, .chat-assistant .hljs-template-variable { color: #89ddff; }
 .chat-assistant .hljs-deletion { color: #e5898b; }
 .chat-assistant .hljs-meta { color: #8b8e97; }
+
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
+.toast { background: var(--bg-active); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; font-size: 13px; }
