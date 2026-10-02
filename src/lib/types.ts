@@ -14,3 +14,65 @@ export interface AppError {
 export function paneKey(ref: PaneRef): string {
   return `${ref.machine_id}/${ref.session}/${ref.pane_id}`;
 }
+
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+export type MachineState =
+  | "disconnected"
+  | "authenticating"
+  | "probing"
+  | "connected"
+  | "incompatible"
+  | "error";
+
+export interface PaneView {
+  pane_id: string;
+  terminal_id: string;
+  title: string;
+  cwd: string | null;
+  agent: string | null;
+  status: AgentStatus;
+}
+
+export interface TabView {
+  tab_id: string;
+  label: string;
+  number: number;
+  status: AgentStatus;
+  panes: PaneView[];
+}
+
+export interface WorkspaceView {
+  workspace_id: string;
+  label: string;
+  number: number;
+  status: AgentStatus;
+  tabs: TabView[];
+}
+
+export interface SessionView {
+  name: string;
+  running: boolean;
+  status: AgentStatus;
+  error: AppError | null;
+  workspaces: WorkspaceView[];
+}
+
+export interface MachineView {
+  id: string;
+  label: string;
+  /** "local" or "ssh" */
+  kind: string;
+  state: MachineState;
+  error: AppError | null;
+  version: string | null;
+  status: AgentStatus;
+  sessions: SessionView[];
+}
+
+export interface PaneStatusEvent {
+  pane: PaneRef;
+  status: AgentStatus;
+  previous: AgentStatus;
+  title: string;
+}
