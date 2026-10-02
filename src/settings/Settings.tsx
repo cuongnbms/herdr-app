@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { GearIcon, SearchIcon } from "../ui/icons";
-import { CHAT_SIZE, DEFAULTS, TERM_FAMILIES, TERM_SIZE, useSettings } from "./store";
+import { FontPicker } from "./FontPicker";
+import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 
 function Stepper({
   label,
@@ -55,26 +56,16 @@ function GeneralSettings() {
 
 function FontSettings() {
   const s = useSettings();
-  const families = TERM_FAMILIES.includes(s.terminalFontFamily) ? TERM_FAMILIES : [s.terminalFontFamily, ...TERM_FAMILIES];
   const isDefault =
     s.terminalFontFamily === DEFAULTS.terminalFontFamily &&
     s.terminalFontSize === DEFAULTS.terminalFontSize &&
     s.chatFontSize === DEFAULTS.chatFontSize;
   return (
     <>
-      <label className="setting-row">
-        <span>Terminal font</span>
-        <select value={s.terminalFontFamily} onChange={(e) => s.set({ terminalFontFamily: e.target.value })}>
-          {families.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-      </label>
+      <FontPicker label="Terminal font" value={s.terminalFontFamily} onChange={(f) => s.set({ terminalFontFamily: f })} />
       <Stepper label="Terminal size" value={s.terminalFontSize} range={TERM_SIZE} onChange={(v) => s.set({ terminalFontSize: v })} />
       <Stepper label="Chat size" value={s.chatFontSize} range={CHAT_SIZE} onChange={(v) => s.set({ chatFontSize: v })} />
-      <p className="note">JetBrains Mono is bundled; other fonts must be installed on this Mac.</p>
+      <p className="note">Lists the monospace fonts installed on this Mac. JetBrains Mono is bundled and covers Vietnamese.</p>
       <div className="settings-foot">
         <button className="btn btn-xs" aria-label="Reset fonts" disabled={isDefault} onClick={s.reset}>
           Reset to defaults

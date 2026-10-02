@@ -7,6 +7,7 @@ export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
 export const machineDisconnect = (id: string) => invoke<void>("machine_disconnect", { id });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
+export const systemFonts = () => invoke<string[]>("system_fonts");
 export const machineAdd = (sshTarget: string, label: string | null, herdrPath: string | null) =>
   invoke<MachineView>("machine_add", { sshTarget, label, herdrPath });
 export const machineRemove = (id: string) => invoke<void>("machine_remove", { id });

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import "./fonts/fonts.css";
 import "./styles.css";
 import { machinesList, onMachine, onPaneStatus, sessionStart } from "./lib/ipc";
 import { notifyPaneStatus } from "./notify";

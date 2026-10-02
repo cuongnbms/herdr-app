@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULTS, applyChatFont, loadFonts, termFontFamily, useSettings, watchTermFont } from "./store";
+import { DEFAULTS, applyChatFont, filterFonts, fontFamilies, loadFonts, termFontFamily, useSettings, watchTermFont } from "./store";
 
 const KEY = "herdr-app:settings";
 
@@ -78,5 +78,20 @@ describe("watchTermFont", () => {
     stop();
     useSettings.getState().set({ terminalFontSize: 18 });
     expect(term.options.fontSize).toBe(15);
+  });
+});
+
+describe("fontFamilies", () => {
+  it("puts the bundled font first and drops duplicates", () => {
+    expect(fontFamilies(["Lilex", "JetBrains Mono", "Menlo"])).toEqual(["JetBrains Mono", "Lilex", "Menlo"]);
+  });
+});
+
+describe("filterFonts", () => {
+  it("matches case-insensitively anywhere in the name, prefix matches first", () => {
+    const all = ["CaskaydiaCove Nerd Font Mono", "FiraCode Nerd Font Mono", "Lilex", "Menlo", "Monaco"];
+    expect(filterFonts(all, "mo")).toEqual(["Monaco", "CaskaydiaCove Nerd Font Mono", "FiraCode Nerd Font Mono"]);
+    expect(filterFonts(all, "  LIL ")).toEqual(["Lilex"]);
+    expect(filterFonts(all, "")).toEqual(all);
   });
 });

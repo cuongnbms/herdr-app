@@ -1,6 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { create } from "zustand";
+import { systemFonts } from "../lib/ipc";
 
 /** Shared with notify.ts: one JSON object, each writer merges its own keys. */
 const SETTINGS_KEY = "herdr-app:settings";
@@ -20,8 +21,32 @@ export const DEFAULTS: FontSettings = {
 export const TERM_SIZE = { min: 10, max: 20 };
 export const CHAT_SIZE = { min: 11, max: 18 };
 
-/** JetBrains Mono is bundled; the others only render if installed. */
-export const TERM_FAMILIES = ["JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Fira Code"];
+/** Ships with the app (src/fonts), so it is always offered. */
+export const BUNDLED_FONT = "JetBrains Mono";
+
+/** The picker's list: the bundled font, then the installed monospace families. */
+export function fontFamilies(installed: string[]): string[] {
+  return [BUNDLED_FONT, ...installed.filter((f) => f !== BUNDLED_FONT)];
+}
+
+let families: Promise<string[]> | null = null;
+
+/** Installed monospace families from the backend, fetched once. */
+export function loadFontFamilies(): Promise<string[]> {
+  families ??= systemFonts()
+    .then(fontFamilies)
+    .catch(() => fontFamilies(["Menlo", "Monaco"]));
+  return families;
+}
+
+/** Case-insensitive substring match; names starting with the query come first. */
+export function filterFonts(all: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return all;
+  const hits = all.filter((f) => f.toLowerCase().includes(q));
+  const starts = hits.filter((f) => f.toLowerCase().startsWith(q));
+  return [...starts, ...hits.filter((f) => !starts.includes(f))];
+}
 
 const clamp = (n: number, r: { min: number; max: number }) => Math.min(r.max, Math.max(r.min, n));
 
@@ -89,6 +114,8 @@ export function applyChatFont(px: number): void {
   document.documentElement.style.setProperty("--chat-font", `${px}px`);
 }
 
+const VI_SAMPLE = "aăâđêôơư ạảấầẩẫậắằẳẵặ";
+
 /**
  * Applies the terminal font settings to `term` now and on every change, refitting so the
  * new cell size reaches the PTY through the terminal's own onResize. Returns an unsubscribe.
@@ -98,6 +125,15 @@ export function watchTermFont(term: Terminal, fit: FitAddon, offset = 0): () => 
   const apply = (s: FontSettings) => {
     term.options.fontFamily = termFontFamily(s.terminalFontFamily);
     term.options.fontSize = s.terminalFontSize + offset;
+    // Subsets (e.g. Vietnamese) load lazily; once they are in, redraw glyphs cached from the fallback.
+    void document.fonts
+      ?.load(`${s.terminalFontSize + offset}px "${s.terminalFontFamily}"`, VI_SAMPLE)
+      .then(() => {
+        if (term.options.fontFamily !== termFontFamily(s.terminalFontFamily)) return;
+        term.clearTextureAtlas?.();
+        term.refresh?.(0, term.rows - 1);
+      })
+      .catch(() => {});
   };
   apply(useSettings.getState());
   return useSettings.subscribe((s, prev) => {

@@ -1,6 +1,7 @@
 pub mod attach;
 pub mod commands;
 pub mod error;
+pub mod fonts;
 pub mod herdr;
 pub mod machines;
 pub mod sshconfig;
@@ -48,6 +49,7 @@ pub fn run() {
             commands::chat_open,
             commands::chat_page,
             commands::chat_close,
+            commands::system_fonts,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
