@@ -1,6 +1,7 @@
 pub mod error;
 pub mod herdr;
 pub mod transport;
+pub mod view;
 
 use tauri::Manager;
 use tracing_appender::rolling::{Builder, Rotation};
