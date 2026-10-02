@@ -76,3 +76,9 @@ export interface PaneStatusEvent {
   previous: AgentStatus;
   title: string;
 }
+
+export type AttachEvent =
+  | { type: "attached" }
+  | { type: "held" }
+  | { type: "exited"; code: number | null }
+  | { type: "detached" };

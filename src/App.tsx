@@ -1,13 +1,17 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import "./styles.css";
 import { machinesList, onMachine } from "./lib/ipc";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
+import { useShallow } from "zustand/react/shallow";
+import { paneKey } from "./lib/types";
 import { selectedPane, useApp } from "./store/app";
+
+const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
 
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
-  const hasSelection = useApp((s) => selectedPane(s) !== null);
+  const sel = useApp(useShallow(selectedPane));
 
   useEffect(() => {
     let cancelled = false;
@@ -31,7 +35,20 @@ export default function App() {
         <Sidebar />
       </nav>
       <main className="main">
-        {hasSelection ? <Header /> : <p className="empty">Select a pane</p>}
+        {sel ? (
+          <>
+            <Header />
+            <Suspense fallback={null}>
+            <TerminalLens
+              key={paneKey({ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id })}
+              pane={{ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id }}
+              terminalId={sel.pane.terminal_id}
+            />
+            </Suspense>
+          </>
+        ) : (
+          <p className="empty">Select a pane</p>
+        )}
       </main>
     </div>
   );
