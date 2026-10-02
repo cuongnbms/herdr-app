@@ -66,7 +66,12 @@ async fn ssh_localhost_master_exec_and_forward() {
 
     let local = ssh.local_socket(&entry).await.unwrap();
     let snap = rpc::snapshot(&local).await;
+    // A second call must reuse the live forward, not unlink it.
+    let again = ssh.local_socket(&entry).await.unwrap();
+    assert_eq!(again, local);
+    let snap2 = rpc::snapshot(&again).await;
     ssh.release_socket(&entry).await.unwrap();
     master_exit(&ssh.ctl, &ssh.target).await;
     assert!(snap.is_ok(), "{snap:?}");
+    assert!(snap2.is_ok(), "{snap2:?}");
 }

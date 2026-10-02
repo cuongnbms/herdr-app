@@ -2,20 +2,42 @@ use super::local::LocalTransport;
 use super::{exec, runtime_dir, secure_runtime_dir, sh_quote, socket_name, SessionEntry, Transport};
 use crate::error::{AppError, AppResult};
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// Runs herdr on a remote Machine through one shared ssh ControlMaster connection.
 pub struct SshTransport {
     pub machine_id: String,
     pub target: String,
     pub ctl: PathBuf,
+    /// Active forwards: session name -> (remote socket, local socket).
+    forwards: Mutex<HashMap<String, (String, PathBuf)>>,
+    /// Serializes forward/cancel so concurrent callers never double-forward.
+    gate: tokio::sync::Mutex<()>,
+}
+
+/// The cached local path if it still forwards `remote` and the socket file exists.
+fn reusable(cached: Option<&(String, PathBuf)>, remote: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    cached.filter(|(r, p)| r == remote && exists(p)).map(|(_, p)| p.clone())
 }
 
 impl SshTransport {
     /// Builds the transport, securing the runtime dir that holds the control socket.
     pub fn new(machine_id: &str, target: &str) -> AppResult<SshTransport> {
         let ctl = secure_runtime_dir()?.join(format!("{machine_id}.ctl"));
-        Ok(SshTransport { machine_id: machine_id.into(), target: target.into(), ctl })
+        Ok(SshTransport {
+            machine_id: machine_id.into(),
+            target: target.into(),
+            ctl,
+            forwards: Mutex::new(HashMap::new()),
+            gate: tokio::sync::Mutex::new(()),
+        })
+    }
+
+    /// Drop the forward cache (the master restarted, so its forwards are gone).
+    pub fn forget_forwards(&self) {
+        self.forwards.lock().unwrap().clear();
     }
 
     /// `ssh -S ctl -O <op> -L <local>:<remote> target`; the -L spec is one literal argv element.
@@ -24,6 +46,8 @@ impl SshTransport {
             "ssh".into(),
             "-S".into(),
             self.ctl.to_string_lossy().into_owned(),
+            "-o".into(),
+            "BatchMode=yes".into(),
             "-O".into(),
             op.into(),
             "-L".into(),
@@ -57,6 +81,11 @@ impl Transport for SshTransport {
     }
 
     async fn local_socket(&self, session: &SessionEntry) -> AppResult<PathBuf> {
+        let _gate = self.gate.lock().await;
+        let hit = reusable(self.forwards.lock().unwrap().get(&session.name), &session.socket, |p| p.exists());
+        if let Some(p) = hit {
+            return Ok(p);
+        }
         let local = secure_runtime_dir()?.join(socket_name(&self.machine_id, &session.name));
         match std::fs::remove_file(&local) {
             Ok(()) => {}
@@ -67,10 +96,13 @@ impl Transport for SshTransport {
         if out.status != 0 {
             return Err(classify_ssh_error(&out.stderr));
         }
+        self.forwards.lock().unwrap().insert(session.name.clone(), (session.socket.clone(), local.clone()));
         Ok(local)
     }
 
     async fn release_socket(&self, session: &SessionEntry) -> AppResult<()> {
+        let _gate = self.gate.lock().await;
+        self.forwards.lock().unwrap().remove(&session.name);
         let local = runtime_dir().join(socket_name(&self.machine_id, &session.name));
         let out = exec(&LocalTransport, &self.forward_argv("cancel", &local, session)).await;
         // The socket file must not outlive the release, whatever ssh said.
@@ -102,7 +134,16 @@ pub fn master_argv(ctl: &Path, target: &str, batch: bool) -> Vec<String> {
 }
 
 fn control_argv(ctl: &Path, target: &str, op: &str) -> Vec<String> {
-    vec!["ssh".into(), "-S".into(), ctl.to_string_lossy().into_owned(), "-O".into(), op.into(), target.into()]
+    vec![
+        "ssh".into(),
+        "-S".into(),
+        ctl.to_string_lossy().into_owned(),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-O".into(),
+        op.into(),
+        target.into(),
+    ]
 }
 
 /// True when the ControlMaster for `ctl` is running (`ssh -O check` exits 0).
@@ -145,6 +186,19 @@ mod tests {
         let b = master_argv(Path::new("/c"), "devtuf", true);
         assert_eq!(b, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "BatchMode=yes", "-f", "-N", "devtuf"]);
         assert!(!master_argv(Path::new("/c"), "devtuf", false).contains(&"BatchMode=yes".to_string()));
+    }
+    #[test]
+    fn reuses_cached_forward_only_when_valid() {
+        let c = ("/r/herdr.sock".to_string(), PathBuf::from("/l/a.sock"));
+        assert_eq!(reusable(Some(&c), "/r/herdr.sock", |_| true), Some(PathBuf::from("/l/a.sock")));
+        assert_eq!(reusable(Some(&c), "/r/other.sock", |_| true), None);
+        assert_eq!(reusable(Some(&c), "/r/herdr.sock", |_| false), None);
+        assert_eq!(reusable(None, "/r/herdr.sock", |_| true), None);
+    }
+    #[test]
+    fn control_commands_use_batch_mode() {
+        let a = control_argv(Path::new("/c"), "h", "check");
+        assert_eq!(a, ["ssh", "-S", "/c", "-o", "BatchMode=yes", "-O", "check", "h"]);
     }
     #[test]
     fn classifies_errors() {
