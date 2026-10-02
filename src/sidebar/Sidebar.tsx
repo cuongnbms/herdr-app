@@ -4,6 +4,8 @@ import type { MachineView, PaneView, SessionView, WorkspaceView } from "../lib/t
 import { useApp } from "../store/app";
 import { StatusDot } from "./StatusDot";
 
+const hl = (status: string) => (status === "blocked" ? " blocked" : "");
+
 function Chevron({ open }: { open: boolean }) {
   return <span className="chev" aria-hidden="true">{open ? "▾" : "▸"}</span>;
 }
@@ -15,7 +17,7 @@ function PaneRow({ machineId, session, pane }: { machineId: string; session: str
   const active = selected !== null && paneKey(selected) === paneKey(ref);
   return (
     <li>
-      <button className={"row pane" + (active ? " active" : "")} onClick={() => select(ref)}>
+      <button className={"row pane" + (active ? " active" : "") + hl(pane.status)} onClick={() => select(ref)}>
         <StatusDot status={pane.status} />
         <span className="title mono">{pane.title}</span>
         {pane.agent && <span className="agent">{pane.agent}</span>}
@@ -31,7 +33,7 @@ function WorkspaceNode({ machineId, session, ws }: { machineId: string; session:
   const single = ws.tabs.length === 1;
   return (
     <li>
-      <button className="row workspace" aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button className={"row workspace" + hl(ws.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
         <Chevron open={open} />
         <StatusDot status={ws.status} />
         <span className="label">{ws.label}</span>
@@ -65,7 +67,7 @@ function TabNode({
   const toggle = useApp((s) => s.toggle);
   return (
     <li>
-      <button className="row tab" aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button className={"row tab" + hl(tab.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
         <Chevron open={open} />
         <StatusDot status={tab.status} />
         <span className="label">{tab.label}</span>
@@ -105,7 +107,7 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
   }
   return (
     <li className="session">
-      <button className="row" aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button className={"row" + hl(session.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
         <Chevron open={open} />
         <StatusDot status={session.status} />
         <span className="label">{session.name}</span>
@@ -129,7 +131,7 @@ function MachineNode({ machine }: { machine: MachineView }) {
   const ok = machine.state === "connected";
   return (
     <li className={"machine" + (ok ? "" : " offline")}>
-      <button className="row" aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button className={"row" + hl(machine.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
         <Chevron open={open} />
         <StatusDot status={machine.status} />
         <span className="label">{machine.label}</span>

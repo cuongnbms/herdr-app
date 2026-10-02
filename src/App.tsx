@@ -14,7 +14,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     void machinesList().then((ms) => {
       if (!cancelled) ms.forEach(upsert);
-    }).catch(() => {});
+    }).catch((e) => console.error("machines_list failed", e));
     void onMachine(upsert).then((u) => {
       if (cancelled) u();
       else unlisten = u;

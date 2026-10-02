@@ -1,9 +1,11 @@
+import { useShallow } from "zustand/react/shallow";
+import { StatusDot } from "../sidebar/StatusDot";
 import { selectedPane, useApp } from "../store/app";
 import type { Lens } from "../store/app";
 import { paneKey } from "../lib/types";
 
 export function Header() {
-  const sel = useApp(selectedPane);
+  const sel = useApp(useShallow(selectedPane));
   const lens = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined)) ?? "terminal";
   const setLens = useApp((s) => s.setLens);
   if (!sel) return null;
@@ -19,6 +21,10 @@ export function Header() {
           </span>
         ))}
       </nav>
+      <div className="agent-status">
+        <StatusDot status={sel.pane.status} />
+        <span>{sel.pane.agent ?? "no agent"} · {sel.pane.status}</span>
+      </div>
       <div className="seg" role="group" aria-label="Lens">
         {(["terminal", "chat"] as Lens[]).map((l) => (
           <button key={l} aria-pressed={lens === l} onClick={() => setLens(key, l)}>

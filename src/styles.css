@@ -80,3 +80,9 @@ button { font: inherit; color: inherit; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button { padding: 3px 10px; border: 0; background: none; cursor: pointer; color: var(--fg-dim); }
 .seg button[aria-pressed="true"] { background: var(--bg-active); color: var(--fg); }
+
+.row.blocked {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+.agent-status { display: flex; align-items: center; gap: 6px; color: var(--fg-dim); margin-left: auto; }
