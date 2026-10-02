@@ -70,6 +70,16 @@ impl Parser for ClaudeParser {
             return ParserOutput::None;
         }
         let content = v.get("message").and_then(|m| m.get("content"));
+        // The CLI's own prompts to the agent (a background task finishing)
+        // are not the user's words: show their summary as a system line.
+        if v.get("promptSource").and_then(Value::as_str) == Some("system") {
+            return match content.and_then(Value::as_str).and_then(|s| tag(s, "summary")) {
+                Some(text) => ParserOutput::Append(vec![ChatItem::System {
+                    text: text.to_string(),
+                }]),
+                None => ParserOutput::None,
+            };
+        }
         let mut items = vec![];
         match content {
             Some(Value::String(s)) if kind == "user" => {
@@ -222,6 +232,20 @@ mod tests {
         );
         let stdout = serde_json::json!({"type":"user","message":{"content":"<local-command-stdout></local-command-stdout>"}}).to_string();
         assert_eq!(run(&stdout), vec![]);
+    }
+    #[test]
+    fn skips_system_prompts() {
+        let note = serde_json::json!({"type":"user","promptSource":"system","origin":{"kind":"task-notification"},"message":{"content":"<task-notification>\n<task-id>a1</task-id>\n<summary>Agent \"Research\" finished</summary>\n</task-notification>"}}).to_string();
+        assert_eq!(
+            run(&note),
+            vec![System {
+                text: "Agent \"Research\" finished".into()
+            }]
+        );
+        let bare = serde_json::json!({"type":"user","promptSource":"system","message":{"content":"<task-notification>\n<task-id>a1</task-id>\n</task-notification>"}}).to_string();
+        assert_eq!(run(&bare), vec![]);
+        let typed = serde_json::json!({"type":"user","promptSource":"typed","origin":{"kind":"human"},"message":{"content":"ok"}}).to_string();
+        assert_eq!(run(&typed), vec![User { text: "ok".into() }]);
     }
     #[test]
     fn truncates_long_results() {
