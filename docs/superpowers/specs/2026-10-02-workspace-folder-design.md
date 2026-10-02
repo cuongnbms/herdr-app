@@ -37,10 +37,10 @@ interface WorkspaceRef { machine_id: string; session: string; workspace_id: stri
 getFolder(ref: WorkspaceRef): string | null
 setFolder(ref: WorkspaceRef, path: string): void          // trims; empty string removes
 suggestFolder(ws: WorkspaceView): string                  // cwd of the first Pane (Tab order) that has one, else ""
-pruneFolders(machineId: string, session: SessionView, previous?: SessionView): void
+pruneFolders(machineId: string, session: SessionView): void
 ```
 
-**Pruning.** herdr Workspace ids (`w1`, `w2`, …) can be reused after a Workspace closes, which would hand a stale folder to a new Workspace. When a *running* Session's view arrives, every stored key for that `machine_id/session` whose `workspace_id` is not in `session.workspaces` is removed. Stopped Sessions, Sessions with an error, and running Sessions with an empty `workspaces` list (a running Session always has at least one Workspace, so empty means "no snapshot yet") are skipped, so a missing snapshot never wipes folders. A folder is saved for a new Workspace as soon as `workspace.create` resolves, but the next snapshot can lag behind it (the watcher refetches after a debounce), so pruning works by diff: when the previous view of the same Session is itself a valid snapshot, only ids listed in that previous view and missing from the new one are removed. Only the first snapshot of a Session in an app run (no valid previous view) removes every stored id that is not listed. The call sits in the store action that applies a machine view (`src/store/app.ts`, the `machines: { ...s.machines, [v.id]: v }` update), once per Session of that Machine, passing the previous view of the same-named Session.
+**Pruning.** herdr Workspace ids (`w1`, `w2`, …) can be reused after a Workspace closes, which would hand a stale folder to a new Workspace. When a *running* Session's view arrives, every stored key for that `machine_id/session` whose `workspace_id` is not in `session.workspaces` is removed. Stopped Sessions, Sessions with an error, and running Sessions with an empty `workspaces` list (a running Session always has at least one Workspace, so empty means "no snapshot yet") are skipped, so a missing snapshot never wipes folders. The call sits in the store action that applies a machine view (`src/store/app.ts`, the `machines: { ...s.machines, [v.id]: v }` update), once per Session of that Machine.
 
 ## UI
 
