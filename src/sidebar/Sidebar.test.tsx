@@ -18,20 +18,24 @@ const m: MachineView = {
 };
 
 describe("Sidebar", () => {
-  beforeEach(() => { useApp.setState({ machines: { local: m }, order: ["local"], selected: null, expanded: {} }); });
-  it("shows machine, sessions, workspace and pane; hides the single tab level", () => {
+  beforeEach(() => { useApp.setState({ machines: { local: m }, order: ["local"], selected: null, viewed: null, expanded: {} }); });
+  it("shows machines and sessions only; workspaces and panes live in the Agents column", () => {
     render(<Sidebar />);
     expect(screen.getByText("local")).toBeTruthy();
     expect(screen.getByText("default")).toBeTruthy();
-    expect(screen.getByText("herdr-app")).toBeTruthy();
-    expect(screen.getByText("Rewrite")).toBeTruthy();
-    expect(screen.queryByText("1")).toBeNull();
+    expect(screen.queryByText("herdr-app")).toBeNull();
+    expect(screen.queryByText("Rewrite")).toBeNull();
     expect(screen.getAllByLabelText("status working").length).toBeGreaterThan(0);
   });
-  it("selects a pane on click", () => {
+  it("views a running session on click", () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Rewrite"));
-    expect(useApp.getState().selected).toEqual({ machine_id: "local", session: "default", pane_id: "w1:p1" });
+    fireEvent.click(screen.getByText("default"));
+    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "default" });
+    expect(screen.getByText("default").closest("button")?.className).toContain("active");
+  });
+  it("selecting a pane views its session", () => {
+    useApp.getState().select({ machine_id: "local", session: "default", pane_id: "w1:p1" });
+    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "default" });
   });
   it("offers to start a stopped session", () => {
     render(<Sidebar />);

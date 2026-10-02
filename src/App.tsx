@@ -6,6 +6,7 @@ import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
+import { AgentList } from "./agents/AgentList";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
@@ -118,6 +119,9 @@ export default function App() {
         </div>
         <Settings />
       </nav>
+      <aside className="agents" aria-label="Agents">
+        <AgentList />
+      </aside>
       <main className="main">
         {sel && ref ? (
           <>

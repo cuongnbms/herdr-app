@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
 
+export interface SessionRef {
+  machine_id: string;
+  session: string;
+}
+
 export type Lens = "terminal" | "chat";
 
 const STORAGE_KEY = "herdr-app:ui";
@@ -35,6 +40,8 @@ export interface AppState {
   machines: Record<string, MachineView>;
   order: string[];
   selected: PaneRef | null;
+  /** The session listed in the Agents column. Selecting a pane views its session. Not persisted. */
+  viewed: SessionRef | null;
   lens: Record<string, Lens>;
   expanded: Record<string, boolean>;
   /** One-line notes shown in the Terminal lens, e.g. after a Chat lens fallback. Not persisted. */
@@ -47,6 +54,7 @@ export interface AppState {
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
+  view: (ref: SessionRef | null) => void;
   setLens: (key: string, lens: Lens) => void;
   toggle: (nodeKey: string, current?: boolean) => void;
 }
@@ -55,6 +63,7 @@ export const useApp = create<AppState>((set, get) => ({
   machines: {},
   order: [],
   selected: null,
+  viewed: null,
   lensNote: {},
   lensOverride: {},
   ...load(),
@@ -75,9 +84,12 @@ export const useApp = create<AppState>((set, get) => ({
         machines,
         order: s.order.filter((o) => o !== id),
         selected: s.selected?.machine_id === id ? null : s.selected,
+        viewed: s.viewed?.machine_id === id ? null : s.viewed,
       };
     }),
-  select: (ref) => set({ selected: ref }),
+  select: (ref) =>
+    set((s) => ({ selected: ref, viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed })),
+  view: (ref) => set({ viewed: ref }),
   setLensOverride: (key, lens) =>
     set((s) => {
       const { [key]: _old, ...rest } = s.lensOverride;
