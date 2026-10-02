@@ -9,6 +9,7 @@ import { BlockedPanel } from "./BlockedPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
 import { Composer } from "./Composer";
+import { WorkingIndicator } from "./WorkingIndicator";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
@@ -193,6 +194,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
           <ArrowDownIcon /> New messages
         </button>
       )}
+      <WorkingIndicator status={view.status} />
       {view.status === "blocked" ? <BlockedPanel pane={pane} view={view} /> : <Composer pane={pane} />}
     </div>
   );

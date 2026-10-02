@@ -677,6 +677,16 @@ kbd {
   animation: fade-up var(--t) var(--ease);
 }
 .chat-new .icon { width: 14px; height: 14px; }
+.chat-working {
+  flex: none; display: flex; align-items: center; gap: 8px; width: 100%; max-width: 840px; margin: 0 auto;
+  padding: 6px 28px 0; box-sizing: border-box; color: var(--fg-3); font-size: 12px;
+  animation: fade-in var(--t) var(--ease);
+}
+.chat-working-dots { display: inline-flex; gap: 3px; }
+.chat-working-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: working-dot 1.2s ease-in-out infinite; }
+.chat-working-dots i:nth-child(2) { animation-delay: 0.15s; }
+.chat-working-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes working-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
 .composer { flex: none; padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; }
 .composer-box {
