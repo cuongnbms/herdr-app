@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod credentials;
 pub mod parsers;
+pub mod requests;
 
 /// Window length of a five-hour limit, in seconds.
 pub const FIVE_HOURS: u64 = 18_000;
@@ -47,4 +49,27 @@ pub struct QuotaWindow {
     pub used_percent: f64,
     pub resets_at: Option<i64>,
     pub duration_secs: Option<u64>,
+}
+
+/// Result of one quota fetch. Provider-side conditions are outcomes, never errors.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum QuotaOutcome {
+    Ok {
+        windows: Vec<QuotaWindow>,
+        fetched_at: i64,
+    },
+    NotSignedIn,
+    SignInExpired,
+    NoSubscription,
+    RateLimited {
+        until: i64,
+    },
+    Failed {
+        reason: String,
+    },
 }
