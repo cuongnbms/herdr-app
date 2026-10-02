@@ -446,3 +446,11 @@ pub async fn chat_close(
     });
     Ok(())
 }
+
+/// Installed monospace font families (empty off macOS).
+#[tauri::command]
+pub async fn system_fonts() -> Result<Vec<String>, AppError> {
+    tokio::task::spawn_blocking(crate::fonts::installed_monospace)
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))
+}
