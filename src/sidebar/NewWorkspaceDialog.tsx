@@ -5,7 +5,7 @@ import { setFolder } from "../workspaces/folder";
 type Agent = "none" | "claude" | "pi";
 
 interface WorkspaceCreated {
-  workspace: { workspace_id: string };
+  workspace?: { workspace_id: string };
   root_pane: { pane_id: string };
 }
 
@@ -33,8 +33,9 @@ export function NewWorkspaceDialog({
         label: label.trim() || null,
         focus: false,
       });
-      if (cwd.trim()) {
-        setFolder({ machine_id: machineId, session, workspace_id: res.workspace.workspace_id }, cwd);
+      const workspaceId = res.workspace?.workspace_id;
+      if (cwd.trim() && workspaceId) {
+        setFolder({ machine_id: machineId, session, workspace_id: workspaceId }, cwd);
       }
       if (agent !== "none") {
         await herdrCall(machineId, session, "agent.start", {
