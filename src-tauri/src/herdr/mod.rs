@@ -1,4 +1,7 @@
 pub mod codec;
+#[cfg(test)]
+pub mod fake;
+pub mod rpc;
 pub mod types;
 
 /// The herdr wire protocol version this app speaks. Anything else is `incompatible`.
