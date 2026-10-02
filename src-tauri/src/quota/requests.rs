@@ -1,4 +1,4 @@
-//! Usage requests per Provider: GET, bearer token, JSON. Sending is Task 3's job.
+//! Usage requests per Provider: GET, bearer token, JSON. Sent by `quota::fetch`.
 
 use super::{credentials::Credential, Provider};
 

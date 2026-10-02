@@ -51,6 +51,7 @@ pub fn run() {
             commands::chat_page,
             commands::chat_close,
             commands::system_fonts,
+            commands::quota_fetch,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;

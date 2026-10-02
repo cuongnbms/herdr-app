@@ -454,3 +454,10 @@ pub async fn system_fonts() -> Result<Vec<String>, AppError> {
         .await
         .map_err(|e| AppError::new("io", e.to_string()))
 }
+
+#[tauri::command]
+pub async fn quota_fetch(
+    provider: crate::quota::Provider,
+) -> Result<crate::quota::QuotaOutcome, AppError> {
+    Ok(crate::quota::fetch(provider).await)
+}
