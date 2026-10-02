@@ -16,6 +16,10 @@ _Avoid_: server, instance
 A group of Tabs inside a Session. What the user calls a "space".
 _Avoid_: space, project
 
+**Workspace folder**:
+The folder the app remembers for a Workspace; Agents started from the app's UI run in a new Tab there. herdr itself does not know it.
+_Avoid_: project dir, workspace cwd
+
 **Tab**:
 A layout of Panes inside a Workspace.
 
