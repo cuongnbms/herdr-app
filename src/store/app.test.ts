@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { chosenLens, useApp, selectedPane } from "./app";
 import type { MachineView } from "../lib/types";
+import { getFolder, setFolder } from "../workspaces/folder";
 
 const machine: MachineView = {
   id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "blocked",
@@ -16,6 +17,13 @@ const machine: MachineView = {
 
 describe("app store", () => {
   beforeEach(() => useApp.setState({ machines: {}, order: [], selected: null }));
+  it("drops folders of workspaces that left a running session", () => {
+    setFolder({ machine_id: "local", session: "default", workspace_id: "w1" }, "/x");
+    setFolder({ machine_id: "local", session: "default", workspace_id: "w7" }, "/gone");
+    useApp.getState().upsertMachine(machine);
+    expect(getFolder({ machine_id: "local", session: "default", workspace_id: "w1" })).toBe("/x");
+    expect(getFolder({ machine_id: "local", session: "default", workspace_id: "w7" })).toBeNull();
+  });
   it("upserts machines keeping order", () => {
     useApp.getState().upsertMachine(machine);
     useApp.getState().upsertMachine({ ...machine, id: "devtuf", label: "devtuf", kind: "ssh" });

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
+import { pruneFolders } from "../workspaces/folder";
 
 export interface SessionRef {
   machine_id: string;
@@ -72,11 +73,13 @@ export const useApp = create<AppState>((set, get) => ({
       const { [key]: _old, ...rest } = s.lensNote;
       return { lensNote: note ? { ...rest, [key]: note } : rest };
     }),
-  upsertMachine: (v) =>
+  upsertMachine: (v) => {
+    for (const s of v.sessions) pruneFolders(v.id, s);
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
-    })),
+    }));
+  },
   removeMachine: (id) =>
     set((s) => {
       const { [id]: _gone, ...machines } = s.machines;
