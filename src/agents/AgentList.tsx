@@ -26,7 +26,18 @@ export function workspaceGroups(session: SessionView): { workspace: WorkspaceVie
   }));
 }
 
-const BADGE: Record<AgentStatus, string> = {
+/** Splits a workspace's entries into consecutive runs sharing a tab. */
+function tabRuns(entries: PaneEntry[]): PaneEntry[][] {
+  const runs: PaneEntry[][] = [];
+  for (const e of entries) {
+    const last = runs[runs.length - 1];
+    if (last && last[0].tab.tab_id === e.tab.tab_id) last.push(e);
+    else runs.push([e]);
+  }
+  return runs;
+}
+
+const BADGE:Record<AgentStatus, string> = {
   blocked: "INPUT",
   working: "WORKING",
   done: "DONE",
@@ -97,9 +108,19 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
       </div>
       {entries.length > 0 && (
         <ul className="agent-cards">
-          {entries.map((e) => (
-            <AgentCard key={e.pane.pane_id} machineId={machineId} session={session} entry={e} />
-          ))}
+          {tabRuns(entries).map((run) =>
+            run.length > 1 ? (
+              <li key={run[0].tab.tab_id} role="group" aria-label={`Tab ${run[0].tab.label}`} className="tab-group">
+                <ul className="agent-cards">
+                  {run.map((e) => (
+                    <AgentCard key={e.pane.pane_id} machineId={machineId} session={session} entry={e} />
+                  ))}
+                </ul>
+              </li>
+            ) : (
+              <AgentCard key={run[0].pane.pane_id} machineId={machineId} session={session} entry={run[0]} />
+            ),
+          )}
         </ul>
       )}
     </section>

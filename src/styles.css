@@ -334,6 +334,11 @@ kbd {
 }
 .agents-empty { margin: 0; padding: 24px 16px; color: var(--fg-3); text-align: center; }
 .agent-cards { list-style: none; margin: 0; padding: 2px 6px; display: flex; flex-direction: column; gap: 1px; }
+.tab-group {
+  margin: 2px 0; border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.tab-group > .agent-cards { padding: 2px; }
 .ws-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; min-width: 0; }
 .ws-label { flex: 0 1 auto; min-width: 0; max-width: 60%; font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-folder { flex: 1; min-width: 0; color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

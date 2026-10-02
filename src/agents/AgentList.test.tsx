@@ -82,6 +82,18 @@ describe("AgentList", () => {
     expect(screen.getByRole("button", { name: "New agent in empty" })).toBeTruthy();
   });
 
+  it("boxes the panes of a multi-pane tab together, leaving single-pane tabs bare", () => {
+    render(<AgentList />);
+    const tab = screen.getByRole("group", { name: "Tab release" });
+    expect(tab.className).toContain("tab-group");
+    expect(within(tab).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      expect.stringContaining("Tag v1.4.0"),
+      expect.stringContaining("Ship flag"),
+    ]);
+    expect(screen.queryByRole("group", { name: "Tab ui" })).toBeNull();
+    expect(screen.getByText("Guard export").closest(".tab-group")).toBeNull();
+  });
+
   it("opens the new agent dialog from the header button", () => {
     render(<AgentList />);
     fireEvent.click(screen.getByRole("button", { name: "New agent in web" }));
