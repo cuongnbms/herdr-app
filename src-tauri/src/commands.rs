@@ -271,26 +271,15 @@ pub async fn chat_open(
         },
         None => {
             let info = mgr.info(&machine_id)?;
-            match transcript::locate(&*transport, &info, &agent_get, &pane, same).await {
-                Err(e) if e.code == "not_found" => {
-                    // The agent may have been started from a different directory than the shell's.
-                    let socket = transport.local_socket(&mgr.session(&machine_id, &session)?).await?;
-                    let fg = rpc::snapshot(&socket)
-                        .await?
-                        .panes
-                        .into_iter()
-                        .find(|p| p.pane_id == pane.pane_id)
-                        .and_then(|p| p.foreground_cwd);
-                    match fg {
-                        Some(fg) if Some(&fg) != pane.cwd.as_ref() => {
-                            let retry = PaneView { cwd: Some(fg), ..pane.clone() };
-                            transcript::locate(&*transport, &info, &agent_get, &retry, same).await?
-                        }
-                        _ => return Err(e),
-                    }
-                }
-                other => other?,
-            }
+            // The agent may run from a different directory than the shell's cwd (best-effort).
+            let fg = match mgr.session(&machine_id, &session) {
+                Ok(entry) => match transport.local_socket(&entry).await {
+                    Ok(socket) => rpc::snapshot(&socket).await.ok().and_then(|s| s.panes.into_iter().find(|p| p.pane_id == pane.pane_id)).and_then(|p| p.foreground_cwd),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            };
+            transcript::locate::locate_in(&*transport, &info, &agent_get, &pane, fg.as_deref(), same).await?
         }
     };
     let parser = transcript::parser_for(&located.agent)

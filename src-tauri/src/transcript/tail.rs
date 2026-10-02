@@ -4,18 +4,19 @@ use crate::error::AppError;
 use crate::transport::Transport;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::task::JoinHandle;
 
 const BATCH: Duration = Duration::from_millis(50);
 const RESET_ITEMS: usize = 500;
+const INITIAL_CAP: Duration = Duration::from_millis(300);
 const MAX_LINE: usize = 8 * 1024 * 1024;
 
 type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
 
-/// A running tail. Dropping it kills the `tail` process.
+/// A running tail. Dropping it ends the `tail` process.
 pub struct TailHandle {
     items: Arc<Mutex<Vec<ChatItem>>>,
     task: JoinHandle<()>,
@@ -32,7 +33,7 @@ impl TailHandle {
 
 impl Drop for TailHandle {
     fn drop(&mut self) {
-        // Aborting drops the future and with it the child (kill_on_drop).
+        // Aborting drops the future, closing the child's stdin; the wrapper then kills tail.
         self.task.abort();
     }
 }
@@ -46,6 +47,10 @@ struct State {
     /// Items appended since the last event was queued.
     appended: Vec<ChatItem>,
     sent_first: bool,
+    /// Bytes arrived since the previous tick.
+    got_bytes: bool,
+    ever_got_bytes: bool,
+    started: Instant,
 }
 
 impl State {
@@ -72,14 +77,15 @@ impl State {
     }
 
     fn flush(&mut self) {
+        let got = std::mem::take(&mut self.got_bytes);
         if !self.sent_first {
-            let items = self.items.lock().unwrap();
-            if items.is_empty() && self.events.is_empty() {
+            // Wait until the backlog has been read (a quiet interval after data) or the cap
+            // passes (empty or missing file), then send one Reset covering everything.
+            let caught_up = (self.ever_got_bytes && !got) || self.started.elapsed() >= INITIAL_CAP;
+            if !caught_up {
                 return;
             }
-            // One Reset covers everything the batch produced.
-            let ev = Self::reset_event(&items);
-            drop(items);
+            let ev = Self::reset_event(&self.items.lock().unwrap());
             self.events.clear();
             self.appended.clear();
             self.sent_first = true;
@@ -97,19 +103,21 @@ impl State {
 
 pub fn spawn_tail(t: Arc<dyn Transport>, path: String, parser: Box<dyn Parser>, sink: Sink) -> TailHandle {
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
-    let state = State { items: items.clone(), parser, sink, events: Vec::new(), appended: Vec::new(), sent_first: false };
+    let state = State { items: items.clone(), parser, sink, events: Vec::new(), appended: Vec::new(), sent_first: false, got_bytes: false, ever_got_bytes: false, started: Instant::now() };
     let task = tokio::spawn(run(t, path, state));
     TailHandle { items, task }
 }
 
 async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
-    let argv = t.wrap(&["tail".into(), "-n".into(), "+1".into(), "-F".into(), path], false);
+    // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
+    // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
+    let script = r#"tail -n +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
+    let argv = t.wrap(&["sh".into(), "-c".into(), script.into(), "sh".into(), path], false);
     let spawned = Command::new(&argv[0])
         .args(&argv[1..])
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
         .spawn();
     let mut child = match spawned {
         Ok(c) => c,
@@ -119,7 +127,8 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
         }
     };
     let mut stdout = child.stdout.take().expect("stdout is piped");
-    let mut tick = tokio::time::interval(BATCH);
+    let _stdin = child.stdin.take();
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + BATCH, BATCH);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut chunk = vec![0u8; 64 * 1024];
     let mut buf: Vec<u8> = Vec::new();
@@ -128,6 +137,8 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
                 let n = match n { Ok(0) | Err(_) => break, Ok(n) => n };
+                st.got_bytes = true;
+                st.ever_got_bytes = true;
                 for part in chunk[..n].split_inclusive(|b| *b == b'\n') {
                     let complete = part.ends_with(b"\n");
                     if !dropping {
@@ -196,6 +207,38 @@ mod tests {
         let _h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { text: "a".into() } && items[2] == ChatItem::User { text: "b".into() }));
+    }
+    #[tokio::test]
+    async fn empty_and_missing_files_still_reset() {
+        let d = tempfile::tempdir().unwrap();
+        for name in ["empty.jsonl", "missing.jsonl"] {
+            let p = d.path().join(name);
+            if name == "empty.jsonl" { std::fs::write(&p, "").unwrap(); }
+            let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
+            let g = got.clone();
+            let _h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 0 } if items.is_empty()), "{name}");
+        }
+    }
+    fn tail_running(path: &str) -> bool {
+        std::process::Command::new("pgrep").args(["-f", "--", &format!("-F {path}")]).output().map(|o| o.status.success()).unwrap_or(false)
+    }
+    #[tokio::test]
+    async fn dropping_the_handle_ends_tail() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("drop-me.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let path: String = p.to_string_lossy().into();
+        let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), path.clone(), Box::new(Lines), Arc::new(|_| {}));
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(tail_running(&path), "tail should be running");
+        drop(h);
+        for _ in 0..40 {
+            if !tail_running(&path) { return; }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        panic!("tail still running after drop");
     }
     #[tokio::test]
     async fn pages_older_items() {

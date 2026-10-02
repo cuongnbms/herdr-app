@@ -68,20 +68,24 @@ fn sh(script: &str, arg: &str) -> Vec<String> {
     vec!["sh".into(), "-c".into(), script.into(), "sh".into(), arg.into()]
 }
 
-async fn file_exists(t: &dyn Transport, path: &str) -> bool {
-    matches!(exec(t, &sh(r#"test -f "$1""#, path)).await, Ok(o) if o.status == 0)
+async fn file_exists(t: &dyn Transport, path: &str) -> AppResult<bool> {
+    Ok(exec(t, &sh(r#"test -f "$1""#, path)).await?.status == 0)
 }
 
-/// Up to 20 `*.jsonl` files in `dir`, newest first.
-async fn newest_in(t: &dyn Transport, dir: &str) -> Vec<String> {
+/// Up to 20 `*.jsonl` files in `dir`, newest first. Only a transport failure is an error.
+async fn newest_in(t: &dyn Transport, dir: &str) -> AppResult<Vec<String>> {
     let script = r#"cd "$1" 2>/dev/null && ls -1t -- *.jsonl 2>/dev/null | head -n 20"#;
-    match exec(t, &sh(script, dir)).await {
-        Ok(o) => o.stdout.lines().filter(|l| !l.is_empty()).map(|l| format!("{}/{l}", dir.trim_end_matches('/'))).collect(),
-        Err(_) => Vec::new(),
-    }
+    let o = exec(t, &sh(script, dir)).await?;
+    Ok(o.stdout.lines().filter(|l| !l.is_empty()).map(|l| format!("{}/{l}", dir.trim_end_matches('/'))).collect())
 }
 
 pub async fn locate(t: &dyn Transport, info: &MachineInfo, agent_get: &Value, pane: &PaneView, same_agent_same_cwd: usize) -> AppResult<Located> {
+    locate_in(t, info, agent_get, pane, None, same_agent_same_cwd).await
+}
+
+/// Like `locate`, also trying the pane's `foreground_cwd`: an exact Claude session id in the
+/// `cwd` dir, then in the `foreground_cwd` dir, then the newest file in each in turn.
+pub async fn locate_in(t: &dyn Transport, info: &MachineInfo, agent_get: &Value, pane: &PaneView, foreground_cwd: Option<&str>, same_agent_same_cwd: usize) -> AppResult<Located> {
     let agent = agent_get["agent"]["agent"].as_str().map(str::to_string).or_else(|| pane.agent.clone()).unwrap_or_default();
     let session = &agent_get["agent"]["agent_session"];
     let found = |path: String, ambiguous: bool, candidates: Vec<String>| Located { agent: agent.clone(), path, ambiguous, candidates };
@@ -92,26 +96,34 @@ pub async fn locate(t: &dyn Transport, info: &MachineInfo, agent_get: &Value, pa
         }
     }
     let home = info.home.trim_end_matches('/');
-    let dirs: Vec<String> = match (agent.as_str(), pane.cwd.as_deref()) {
-        ("claude", Some(cwd)) => vec![format!("{home}/.claude/projects/{}", claude_project_dir(cwd))],
-        ("pi", Some(cwd)) => vec![format!("{}/{}", info.pi_dir.trim_end_matches('/'), pi_session_dir(cwd))],
+    let mut cwds: Vec<&str> = Vec::new();
+    for c in [pane.cwd.as_deref(), foreground_cwd].into_iter().flatten() {
+        if !cwds.contains(&c) {
+            cwds.push(c);
+        }
+    }
+    let dirs: Vec<String> = match agent.as_str() {
+        "claude" => cwds.iter().map(|c| format!("{home}/.claude/projects/{}", claude_project_dir(c))).collect(),
+        "pi" => cwds.iter().map(|c| format!("{}/{}", info.pi_dir.trim_end_matches('/'), pi_session_dir(c))).collect(),
         _ => Vec::new(),
     };
     if agent == "claude" {
-        if let (Some(id), Some(dir)) = (session["value"].as_str(), dirs.first()) {
-            let path = format!("{dir}/{id}.jsonl");
-            if file_exists(t, &path).await {
-                return Ok(found(path.clone(), false, vec![path]));
+        if let Some(id) = session["value"].as_str() {
+            for dir in &dirs {
+                let path = format!("{dir}/{id}.jsonl");
+                if file_exists(t, &path).await? {
+                    return Ok(found(path.clone(), false, vec![path]));
+                }
             }
         }
     }
     for dir in &dirs {
-        let candidates = newest_in(t, dir).await;
+        let candidates = newest_in(t, dir).await?;
         if let Some(first) = candidates.first() {
             return Ok(found(first.clone(), same_agent_same_cwd > 1, candidates));
         }
     }
-    Err(AppError::new("not_found", format!("no transcript found for {} in {}", if agent.is_empty() { "agent" } else { &agent }, pane.cwd.as_deref().unwrap_or("unknown directory"))))
+    Err(AppError::new("not_found", format!("no transcript found for {} in {}", if agent.is_empty() { "agent" } else { &agent }, cwds.first().copied().unwrap_or("unknown directory"))))
 }
 
 #[cfg(test)]
