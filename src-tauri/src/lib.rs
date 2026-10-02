@@ -75,6 +75,7 @@ pub fn run() {
                 if let Err(e) = mgr.connect("local").await {
                     tracing::error!("connect local: {e}");
                 }
+                mgr.connect_enabled_ssh().await;
             });
             Ok(())
         })

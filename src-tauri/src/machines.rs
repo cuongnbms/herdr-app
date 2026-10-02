@@ -34,6 +34,8 @@ pub const ALLOWED_METHODS: &[&str] = &[
 const EMIT_THROTTLE: Duration = Duration::from_millis(100);
 const START_WAIT: Duration = Duration::from_secs(10);
 const START_POLL: Duration = Duration::from_millis(200);
+/// How often a connected ssh Machine's master is checked.
+const HEALTH_EVERY: Duration = Duration::from_secs(15);
 const LOCAL: &str = "local";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -124,6 +126,10 @@ pub enum UiEvent {
 pub type Emit = Arc<dyn Fn(UiEvent) + Send + Sync>;
 /// Test seam: replaces starting the batch ssh master.
 type MasterStart = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>> + Send + Sync>;
+/// Test seam: replaces asking the ssh master to exit.
+type MasterExit = Arc<dyn Fn() + Send + Sync>;
+/// Test seam: replaces the health task's `master_alive` check.
+type AliveCheck = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>> + Send + Sync>;
 type Factory = Arc<dyn Fn(&MachineConfig) -> Arc<dyn Transport> + Send + Sync>;
 
 struct Sess {
@@ -146,6 +152,12 @@ struct Machine {
     reconnect: Option<JoinHandle<()>>,
     /// Serializes connects of this Machine.
     gate: Arc<tokio::sync::Mutex<()>>,
+    /// Bumped by disconnect/remove; a connect that started under an older epoch is abandoned.
+    epoch: u64,
+    /// Periodic master check while an ssh Machine is connected.
+    health: Option<JoinHandle<()>>,
+    /// Being removed: its views are no longer emitted.
+    removing: bool,
 }
 
 impl Machine {
@@ -160,6 +172,9 @@ impl Machine {
             sessions: Vec::new(),
             reconnect: None,
             gate: Arc::default(),
+            epoch: 0,
+            health: None,
+            removing: false,
         }
     }
 
@@ -227,7 +242,23 @@ pub struct MachineManager {
     emit: Emit,
     factory: Mutex<Option<Factory>>,
     master_start: Mutex<Option<MasterStart>>,
+    master_exit: Mutex<Option<MasterExit>>,
+    alive_check: Mutex<Option<AliveCheck>>,
+    health_every: Mutex<Duration>,
     throttle: Mutex<HashMap<String, Throttle>>,
+}
+
+/// Why a connect attempt ended without connecting.
+enum Fail {
+    /// The Machine was disconnected or removed meanwhile.
+    Stale,
+    Err(AppError),
+}
+
+impl From<AppError> for Fail {
+    fn from(e: AppError) -> Self {
+        Fail::Err(e)
+    }
 }
 
 fn not_found(what: impl std::fmt::Display) -> AppError {
@@ -252,6 +283,9 @@ impl MachineManager {
             emit,
             factory: Mutex::new(None),
             master_start: Mutex::new(None),
+            master_exit: Mutex::new(None),
+            alive_check: Mutex::new(None),
+            health_every: Mutex::new(HEALTH_EVERY),
             throttle: Mutex::new(HashMap::new()),
         })
     }
@@ -269,6 +303,25 @@ impl MachineManager {
     #[cfg(test)]
     fn with_master_start(&self, f: MasterStart) {
         *self.master_start.lock().unwrap() = Some(f);
+    }
+
+    #[cfg(test)]
+    fn with_master_exit(&self, f: MasterExit) {
+        *self.master_exit.lock().unwrap() = Some(f);
+    }
+
+    #[cfg(test)]
+    fn with_health_check(&self, every: Duration, f: AliveCheck) {
+        *self.health_every.lock().unwrap() = every;
+        *self.alive_check.lock().unwrap() = Some(f);
+    }
+
+    async fn end_master(&self, s: &SshTransport) {
+        let seam = self.master_exit.lock().unwrap().clone();
+        match seam {
+            Some(f) => f(),
+            None => master_exit(&s.ctl, &s.target).await,
+        }
     }
 
     fn make_transport(&self, cfg: &MachineConfig) -> AppResult<Arc<dyn Transport>> {
@@ -352,7 +405,7 @@ impl MachineManager {
     // ---- events --------------------------------------------------------
 
     fn emit_now(&self, id: &str) {
-        let view = self.machines.lock().unwrap().iter().find(|m| m.cfg.id == id).map(Machine::view);
+        let view = self.machines.lock().unwrap().iter().find(|m| m.cfg.id == id && !m.removing).map(Machine::view);
         if let Some(v) = view {
             (self.emit)(UiEvent::Machine(v));
         }
@@ -397,12 +450,57 @@ impl MachineManager {
         }
     }
 
+    /// A state change is emitted at once (the Terminal lens must see every transition);
+    /// anything else goes through the throttle.
     fn set_state(&self, id: &str, state: MachineState, error: Option<AppError>) {
-        let _ = self.with_machine(id, |m| {
-            m.state = state;
-            m.error = error;
-        });
-        self.notify(id);
+        let changed = self
+            .with_machine(id, |m| {
+                let changed = m.state != state;
+                m.state = state;
+                m.error = error;
+                changed
+            })
+            .unwrap_or(false);
+        self.emit_state(id, changed);
+    }
+
+    /// `set_state`, but only while the Machine is still at `epoch`. False when stale.
+    fn set_state_at(&self, id: &str, epoch: u64, state: MachineState, error: Option<AppError>) -> bool {
+        let r = self
+            .with_machine(id, |m| {
+                if m.epoch != epoch {
+                    return None;
+                }
+                let changed = m.state != state;
+                m.state = state;
+                m.error = error;
+                Some(changed)
+            })
+            .ok()
+            .flatten();
+        match r {
+            Some(changed) => {
+                self.emit_state(id, changed);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn emit_state(&self, id: &str, changed: bool) {
+        if changed {
+            self.emit_now(id);
+        } else {
+            self.notify(id);
+        }
+    }
+
+    fn is_current(&self, id: &str, epoch: u64) -> bool {
+        self.with_machine(id, |m| m.epoch == epoch).unwrap_or(false)
+    }
+
+    fn current(&self, id: &str, epoch: u64) -> Result<(), Fail> {
+        if self.is_current(id, epoch) { Ok(()) } else { Err(Fail::Stale) }
     }
 
     // ---- connection ----------------------------------------------------
@@ -421,56 +519,136 @@ impl MachineManager {
             return Err(AppError::new("invalid", format!("machine {id} is disabled")));
         }
         self.cancel_reconnect(id);
-        let gate = self.with_machine(id, |m| m.gate.clone())?;
+        // Captured before waiting: a disconnect while we wait cancels this connect.
+        let (gate, epoch) = self.with_machine(id, |m| (m.gate.clone(), m.epoch))?;
         let _g = gate.lock().await;
+        if !self.is_current(id, epoch) {
+            return Ok(());
+        }
         // Reconnecting: stop watchers and release the old sockets first.
         self.teardown(id, false, false).await;
-        self.connect_core(&cfg).await
+        self.connect_core(&cfg, epoch).await
     }
 
-    async fn connect_core(&self, cfg: &MachineConfig) -> AppResult<()> {
-        let id = cfg.id.as_str();
-        let result = self.connect_inner(cfg).await;
-        match &result {
-            Ok(()) => self.set_state(id, MachineState::Connected, None),
-            Err(e) => {
-                let state = if e.code == "incompatible" { MachineState::Incompatible } else { MachineState::Error };
-                self.set_state(id, state, Some(e.clone()));
-            }
-        }
-        result
-    }
-
-    async fn connect_inner(&self, cfg: &MachineConfig) -> AppResult<()> {
+    /// One connect attempt under the Machine's gate. When the Machine was disconnected or
+    /// removed meanwhile (`epoch` moved on), any master this attempt started is ended,
+    /// the Machine's state is left alone and the result is `Ok`.
+    async fn connect_core(&self, cfg: &MachineConfig, epoch: u64) -> AppResult<()> {
         let id = cfg.id.as_str();
         let ssh = if id != LOCAL && self.factory.lock().unwrap().is_none() { Some(self.ssh_for(cfg)?) } else { None };
-        let transport: Arc<dyn Transport> = match &ssh {
-            Some(s) => s.clone(),
+        match self.connect_inner(cfg, ssh.as_deref(), epoch).await {
+            Ok(()) if self.set_state_at(id, epoch, MachineState::Connected, None) => {
+                self.start_health(id);
+                Ok(())
+            }
+            Err(Fail::Err(e)) => {
+                let state = if e.code == "incompatible" { MachineState::Incompatible } else { MachineState::Error };
+                if self.set_state_at(id, epoch, state, Some(e.clone())) {
+                    return Err(e);
+                }
+                self.abandon(id, ssh.as_deref()).await;
+                Ok(())
+            }
+            Ok(()) | Err(Fail::Stale) => {
+                self.abandon(id, ssh.as_deref()).await;
+                Ok(())
+            }
+        }
+    }
+
+    /// Undo a stale connect: end the master it may have started and drop what it set up.
+    async fn abandon(&self, id: &str, ssh: Option<&SshTransport>) {
+        tracing::info!("connect of {id} abandoned: disconnected meanwhile");
+        if let Some(s) = ssh {
+            self.end_master(s).await;
+        }
+        let _ = self.with_machine(id, |m| {
+            m.abort_supervisors();
+            m.sessions.clear();
+            m.transport = None;
+            m.info = None;
+        });
+        self.notify(id);
+    }
+
+    async fn connect_inner(&self, cfg: &MachineConfig, ssh: Option<&SshTransport>, epoch: u64) -> Result<(), Fail> {
+        let id = cfg.id.as_str();
+        let transport: Arc<dyn Transport> = match ssh {
+            Some(_) => self.ssh_for(cfg)?,
             None => self.make_transport(cfg)?,
         };
         self.with_machine(id, |m| {
             m.transport = Some(transport.clone());
             m.info = None;
         })?;
-        if let Some(s) = &ssh {
-            self.set_state(id, MachineState::Authenticating, None);
-            if !master_alive(&s.ctl, &s.target).await {
+        if let Some(s) = ssh {
+            if !self.set_state_at(id, epoch, MachineState::Authenticating, None) {
+                return Err(Fail::Stale);
+            }
+            let alive = master_alive(&s.ctl, &s.target).await;
+            self.current(id, epoch)?;
+            if !alive {
                 clear_stale_ctl(&s.ctl, &s.target).await;
+                self.current(id, epoch)?;
                 let seam = self.master_start.lock().unwrap().clone();
                 match seam {
                     Some(f) => f().await?,
                     None => start_master(id, &s.ctl, &s.target).await?,
                 }
+                self.current(id, epoch)?;
             }
             // Whatever the master's history, its forwards are not the cached ones.
             s.forget_forwards();
         }
-        self.set_state(id, MachineState::Probing, None);
+        if !self.set_state_at(id, epoch, MachineState::Probing, None) {
+            return Err(Fail::Stale);
+        }
         let out = exec(transport.as_ref(), &probe_argv(cfg.herdr_path.as_deref())).await?;
+        self.current(id, epoch)?;
         let info = parse_probe(&out.stdout)?;
         self.with_machine(id, |m| m.info = Some(info))?;
         let list = self.list_sessions(id).await?;
-        self.apply_list(id, list)
+        self.current(id, epoch)?;
+        Ok(self.apply_list(id, list)?)
+    }
+
+    /// Watch a connected ssh Machine's master so a dead one is noticed even with no
+    /// running Session (whose watcher would otherwise notice).
+    fn start_health(&self, id: &str) {
+        if id == LOCAL {
+            return;
+        }
+        let Some(me) = self.me.upgrade() else { return };
+        let h = tokio::spawn(me.health_loop(id.to_string()));
+        let _ = self.with_machine(id, |m| {
+            if let Some(old) = m.health.replace(h) {
+                old.abort();
+            }
+        });
+    }
+
+    async fn health_loop(self: Arc<Self>, id: String) {
+        loop {
+            let every = *self.health_every.lock().unwrap();
+            tokio::time::sleep(every).await;
+            if !self.health_ok(&id).await {
+                // Spawned: on_master_lost's teardown aborts this task.
+                let me = self.clone();
+                tokio::spawn(async move { me.on_master_lost(&id).await });
+                return;
+            }
+        }
+    }
+
+    async fn health_ok(&self, id: &str) -> bool {
+        let seam = self.alive_check.lock().unwrap().clone();
+        if let Some(f) = seam {
+            return f().await;
+        }
+        match self.ssh_of(id) {
+            Some(s) => master_alive(&s.ctl, &s.target).await,
+            None => true, // a test transport: nothing to check
+        }
     }
 
     /// Stop watchers, close terminals and release forwarded sockets. `clear` also forgets the Sessions.
@@ -480,6 +658,9 @@ impl MachineManager {
         let released = self
             .with_machine(id, |m| {
                 m.abort_supervisors();
+                if let Some(h) = m.health.take() {
+                    h.abort();
+                }
                 let t = m.transport.take();
                 let entries: Vec<SessionEntry> = if clear {
                     m.sessions.drain(..).map(|s| s.entry).collect()
@@ -508,17 +689,42 @@ impl MachineManager {
     }
 
     /// Explicit disconnect: forgets the Sessions and, for ssh, ends the master.
+    /// Bumps the epoch first, so a connect in flight abandons itself (and its master).
     pub async fn disconnect(&self, id: &str) {
+        let _ = self.with_machine(id, |m| m.epoch += 1);
         self.cancel_reconnect(id);
         self.teardown(id, true, true).await;
         if let Some(s) = self.ssh_of(id) {
-            master_exit(&s.ctl, &s.target).await;
+            self.end_master(&s).await;
         }
-        let _ = self.with_machine(id, |m| {
-            m.state = MachineState::Disconnected;
-            m.error = None;
-        });
-        self.notify(id);
+        self.set_state(id, MachineState::Disconnected, None);
+    }
+
+    /// Connect every enabled ssh Machine concurrently (app start). Batch mode only: one
+    /// that needs a password or passphrase ends in `ssh_auth` and offers Connect….
+    pub async fn connect_enabled_ssh(self: &Arc<Self>) {
+        let ids: Vec<String> = self
+            .machines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.cfg.id != LOCAL && m.cfg.enabled)
+            .map(|m| m.cfg.id.clone())
+            .collect();
+        let tasks: Vec<_> = ids
+            .into_iter()
+            .map(|id| {
+                let me = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = me.connect(&id).await {
+                        tracing::warn!("connect {id} at startup: {e}");
+                    }
+                })
+            })
+            .collect();
+        for t in tasks {
+            let _ = t.await;
+        }
     }
 
     /// Disconnect every ssh Machine (app exit).
@@ -547,7 +753,7 @@ impl MachineManager {
             return;
         }
         self.teardown(id, false, false).await;
-        self.notify(id);
+        self.emit_now(id);
         if let Some(me) = self.me.upgrade() {
             let h = tokio::spawn(me.reconnect_loop(id.to_string()));
             let _ = self.with_machine(id, |m| m.reconnect = Some(h));
@@ -561,9 +767,9 @@ impl MachineManager {
         loop {
             tokio::time::sleep(backoff(attempt)).await;
             attempt = attempt.saturating_add(1);
-            let Ok((cfg, gate)) = self.with_machine(&id, |m| (m.cfg.clone(), m.gate.clone())) else { return };
+            let Ok((cfg, gate, epoch)) = self.with_machine(&id, |m| (m.cfg.clone(), m.gate.clone(), m.epoch)) else { return };
             let _g = gate.lock().await;
-            match self.connect_core(&cfg).await {
+            match self.connect_core(&cfg, epoch).await {
                 Ok(()) => return,
                 Err(e) if matches!(e.code.as_str(), "ssh_auth" | "incompatible" | "herdr_not_found") => return,
                 Err(e) => self.set_state(&id, MachineState::Disconnected, Some(e)),
@@ -599,7 +805,8 @@ impl MachineManager {
         if id == LOCAL {
             return Err(AppError::new("invalid", "the local machine cannot be removed"));
         }
-        self.with_machine(id, |_| ())?;
+        // From here on nothing about this Machine reaches the UI (no ghost row).
+        self.with_machine(id, |m| m.removing = true)?;
         self.disconnect(id).await;
         if let Some(s) = self.ssh_of(id) {
             let _ = std::fs::remove_file(&s.ctl);
@@ -1111,6 +1318,153 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(2600)).await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
         mgr.remove("retry-cancel").await.unwrap();
+    }
+
+    /// A master start that takes `ms` and then succeeds, flagging `started` when done.
+    fn slow_master(ms: u64, started: Arc<std::sync::atomic::AtomicBool>) -> MasterStart {
+        Arc::new(move || {
+            let started = started.clone();
+            Box::pin(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                started.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        })
+    }
+
+    /// Records, per master-exit call, whether the slow master start had finished by then.
+    fn recording_exit(started: Arc<std::sync::atomic::AtomicBool>, log: Arc<Mutex<Vec<bool>>>) -> MasterExit {
+        Arc::new(move || log.lock().unwrap().push(started.load(std::sync::atomic::Ordering::SeqCst)))
+    }
+
+    #[tokio::test]
+    async fn disconnect_during_connect_ends_the_new_master() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (started, exits) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(Mutex::new(Vec::new())));
+        mgr.with_master_start(slow_master(400, started.clone()));
+        mgr.with_master_exit(recording_exit(started.clone(), exits.clone()));
+        mgr.add("i1-disc".into(), None, None).await.unwrap();
+        let m = mgr.clone();
+        let connect = tokio::spawn(async move { m.connect("i1-disc").await });
+        let m = mgr.clone();
+        assert!(wait_for(move || m.views().iter().any(|v| v.id == "i1-disc" && v.state == MachineState::Authenticating)).await);
+        mgr.disconnect("i1-disc").await;
+        connect.await.unwrap().unwrap();
+        assert!(started.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(exits.lock().unwrap().contains(&true), "the master started after the disconnect is ended: {:?}", exits.lock().unwrap());
+        let v = mgr.views().into_iter().find(|v| v.id == "i1-disc").unwrap();
+        assert_eq!((v.state, v.error), (MachineState::Disconnected, None));
+        assert!(mgr.transport("i1-disc").is_err());
+        mgr.remove("i1-disc").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn remove_during_connect_ends_the_new_master() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (started, exits) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(Mutex::new(Vec::new())));
+        mgr.with_master_start(slow_master(400, started.clone()));
+        mgr.with_master_exit(recording_exit(started.clone(), exits.clone()));
+        mgr.add("i1-remove".into(), None, None).await.unwrap();
+        let m = mgr.clone();
+        let connect = tokio::spawn(async move { m.connect("i1-remove").await });
+        let m = mgr.clone();
+        assert!(wait_for(move || m.views().iter().any(|v| v.id == "i1-remove" && v.state == MachineState::Authenticating)).await);
+        mgr.remove("i1-remove").await.unwrap();
+        connect.await.unwrap().unwrap();
+        assert!(exits.lock().unwrap().contains(&true), "{:?}", exits.lock().unwrap());
+        assert!(mgr.views().iter().all(|v| v.id != "i1-remove"));
+    }
+
+    fn alive_seam(alive: bool, calls: Arc<std::sync::atomic::AtomicU32>) -> AliveCheck {
+        Arc::new(move || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move { alive })
+        })
+    }
+
+    #[tokio::test]
+    async fn health_task_notices_a_dead_master_without_sessions() {
+        let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        mgr.with_health_check(std::time::Duration::from_millis(50), alive_seam(false, calls.clone()));
+        mgr.add("health-dead".into(), None, None).await.unwrap();
+        mgr.connect("health-dead").await.unwrap();
+        let m = mgr.clone();
+        assert!(wait_for(move || m.views().iter().any(|v| v.id == "health-dead" && v.state == MachineState::Disconnected)).await);
+        mgr.disconnect("health-dead").await;
+    }
+
+    #[tokio::test]
+    async fn health_task_stops_on_disconnect() {
+        let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        mgr.with_health_check(std::time::Duration::from_millis(50), alive_seam(true, calls.clone()));
+        mgr.add("health-ok".into(), None, None).await.unwrap();
+        mgr.connect("health-ok").await.unwrap();
+        let c = calls.clone();
+        assert!(wait_for(move || c.load(std::sync::atomic::Ordering::SeqCst) >= 2).await);
+        assert_eq!(mgr.views().into_iter().find(|v| v.id == "health-ok").unwrap().state, MachineState::Connected);
+        mgr.disconnect("health-ok").await;
+        let n = calls.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), n);
+        // The local Machine gets no health task.
+        mgr.connect("local").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), n);
+    }
+
+    #[tokio::test]
+    async fn state_changes_bypass_the_throttle() {
+        let states: Arc<Mutex<Vec<MachineState>>> = Arc::default();
+        let st = states.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(move |e| if let UiEvent::Machine(v) = e { st.lock().unwrap().push(v.state) }));
+        mgr.set_state("local", MachineState::Authenticating, None);
+        mgr.set_state("local", MachineState::Probing, None);
+        mgr.set_state("local", MachineState::Connected, None);
+        assert_eq!(*states.lock().unwrap(), [MachineState::Authenticating, MachineState::Probing, MachineState::Connected]);
+    }
+
+    #[tokio::test]
+    async fn remove_emits_nothing_for_the_removed_machine() {
+        let ids: Arc<Mutex<Vec<String>>> = Arc::default();
+        let rec = ids.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(move |e| if let UiEvent::Machine(v) = e { rec.lock().unwrap().push(v.id) }));
+        mgr.add("ghost".into(), None, None).await.unwrap();
+        ids.lock().unwrap().clear();
+        mgr.remove("ghost").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await; // past any trailing emit
+        assert!(!ids.lock().unwrap().contains(&"ghost".to_string()), "{:?}", ids.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn startup_connects_every_enabled_ssh_machine() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("m.json");
+        let cfg = |id: &str, enabled| MachineConfig { id: id.into(), label: id.into(), ssh_target: id.into(), herdr_path: None, enabled };
+        save_registry(&p, &[cfg("i9-a", true), cfg("i9-b", true), cfg("i9-off", false)]).unwrap();
+        let mgr = MachineManager::new(p, Arc::new(|_| {}));
+        let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        mgr.with_master_start(counting_master(calls.clone(), "ssh_auth"));
+        mgr.connect_enabled_ssh().await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let views = mgr.views();
+        let state = |id: &str| views.iter().find(|v| v.id == id).map(|v| (v.state, v.error.as_ref().map(|e| e.code.clone())));
+        assert_eq!(state("i9-a"), Some((MachineState::Error, Some("ssh_auth".into()))));
+        assert_eq!(state("i9-off"), Some((MachineState::Disconnected, None)));
+        assert_eq!(state("local"), Some((MachineState::Disconnected, None)), "local is connected separately");
     }
 
     #[tokio::test]
