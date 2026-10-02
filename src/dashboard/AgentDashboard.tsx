@@ -3,6 +3,7 @@ import { AgentIcon } from "../agents/AgentIcon";
 import { StatusDot } from "../sidebar/StatusDot";
 import { useApp } from "../store/app";
 import { CloseIcon, DashboardIcon, FilterIcon, FolderIcon, LaptopIcon, SearchIcon, ServerIcon } from "../ui/icons";
+import { QuotaColumn } from "./QuotaColumn";
 import { BUCKETS, bucketCounts, dashboardCards, matchesQuery } from "./buckets";
 import type { Bucket, DashCard } from "./buckets";
 
@@ -214,6 +215,7 @@ export function AgentDashboard() {
             </section>
           );
         })}
+        <QuotaColumn />
       </div>
     </section>
   );

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../lib/ipc", () => ({ quotaFetch: vi.fn().mockResolvedValue({ kind: "notSignedIn" }) }));
 import type { MachineView, PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { AgentDashboard, DashboardEntry } from "./AgentDashboard";
@@ -24,6 +25,13 @@ describe("AgentDashboard", () => {
   beforeEach(() =>
     useApp.setState({ machines: { local, box }, order: ["local", "box"], selected: null, viewed: null, doneSeen: {}, dashboardOpen: true }),
   );
+
+  it("keeps the Quota column when search hides every agent", () => {
+    render(<AgentDashboard />);
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "zzz-no-match" } });
+    expect(screen.getByRole("region", { name: "Quota" })).toBeTruthy();
+    expect(within(column(/needs you/i)).getByText("None")).toBeTruthy();
+  });
 
   it("sorts agents into Needs you, Working, Done and Idle with counts", () => {
     render(<AgentDashboard />);
