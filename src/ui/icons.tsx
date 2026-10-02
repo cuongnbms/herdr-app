@@ -66,3 +66,16 @@ export const LayersIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M3 13l9 5 9-5" />
   </Icon>
 );
+export const CloseIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M18 6L6 18M6 6l12 12" /></Icon>;
+export const DashboardIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="7" height="9" rx="1" />
+    <rect x="14" y="3" width="7" height="5" rx="1" />
+    <rect x="14" y="12" width="7" height="9" rx="1" />
+    <rect x="3" y="16" width="7" height="5" rx="1" />
+  </Icon>
+);
+export const FilterIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></Icon>;
+export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z" /></Icon>
+);

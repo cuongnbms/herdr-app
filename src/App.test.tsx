@@ -5,6 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 import App from "./App";
+import { useApp } from "./store/app";
 
 describe("App shell", () => {
   it("renders the sidebar and the empty main area", () => {
@@ -38,5 +39,18 @@ describe("App shell", () => {
     (invoke as any).mockResolvedValueOnce([{ id: "local", label: "local", kind: "local", state: "error", error: { code: "herdr_not_found", message: "herdr not found" }, version: null, status: "unknown", sessions: [] }]);
     render(<App />);
     expect(await screen.findByText("herdr is not installed on this Mac")).toBeTruthy();
+  });
+
+  it("opens the Agent Dashboard over the main area from the sidebar, keeping the main area mounted", () => {
+    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /agent dashboard/i }));
+    expect(screen.getByRole("dialog", { name: "Agent Dashboard" })).toBeTruthy();
+    expect(screen.getByText("Select a pane")).toBeTruthy();
+    // ⌘K searches the dashboard instead of opening the palette.
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 });

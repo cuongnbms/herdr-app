@@ -15,6 +15,7 @@ import { StatusDot } from "./StatusDot";
 import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
 import { forgetSessionFolders } from "../workspaces/folder";
+import { DashboardEntry } from "../dashboard/AgentDashboard";
 import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon } from "../ui/icons";
 
 const hl = (status: string) => (status === "blocked" ? " blocked" : "");
@@ -181,6 +182,7 @@ export function Sidebar() {
   const order = useApp((s) => s.order);
   return (
     <ActionsProvider>
+      <DashboardEntry />
       <div className="section-label">Machines</div>
       <ul className="tree">
         {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}

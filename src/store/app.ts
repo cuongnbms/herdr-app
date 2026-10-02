@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { paneKey } from "../lib/types";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
 import { pruneFolders } from "../workspaces/folder";
 
@@ -52,6 +53,12 @@ export interface AppState {
    *  over `lens` until the user picks a lens again. */
   lensOverride: Record<string, Lens>;
   setLensOverride: (key: string, lens: Lens | null) => void;
+  /** Whether the Agent Dashboard overlay is open. Not persisted. */
+  dashboardOpen: boolean;
+  setDashboardOpen: (open: boolean) => void;
+  /** Done panes the user has looked at (by paneKey); a seen Done pane counts as Idle on the
+   *  dashboard. Cleared when the pane leaves done. Not persisted. */
+  doneSeen: Record<string, true>;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -67,7 +74,10 @@ export const useApp = create<AppState>((set, get) => ({
   viewed: null,
   lensNote: {},
   lensOverride: {},
+  dashboardOpen: false,
+  doneSeen: {},
   ...load(),
+  setDashboardOpen: (open) => set({ dashboardOpen: open }),
   setLensNote: (key, note) =>
     set((s) => {
       const { [key]: _old, ...rest } = s.lensNote;
@@ -81,6 +91,7 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
+      doneSeen: seenAfterSnapshot(s.doneSeen, v, s.selected),
     }));
   },
   removeMachine: (id) =>
@@ -94,7 +105,11 @@ export const useApp = create<AppState>((set, get) => ({
       };
     }),
   select: (ref) =>
-    set((s) => ({ selected: ref, viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed })),
+    set((s) => ({
+      selected: ref,
+      viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
+      doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
+    })),
   view: (ref) => set({ viewed: ref }),
   setLensOverride: (key, lens) =>
     set((s) => {
@@ -115,6 +130,35 @@ export const useApp = create<AppState>((set, get) => ({
     save(get());
   },
 }));
+
+function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView | undefined {
+  const session = machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session);
+  for (const ws of session?.workspaces ?? []) {
+    for (const tab of ws.tabs) {
+      const pane = tab.panes.find((p) => p.pane_id === ref.pane_id);
+      if (pane) return pane;
+    }
+  }
+  return undefined;
+}
+
+/** This machine's seen marks after a snapshot: only panes still done keep theirs, and the
+ *  selected pane is seen as soon as it is done. Other machines' marks are untouched. */
+function seenAfterSnapshot(prev: Record<string, true>, v: MachineView, selected: PaneRef | null): Record<string, true> {
+  const next: Record<string, true> = {};
+  const prefix = v.id + "/";
+  for (const k of Object.keys(prev)) if (!k.startsWith(prefix)) next[k] = true;
+  const selKey = selected ? paneKey(selected) : null;
+  for (const s of v.sessions)
+    for (const ws of s.workspaces)
+      for (const tab of ws.tabs)
+        for (const p of tab.panes) {
+          if (p.status !== "done") continue;
+          const k = paneKey({ machine_id: v.id, session: s.name, pane_id: p.pane_id });
+          if (prev[k] || k === selKey) next[k] = true;
+        }
+  return next;
+}
 
 /** The lens chosen for a pane (automatic override first, then the remembered choice). */
 export function chosenLens(state: Pick<AppState, "lens" | "lensOverride">, key: string): Lens | undefined {

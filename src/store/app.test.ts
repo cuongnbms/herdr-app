@@ -72,3 +72,47 @@ describe("app store", () => {
     expect(selectedPane(useApp.getState())).toBeNull();
   });
 });
+
+describe("done-seen tracking", () => {
+  const withStatus = (p2: "done" | "working" | "blocked"): MachineView => {
+    const s = machine.sessions[0];
+    const ws = s.workspaces[0];
+    const tab = ws.tabs[0];
+    return { ...machine, sessions: [{ ...s, workspaces: [{ ...ws, tabs: [{ ...tab, panes: [tab.panes[0], { ...tab.panes[1], status: p2 }] }] }] }] };
+  };
+  const p2 = { machine_id: "local", session: "default", pane_id: "w1:p2" };
+  beforeEach(() => useApp.setState({ machines: {}, order: [], selected: null, doneSeen: {}, dashboardOpen: false }));
+
+  it("marks a done pane seen when it is selected", () => {
+    useApp.getState().upsertMachine(withStatus("done"));
+    expect(useApp.getState().doneSeen).toEqual({});
+    useApp.getState().select(p2);
+    expect(useApp.getState().doneSeen).toEqual({ "local/default/w1:p2": true });
+  });
+  it("marks the selected pane seen when it becomes done", () => {
+    useApp.getState().upsertMachine(withStatus("working"));
+    useApp.getState().select(p2);
+    useApp.getState().upsertMachine(withStatus("done"));
+    expect(useApp.getState().doneSeen).toEqual({ "local/default/w1:p2": true });
+  });
+  it("forgets the seen mark once the pane leaves done", () => {
+    useApp.getState().upsertMachine(withStatus("done"));
+    useApp.getState().select(p2);
+    useApp.getState().select(null);
+    useApp.getState().upsertMachine(withStatus("working"));
+    expect(useApp.getState().doneSeen).toEqual({});
+    useApp.getState().upsertMachine(withStatus("done"));
+    expect(useApp.getState().doneSeen).toEqual({});
+  });
+  it("keeps other machines' seen marks", () => {
+    useApp.setState({ doneSeen: { "devtuf/default/w1:p1": true } });
+    useApp.getState().upsertMachine(withStatus("working"));
+    expect(useApp.getState().doneSeen).toEqual({ "devtuf/default/w1:p1": true });
+  });
+  it("toggles the dashboard", () => {
+    useApp.getState().setDashboardOpen(true);
+    expect(useApp.getState().dashboardOpen).toBe(true);
+    useApp.getState().setDashboardOpen(false);
+    expect(useApp.getState().dashboardOpen).toBe(false);
+  });
+});

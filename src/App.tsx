@@ -8,6 +8,7 @@ import { applyChatFont, useSettings } from "./settings/store";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { AgentList } from "./agents/AgentList";
+import { AgentDashboard } from "./dashboard/AgentDashboard";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
@@ -83,6 +84,7 @@ export default function App() {
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const note = useApp((s) => (s.selected ? s.lensNote[paneKey(s.selected)] : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const dashboardOpen = useApp((s) => s.dashboardOpen);
   const chatFontSize = useSettings((s) => s.chatFontSize);
 
   useEffect(() => applyChatFont(chatFontSize), [chatFontSize]);
@@ -122,7 +124,8 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key.toLowerCase() === "k") {
+      // While the dashboard is open, ⌘K focuses its search instead.
+      if (e.metaKey && e.key.toLowerCase() === "k" && !useApp.getState().dashboardOpen) {
         e.preventDefault();
         setPaletteOpen((o) => !o);
       }
@@ -170,6 +173,7 @@ export default function App() {
           </>
         )}
       </main>
+      {dashboardOpen && <AgentDashboard />}
       <Toasts />
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>
