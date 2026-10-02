@@ -113,13 +113,28 @@ impl AttachManager {
 
     /// Spawn `argv` verbatim on a PTY, or reuse the live attach for `key`.
     pub fn open(&self, key: AttachKey, argv: Vec<String>, cols: u16, rows: u16, sink: Arc<dyn Sink>) -> AppResult<()> {
-        let existing = self.entries.lock().unwrap().get(&key).cloned();
-        if let Some(e) = existing {
-            *e.sink.lock().unwrap() = sink.clone();
-            e.generation.fetch_add(1, Ordering::SeqCst);
-            let _ = self.resize(&key, cols, rows);
-            sink.event(AttachEvent::Attached);
-            return Ok(());
+        // Held across check + spawn + insert so concurrent opens of one key cannot both spawn.
+        let mut map = self.entries.lock().unwrap();
+        if let Some(e) = map.get(&key).cloned() {
+            if e.held.load(Ordering::SeqCst) || e.closed.load(Ordering::SeqCst) {
+                // Refused or ending: the old child is useless, respawn with the new argv.
+                map.remove(&key);
+                retire(&e);
+            } else {
+                *e.sink.lock().unwrap() = sink.clone();
+                e.generation.fetch_add(1, Ordering::SeqCst);
+                // Output sent to the previous (gone) sink was never acked; start fresh.
+                *e.unacked.lock().unwrap() = 0;
+                e.resume.notify_all();
+                if let Some(m) = e.master.lock().unwrap().as_ref() {
+                    let _ = m.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                }
+                // Not yet attached: the settle thread will announce it to the new sink.
+                if e.attached.load(Ordering::SeqCst) {
+                    sink.event(AttachEvent::Attached);
+                }
+                return Ok(());
+            }
         }
         let program = argv.first().ok_or_else(|| AppError::new("invalid", "empty command"))?;
         let pair = native_pty_system()
@@ -130,8 +145,18 @@ impl AttachManager {
         cmd.env("TERM", "xterm-256color");
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| AppError::new("io", e.to_string()))?;
         drop(pair.slave);
-        let reader = pair.master.try_clone_reader().map_err(|e| AppError::new("io", e.to_string()))?;
-        let writer = pair.master.take_writer().map_err(|e| AppError::new("io", e.to_string()))?;
+        let io = pair
+            .master
+            .try_clone_reader()
+            .and_then(|r| pair.master.take_writer().map(|w| (r, w)))
+            .map_err(|e| AppError::new("io", e.to_string()));
+        let (reader, writer) = match io {
+            Ok(rw) => rw,
+            Err(e) => {
+                let _ = child.kill();
+                return Err(e);
+            }
+        };
         let entry = Arc::new(Entry {
             key: key.clone(),
             sink: Mutex::new(sink),
@@ -146,7 +171,8 @@ impl AttachManager {
             generation: AtomicU64::new(0),
             handle: tokio::runtime::Handle::try_current().ok(),
         });
-        self.entries.lock().unwrap().insert(key, entry.clone());
+        map.insert(key, entry.clone());
+        drop(map);
 
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let e = entry.clone();
@@ -249,6 +275,14 @@ fn remove_if_same(entries: &Entries, e: &Arc<Entry>) {
     if map.get(&e.key).is_some_and(|cur| Arc::ptr_eq(cur, e)) {
         map.remove(&e.key);
     }
+}
+
+/// End an entry that is already out of the map, without emitting events.
+fn retire(e: &Arc<Entry>) {
+    e.closed.store(true, Ordering::SeqCst);
+    let _ = e.killer.lock().unwrap().kill();
+    e.master.lock().unwrap().take();
+    e.wake_reader();
 }
 
 fn detach(entries: &Entries, e: &Arc<Entry>) {
@@ -361,6 +395,41 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(!rec.events.lock().unwrap().contains(&AttachEvent::Detached));
         m.release(&key("d"));
+        wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
+    }
+    #[tokio::test]
+    async fn reopen_after_unacked_backlog_still_delivers() {
+        let m = AttachManager::new(Duration::from_secs(5));
+        let old = Arc::new(Rec::default());
+        m.open(key("e"), sh("yes 0123456789abcdef | head -c 8000000"), 80, 24, old.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(old.bytes.lock().unwrap().len() > (1 << 20));
+        m.release(&key("e"));
+        let new = Arc::new(Rec::default());
+        m.open(key("e"), sh("sleep 30"), 80, 24, new.clone()).unwrap();
+        wait_for(|| !new.bytes.lock().unwrap().is_empty()).await;
+        m.close(&key("e"));
+    }
+    #[tokio::test]
+    async fn reopen_of_held_key_respawns_with_new_argv() {
+        let m = AttachManager::new(Duration::from_secs(5));
+        let old = Arc::new(Rec::default());
+        m.open(key("f"), sh("echo 'already has an attached client'; sleep 2"), 80, 24, old.clone()).unwrap();
+        wait_for(|| old.events.lock().unwrap().contains(&AttachEvent::Held)).await;
+        let new = Arc::new(Rec::default());
+        m.open(key("f"), sh("echo fresh; sleep 5"), 80, 24, new.clone()).unwrap();
+        wait_for(|| String::from_utf8_lossy(&new.bytes.lock().unwrap()).contains("fresh")).await;
+        wait_for(|| new.events.lock().unwrap().contains(&AttachEvent::Attached)).await;
+        assert!(!new.events.lock().unwrap().contains(&AttachEvent::Held));
+        m.close(&key("f"));
+    }
+    #[tokio::test]
+    async fn close_while_reader_paused_detaches() {
+        let m = AttachManager::new(Duration::from_secs(5));
+        let rec = Arc::new(Rec::default());
+        m.open(key("g"), sh("yes 0123456789abcdef | head -c 8000000"), 80, 24, rec.clone()).unwrap();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        m.close(&key("g"));
         wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
     }
     #[test]
