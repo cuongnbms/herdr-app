@@ -385,7 +385,7 @@ impl MachineManager {
 
     // ---- connection ----------------------------------------------------
 
-    fn cancel_reconnect(&self, id: &str) {
+    pub(crate) fn cancel_reconnect(&self, id: &str) {
         let _ = self.with_machine(id, |m| {
             if let Some(h) = m.reconnect.take() {
                 h.abort();

@@ -251,7 +251,7 @@ function MachineNode({ machine }: { machine: MachineView }) {
   const ssh = machine.kind === "ssh";
   const ok = machine.state === "connected";
   // A dropped ssh Machine stays visible (greyed, controls disabled) with its last snapshot.
-  const showSessions = ok || (machine.state === "disconnected" && machine.sessions.length > 0);
+  const showSessions = ok || machine.sessions.length > 0;
   const needsConnect = ssh && (machine.state === "disconnected" || (machine.state === "error" && machine.error?.code === "ssh_auth"));
   const notFound = ssh && machine.error?.code === "herdr_not_found";
   let message = machine.error?.message ?? machine.state;

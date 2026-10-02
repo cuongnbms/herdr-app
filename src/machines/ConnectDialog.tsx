@@ -48,9 +48,11 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
       /* not measurable yet */
     }
     let done = false;
+    let succeeded = false;
     const finish = () => {
       if (done) return;
       done = true;
+      succeeded = true;
       closeRef.current();
     };
 
@@ -90,7 +92,8 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
       input.dispose();
       resize.dispose();
       term.dispose();
-      void connectClose(id).catch(() => {});
+      // After success the master must be left alone (it may still be detaching).
+      if (!succeeded) void connectClose(id).catch(() => {});
     };
   }, [id]);
 

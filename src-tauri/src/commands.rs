@@ -140,6 +140,8 @@ pub async fn connect_open(
     data: Channel<InvokeResponseBody>,
     events: Channel<AttachEvent>,
 ) -> Result<(), AppError> {
+    // The user is authenticating by hand: no automatic retry may race the interactive master.
+    mgr.cancel_reconnect(&machine_id);
     let (ctl, target) = mgr.ssh_master(&machine_id)?;
     crate::transport::ssh::clear_stale_ctl(&ctl, &target).await;
     let argv = master_argv(&ctl, &target, false);
