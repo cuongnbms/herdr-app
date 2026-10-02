@@ -9,12 +9,16 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { selectedPane, useApp } from "./store/app";
+import { defaultLens } from "./lens";
 
+const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
 const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
 
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   const sel = useApp(useShallow(selectedPane));
+  const remembered = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined));
+  const note = useApp((s) => (s.selected ? s.lensNote[paneKey(s.selected)] : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -61,6 +65,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const ref = sel ? { machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id } : null;
+  const key = ref ? paneKey(ref) : "";
+
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Machines">
@@ -70,15 +77,18 @@ export default function App() {
         <Settings />
       </nav>
       <main className="main">
-        {sel ? (
+        {sel && ref ? (
           <>
             <Header />
             <Suspense fallback={null}>
-            <TerminalLens
-              key={paneKey({ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id })}
-              pane={{ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id }}
-              terminalId={sel.pane.terminal_id}
-            />
+              {defaultLens(sel.pane, remembered) === "chat" ? (
+                <ChatLens key={key} pane={ref} view={sel.pane} />
+              ) : (
+                <>
+                  {note && <div className="lens-note">{note}</div>}
+                  <TerminalLens key={key} pane={ref} terminalId={sel.pane.terminal_id} />
+                </>
+              )}
             </Suspense>
           </>
         ) : (

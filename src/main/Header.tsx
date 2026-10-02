@@ -3,12 +3,14 @@ import { StatusDot } from "../sidebar/StatusDot";
 import { selectedPane, useApp } from "../store/app";
 import type { Lens } from "../store/app";
 import { paneKey } from "../lib/types";
+import { defaultLens } from "../lens";
 
 export function Header() {
   const sel = useApp(useShallow(selectedPane));
-  const lens = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined)) ?? "terminal";
+  const remembered = useApp((s) => (s.selected ? s.lens[paneKey(s.selected)] : undefined));
   const setLens = useApp((s) => s.setLens);
   if (!sel) return null;
+  const lens = defaultLens(sel.pane, remembered);
   const key = paneKey({ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id });
   const crumbs = [sel.machine.label, sel.session.name, sel.workspace.label, sel.pane.title];
   return (

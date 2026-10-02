@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AttachEvent, MachineView, PaneStatusEvent } from "./types";
+import type { AttachEvent, ChatEvent, ChatItem, Located, MachineView, PaneRef, PaneStatusEvent } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
@@ -68,3 +68,10 @@ export const termResize = (key: AttachKey, cols: number, rows: number) =>
 export const termAck = (key: AttachKey, bytes: number) => invoke<void>("term_ack", { key, bytes });
 export const termRelease = (key: AttachKey) => invoke<void>("term_release", { key });
 export const termClose = (key: AttachKey) => invoke<void>("term_close", { key });
+
+export const chatOpen = (p: PaneRef, path: string | null, events: Channel<ChatEvent>) =>
+  invoke<Located>("chat_open", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, path, events });
+export const chatPage = (p: PaneRef, before: number) =>
+  invoke<ChatItem[]>("chat_page", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, before });
+export const chatClose = (p: PaneRef) =>
+  invoke<void>("chat_close", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });

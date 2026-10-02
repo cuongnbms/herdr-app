@@ -37,6 +37,9 @@ export interface AppState {
   selected: PaneRef | null;
   lens: Record<string, Lens>;
   expanded: Record<string, boolean>;
+  /** One-line notes shown in the Terminal lens, e.g. after a Chat lens fallback. Not persisted. */
+  lensNote: Record<string, string>;
+  setLensNote: (key: string, note: string | null) => void;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -48,7 +51,13 @@ export const useApp = create<AppState>((set, get) => ({
   machines: {},
   order: [],
   selected: null,
+  lensNote: {},
   ...load(),
+  setLensNote: (key, note) =>
+    set((s) => {
+      const { [key]: _old, ...rest } = s.lensNote;
+      return { lensNote: note ? { ...rest, [key]: note } : rest };
+    }),
   upsertMachine: (v) =>
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },

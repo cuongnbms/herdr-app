@@ -82,3 +82,23 @@ export type AttachEvent =
   | { type: "held" }
   | { type: "exited"; code: number | null }
   | { type: "detached" };
+
+export type ChatItem =
+  | { kind: "user"; text: string }
+  | { kind: "assistant_text"; markdown: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_call"; id: string; name: string; input_summary: string; input: unknown }
+  | { kind: "tool_result"; call_id: string; output: string; is_error: boolean }
+  | { kind: "system"; text: string };
+
+export type ChatEvent =
+  | { type: "reset"; items: ChatItem[]; total: number }
+  | { type: "append"; items: ChatItem[] }
+  | { type: "error"; error: AppError };
+
+export interface Located {
+  agent: string;
+  path: string;
+  ambiguous: boolean;
+  candidates: string[];
+}

@@ -142,3 +142,35 @@ button { font: inherit; color: inherit; }
 .machine-actions { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px 26px; }
 .machine-actions input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
 .machine-actions button { padding: 1px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-hover); cursor: pointer; }
+
+/* Chat lens */
+.lens-note { padding: 4px 14px; font-size: 12px; color: var(--fg-dim); border-bottom: 1px solid var(--line); }
+.chat-lens { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--bg); }
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.chat-row { padding: 6px 18px; max-width: 860px; margin: 0 auto; box-sizing: border-box; }
+.chat-user { display: flex; justify-content: flex-end; }
+.chat-bubble { max-width: 80%; white-space: pre-wrap; background: var(--bg-active); border-radius: 12px; padding: 8px 12px; }
+.chat-assistant { line-height: 1.5; overflow-wrap: anywhere; }
+.chat-assistant pre { background: #0f1012; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.chat-assistant code { font-family: "JetBrains Mono", Menlo, monospace; font-size: 12px; }
+.chat-thinking summary { cursor: pointer; color: var(--fg-dim); }
+.chat-dim { color: var(--fg-dim); white-space: pre-wrap; font-size: 12px; }
+.chat-system { text-align: center; color: var(--fg-dim); font-size: 12px; }
+.chat-tool-row { display: flex; gap: 6px; width: 100%; text-align: left; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; color: var(--fg); cursor: pointer; font-family: "JetBrains Mono", Menlo, monospace; font-size: 12px; }
+.chat-tool-name { font-weight: 700; }
+.chat-tool-summary { color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-result, .chat-diff { margin: 4px 0 0; padding: 6px 8px; background: #0f1012; border: 1px solid var(--line); border-radius: 6px; max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-result.error { border-color: #d04a4a; }
+.diff-del { color: #e5898b; background: rgba(208, 74, 74, 0.12); }
+.diff-add { color: #8fd19e; background: rgba(80, 180, 110, 0.12); }
+.chat-notice { display: flex; gap: 10px; align-items: center; padding: 6px 14px; font-size: 12px; background: color-mix(in srgb, var(--amber) 14%, transparent); border-bottom: 1px solid var(--line); }
+.chat-error { color: #e5898b; }
+.chat-new { position: absolute; right: 18px; bottom: 120px; padding: 4px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-active); color: var(--fg); cursor: pointer; }
+.composer { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.composer textarea { resize: none; background: var(--bg-side); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+.composer-keys, .blocked-keys { display: flex; gap: 6px; flex-wrap: wrap; }
+.composer-keys button, .blocked-keys button { padding: 2px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-hover); color: var(--fg); cursor: pointer; }
+.blocked-panel { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.blocked-head { color: var(--amber); font-size: 12px; }
+.blocked-screen { height: 220px; background: #16171a; overflow: hidden; }
+.blocked-open { margin-left: auto; }
