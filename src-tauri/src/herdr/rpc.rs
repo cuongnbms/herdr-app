@@ -19,6 +19,15 @@ use tokio::{
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Message prefix of the error for a peer that closes before answering.
+const CLOSED_EARLY: &str = "connection closed before response to";
+
+/// True when `e` says the peer closed or reset the connection before any response
+/// (as a forwarded socket does when sshd refuses the forward), as opposed to a connect failure.
+pub fn closed_early(e: &AppError) -> bool {
+    e.code == "io" && (e.message.starts_with(CLOSED_EARLY) || e.message.contains("Connection reset") || e.message.contains("Broken pipe"))
+}
+
 fn timeout_err(method: &str) -> AppError {
     AppError::new("timeout", format!("{method} took longer than 10s"))
 }
@@ -44,7 +53,7 @@ async fn read_response(
 ) -> AppResult<Value> {
     loop {
         let Some(line) = lines.next_line().await? else {
-            return Err(AppError::new("io", format!("connection closed before response to {method}")));
+            return Err(AppError::new("io", format!("{CLOSED_EARLY} {method}")));
         };
         match decode_frame(&line)? {
             Frame::Result { id: rid, result } if rid == id => return Ok(result),
@@ -131,6 +140,16 @@ mod tests {
         let f = FakeHerdr::start(Arc::new(|_, _| Err(("not_found".into(), "no pane".into()))));
         let e = call(&f.path, "pane.close", json!({"pane_id":"x"})).await.unwrap_err();
         assert_eq!((e.code.as_str(), e.message.as_str()), ("herdr_error", "no pane"));
+    }
+    #[tokio::test]
+    async fn eof_before_response_is_closed_early_but_connect_failure_is_not() {
+        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let sock = d.path().join("c.sock");
+        let l = tokio::net::UnixListener::bind(&sock).unwrap();
+        tokio::spawn(async move { while let Ok((s, _)) = l.accept().await { drop(s); } });
+        assert!(closed_early(&call(&sock, "session.snapshot", json!({})).await.unwrap_err()));
+        let missing = call(std::path::Path::new("/tmp/definitely-not-here.sock"), "x", json!({})).await.unwrap_err();
+        assert!(!closed_early(&missing));
     }
     #[tokio::test]
     async fn missing_socket_is_io_error() {

@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-import { herdrCall, sessionStart, sessionStop } from "../lib/ipc";
+import { herdrCall, machineDisconnect, machineRemove, machineUpdate, sessionStart, sessionStop } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneView, SessionView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
@@ -8,17 +8,22 @@ import { StatusDot } from "./StatusDot";
 import { ConfirmDialog, ContextMenu, TextDialog } from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
+import { AddMachineDialog } from "../machines/AddMachineDialog";
+const ConnectDialog = lazy(() => import("../machines/ConnectDialog").then((m) => ({ default: m.ConnectDialog })));
 
 type Dialog =
   | { kind: "rename"; title: string; initial: string; run: (label: string) => Promise<unknown> }
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
-  | { kind: "workspace"; machineId: string; session: string; defaultCwd: string };
+  | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
+  | { kind: "add-machine" }
+  | { kind: "connect"; machine: MachineView };
 
 interface Actions {
   menu: (e: MouseEvent, items: MenuItem[]) => void;
   rename: (title: string, initial: string, run: (label: string) => Promise<unknown>) => void;
   confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
   newWorkspace: (machineId: string, session: string) => void;
+  connect: (machine: MachineView) => void;
   guard: (run: () => Promise<unknown>) => void;
 }
 
@@ -214,20 +219,77 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
   );
 }
 
+/** "herdr 0.8.1 — needs protocol 22", with the version taken from the probe error. */
+function incompatibleText(m: MachineView): string {
+  const version = m.version ?? /^herdr (\S+?),/.exec(m.error?.message ?? "")?.[1] ?? "?";
+  return `herdr ${version} — needs protocol 22`;
+}
+
+function HerdrPathEdit({ machineId }: { machineId: string }) {
+  const [path, setPath] = useState("");
+  const a = useActions();
+  const save = () => a?.guard(() => machineUpdate(machineId, path.trim() || null));
+  return (
+    <div className="machine-actions">
+      <input
+        aria-label="herdr path"
+        value={path}
+        placeholder="/path/to/herdr"
+        onChange={(e) => setPath(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+      />
+      <button onClick={save}>Set</button>
+    </div>
+  );
+}
+
 function MachineNode({ machine }: { machine: MachineView }) {
   const key = machine.id;
   const open = useApp((s) => s.expanded[key] ?? true);
   const toggle = useApp((s) => s.toggle);
+  const a = useActions();
+  const ssh = machine.kind === "ssh";
   const ok = machine.state === "connected";
+  // A dropped ssh Machine stays visible (greyed, controls disabled) with its last snapshot.
+  const showSessions = ok || (machine.state === "disconnected" && machine.sessions.length > 0);
+  const needsConnect = ssh && (machine.state === "disconnected" || (machine.state === "error" && machine.error?.code === "ssh_auth"));
+  const notFound = ssh && machine.error?.code === "herdr_not_found";
+  let message = machine.error?.message ?? machine.state;
+  if (machine.state === "incompatible") message = incompatibleText(machine);
+  else if (notFound) message = "herdr not found — set its path";
+  const items: MenuItem[] =
+    a && ssh
+      ? [
+          ...(machine.state !== "disconnected" ? [{ label: "Disconnect", onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
+          {
+            label: "Remove machine…",
+            onSelect: () =>
+              a.confirm("Remove machine", `Remove "${machine.label}"? Its sessions keep running on the machine.`, "Remove", () =>
+                machineRemove(machine.id).then(() => useApp.getState().removeMachine(machine.id)),
+              ),
+          },
+        ]
+      : [];
   return (
     <li className={"machine" + (ok ? "" : " offline")}>
-      <button className={"row" + hl(machine.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button
+        className={"row" + hl(machine.status)}
+        aria-expanded={open}
+        onClick={() => toggle(key, open)}
+        onContextMenu={(e) => items.length > 0 && a?.menu(e, items)}
+      >
         <Chevron open={open} />
         <StatusDot status={machine.status} />
         <span className="label">{machine.label}</span>
       </button>
-      {!ok && <p className="error">{machine.error?.message ?? machine.state}</p>}
-      {open && ok && (
+      {!ok && <p className="error">{message}</p>}
+      {notFound && <HerdrPathEdit machineId={machine.id} />}
+      {needsConnect && (
+        <div className="machine-actions">
+          <button onClick={() => a?.connect(machine)}>Connect…</button>
+        </div>
+      )}
+      {open && showSessions && (
         <ul className="children">
           {machine.sessions.map((s) => (
             <SessionNode key={s.name} machineId={machine.id} session={s} />
@@ -262,6 +324,7 @@ export function Sidebar() {
       },
       rename: (title, initial, run) => setDialog({ kind: "rename", title, initial, run }),
       confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
+      connect: (machine) => setDialog({ kind: "connect", machine }),
       newWorkspace: (machineId, session) =>
         setDialog({ kind: "workspace", machineId, session, defaultCwd: defaultCwdFor(machineId, session) }),
     }),
@@ -286,6 +349,14 @@ export function Sidebar() {
       <NewWorkspaceDialog machineId={dialog.machineId} session={dialog.session} defaultCwd={dialog.defaultCwd}
         onClose={closeDialog} onError={setError} />
     );
+  } else if (dialog?.kind === "add-machine") {
+    modal = <AddMachineDialog onClose={closeDialog} />;
+  } else if (dialog?.kind === "connect") {
+    modal = (
+      <Suspense fallback={null}>
+        <ConnectDialog machine={dialog.machine} onClose={closeDialog} />
+      </Suspense>
+    );
   }
 
   return (
@@ -293,6 +364,9 @@ export function Sidebar() {
       <ul className="tree">
         {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
       </ul>
+      <button className="add-machine" onClick={() => setDialog({ kind: "add-machine" })}>
+        + Add machine
+      </button>
       {error && (
         <p className="error action-error" role="alert" onClick={() => setError(null)}>
           {error}

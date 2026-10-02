@@ -38,6 +38,7 @@ export interface AppState {
   lens: Record<string, Lens>;
   expanded: Record<string, boolean>;
   upsertMachine: (v: MachineView) => void;
+  removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
   setLens: (key: string, lens: Lens) => void;
   toggle: (nodeKey: string, current?: boolean) => void;
@@ -53,6 +54,15 @@ export const useApp = create<AppState>((set, get) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
     })),
+  removeMachine: (id) =>
+    set((s) => {
+      const { [id]: _gone, ...machines } = s.machines;
+      return {
+        machines,
+        order: s.order.filter((o) => o !== id),
+        selected: s.selected?.machine_id === id ? null : s.selected,
+      };
+    }),
   select: (ref) => set({ selected: ref }),
   setLens: (key, lens) => {
     set((s) => ({ lens: { ...s.lens, [key]: lens } }));

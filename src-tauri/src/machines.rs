@@ -1,12 +1,17 @@
 //! Machine manager: owns Machines, their Sessions and watchers, and the UI event stream.
 use crate::{
+    attach::AttachManager,
     error::{AppError, AppResult},
     herdr::{
         rpc,
         types::AgentStatus,
         watcher::{spawn_watcher, WatchEvent},
     },
-    transport::{exec, herdr_argv, local::LocalTransport, parse_probe, parse_session_list, probe_argv, MachineInfo, SessionEntry, Transport},
+    transport::{
+        exec, herdr_argv, local::LocalTransport, parse_probe, parse_session_list, probe_argv,
+        ssh::{classify_ssh_error, clear_stale_ctl, master_alive, master_exit, start_master, SshTransport},
+        MachineInfo, SessionEntry, Transport,
+    },
     view::{MachineState, MachineView, PaneRef, PaneStatusEvent, SessionView},
 };
 use serde::{Deserialize, Serialize};
@@ -119,12 +124,28 @@ struct Machine {
     error: Option<AppError>,
     info: Option<MachineInfo>,
     transport: Option<Arc<dyn Transport>>,
+    /// The ssh Machine's one transport (its forward cache lives here); created lazily.
+    ssh: Option<Arc<SshTransport>>,
     sessions: Vec<Sess>,
+    /// Backoff retry task after an unexpected drop.
+    reconnect: Option<JoinHandle<()>>,
+    /// Serializes connects of this Machine.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Machine {
     fn new(cfg: MachineConfig) -> Self {
-        Machine { cfg, state: MachineState::Disconnected, error: None, info: None, transport: None, sessions: Vec::new() }
+        Machine {
+            cfg,
+            state: MachineState::Disconnected,
+            error: None,
+            info: None,
+            transport: None,
+            ssh: None,
+            sessions: Vec::new(),
+            reconnect: None,
+            gate: Arc::default(),
+        }
     }
 
     fn view(&self) -> MachineView {
@@ -185,6 +206,8 @@ struct Throttle {
 
 pub struct MachineManager {
     me: Weak<MachineManager>,
+    registry: PathBuf,
+    attach: Mutex<Option<Arc<AttachManager>>>,
     machines: Mutex<Vec<Machine>>,
     emit: Emit,
     factory: Mutex<Option<Factory>>,
@@ -207,6 +230,8 @@ impl MachineManager {
         machines.extend(load_registry(&registry_path).into_iter().filter(|c| c.id != LOCAL).map(Machine::new));
         Arc::new_cyclic(|me| MachineManager {
             me: me.clone(),
+            registry: registry_path,
+            attach: Mutex::new(None),
             machines: Mutex::new(machines),
             emit,
             factory: Mutex::new(None),
@@ -214,7 +239,12 @@ impl MachineManager {
         })
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // test seam; Task 13 adds the ssh factory
+    /// Terminals are closed through this when a Machine disconnects.
+    pub fn set_attach_manager(&self, a: Arc<AttachManager>) {
+        *self.attach.lock().unwrap() = Some(a);
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))] // test seam: replaces the default local/ssh transports
     pub(crate) fn with_transport_factory(self: &Arc<Self>, f: Factory) {
         *self.factory.lock().unwrap() = Some(f);
     }
@@ -226,8 +256,50 @@ impl MachineManager {
         if cfg.id == LOCAL {
             Ok(Arc::new(LocalTransport))
         } else {
-            Err(AppError::new("invalid", "ssh machines are not supported yet"))
+            Ok(self.ssh_for(cfg)?)
         }
+    }
+
+    /// The Machine's single `SshTransport`, created on first use. `None` when a test
+    /// factory supplies the transport.
+    fn ssh_for(&self, cfg: &MachineConfig) -> AppResult<Arc<SshTransport>> {
+        let mut ms = self.machines.lock().unwrap();
+        let m = ms.iter_mut().find(|m| m.cfg.id == cfg.id).ok_or_else(|| not_found(format!("unknown machine {}", cfg.id)))?;
+        if m.ssh.is_none() {
+            m.ssh = Some(Arc::new(SshTransport::new(&cfg.id, &cfg.ssh_target)?));
+        }
+        Ok(m.ssh.clone().expect("just set"))
+    }
+
+    fn ssh_of(&self, id: &str) -> Option<Arc<SshTransport>> {
+        self.with_machine(id, |m| m.ssh.clone()).ok().flatten()
+    }
+
+    /// Control socket path and target for an ssh Machine (for the interactive master).
+    pub fn ssh_master(&self, id: &str) -> AppResult<(PathBuf, String)> {
+        if id == LOCAL {
+            return Err(AppError::new("invalid", "the local machine has no ssh connection"));
+        }
+        let cfg = self.with_machine(id, |m| m.cfg.clone())?;
+        let s = self.ssh_for(&cfg)?;
+        Ok((s.ctl.clone(), s.target.clone()))
+    }
+
+    pub async fn master_alive(&self, id: &str) -> bool {
+        match self.ssh_of(id) {
+            Some(s) => master_alive(&s.ctl, &s.target).await,
+            None => false,
+        }
+    }
+
+    pub fn is_ssh(&self, id: &str) -> bool {
+        id != LOCAL
+    }
+
+    fn persist(&self) -> AppResult<()> {
+        let list: Vec<MachineConfig> =
+            self.machines.lock().unwrap().iter().filter(|m| m.cfg.id != LOCAL).map(|m| m.cfg.clone()).collect();
+        save_registry(&self.registry, &list)
     }
 
     fn with_machine<R>(&self, id: &str, f: impl FnOnce(&mut Machine) -> R) -> AppResult<R> {
@@ -313,14 +385,30 @@ impl MachineManager {
 
     // ---- connection ----------------------------------------------------
 
+    fn cancel_reconnect(&self, id: &str) {
+        let _ = self.with_machine(id, |m| {
+            if let Some(h) = m.reconnect.take() {
+                h.abort();
+            }
+        });
+    }
+
     pub async fn connect(&self, id: &str) -> AppResult<()> {
         let cfg = self.with_machine(id, |m| m.cfg.clone())?;
         if !cfg.enabled {
             return Err(AppError::new("invalid", format!("machine {id} is disabled")));
         }
+        self.cancel_reconnect(id);
+        let gate = self.with_machine(id, |m| m.gate.clone())?;
+        let _g = gate.lock().await;
         // Reconnecting: stop watchers and release the old sockets first.
-        self.disconnect(id).await;
-        let result = self.connect_inner(&cfg).await;
+        self.teardown(id, false).await;
+        self.connect_core(&cfg).await
+    }
+
+    async fn connect_core(&self, cfg: &MachineConfig) -> AppResult<()> {
+        let id = cfg.id.as_str();
+        let result = self.connect_inner(cfg).await;
         match &result {
             Ok(()) => self.set_state(id, MachineState::Connected, None),
             Err(e) => {
@@ -333,11 +421,24 @@ impl MachineManager {
 
     async fn connect_inner(&self, cfg: &MachineConfig) -> AppResult<()> {
         let id = cfg.id.as_str();
-        let transport = self.make_transport(cfg)?;
+        let ssh = if id != LOCAL && self.factory.lock().unwrap().is_none() { Some(self.ssh_for(cfg)?) } else { None };
+        let transport: Arc<dyn Transport> = match &ssh {
+            Some(s) => s.clone(),
+            None => self.make_transport(cfg)?,
+        };
         self.with_machine(id, |m| {
             m.transport = Some(transport.clone());
             m.info = None;
         })?;
+        if let Some(s) = &ssh {
+            self.set_state(id, MachineState::Authenticating, None);
+            if !master_alive(&s.ctl, &s.target).await {
+                clear_stale_ctl(&s.ctl, &s.target).await;
+                start_master(id, &s.ctl, &s.target).await?;
+            }
+            // Whatever the master's history, its forwards are not the cached ones.
+            s.forget_forwards();
+        }
         self.set_state(id, MachineState::Probing, None);
         let out = exec(transport.as_ref(), &probe_argv(cfg.herdr_path.as_deref())).await?;
         let info = parse_probe(&out.stdout)?;
@@ -346,26 +447,146 @@ impl MachineManager {
         self.apply_list(id, list)
     }
 
-    pub async fn disconnect(&self, id: &str) {
+    /// Stop watchers, close terminals and release forwarded sockets. `clear` also forgets the Sessions.
+    async fn teardown(&self, id: &str, clear: bool) {
         let released = self
             .with_machine(id, |m| {
                 m.abort_supervisors();
                 let t = m.transport.take();
-                let entries: Vec<SessionEntry> = m.sessions.drain(..).map(|s| s.entry).collect();
+                let entries: Vec<SessionEntry> = if clear {
+                    m.sessions.drain(..).map(|s| s.entry).collect()
+                } else {
+                    m.sessions.iter().map(|s| s.entry.clone()).collect()
+                };
                 m.info = None;
-                m.state = MachineState::Disconnected;
-                m.error = None;
                 (t, entries)
             })
             .ok();
+        if let Some(a) = self.attach.lock().unwrap().clone() {
+            a.close_machine(id);
+        }
         if let Some((Some(t), entries)) = released {
-            for e in entries {
+            for e in entries.into_iter().filter(|e| e.running) {
                 if let Err(err) = t.release_socket(&e).await {
                     tracing::warn!("release_socket {id}/{}: {err}", e.name);
                 }
             }
         }
+    }
+
+    /// Explicit disconnect: forgets the Sessions and, for ssh, ends the master.
+    pub async fn disconnect(&self, id: &str) {
+        self.cancel_reconnect(id);
+        self.teardown(id, true).await;
+        if let Some(s) = self.ssh_of(id) {
+            master_exit(&s.ctl, &s.target).await;
+        }
+        let _ = self.with_machine(id, |m| {
+            m.state = MachineState::Disconnected;
+            m.error = None;
+        });
         self.notify(id);
+    }
+
+    /// Disconnect every ssh Machine (app exit).
+    pub async fn disconnect_all_ssh(&self) {
+        let ids: Vec<String> =
+            self.machines.lock().unwrap().iter().filter(|m| m.cfg.id != LOCAL).map(|m| m.cfg.id.clone()).collect();
+        for id in ids {
+            self.disconnect(&id).await;
+        }
+    }
+
+    /// The ssh master died under a connected Machine: grey it out, keep its last
+    /// snapshot, close its terminals, and retry with backoff.
+    pub(crate) async fn on_master_lost(&self, id: &str) {
+        let go = self
+            .with_machine(id, |m| {
+                if m.state == MachineState::Disconnected || m.reconnect.as_ref().is_some_and(|h| !h.is_finished()) {
+                    return false;
+                }
+                m.state = MachineState::Disconnected;
+                m.error = None;
+                true
+            })
+            .unwrap_or(false);
+        if !go {
+            return;
+        }
+        self.teardown(id, false).await;
+        self.notify(id);
+        if let Some(me) = self.me.upgrade() {
+            let h = tokio::spawn(me.reconnect_loop(id.to_string()));
+            let _ = self.with_machine(id, |m| m.reconnect = Some(h));
+        }
+    }
+
+    /// Retry the connection with `backoff`; an auth failure (or any state that needs the
+    /// user) ends the retries.
+    async fn reconnect_loop(self: Arc<Self>, id: String) {
+        let mut attempt = 0u32;
+        loop {
+            tokio::time::sleep(backoff(attempt)).await;
+            attempt = attempt.saturating_add(1);
+            let Ok((cfg, gate)) = self.with_machine(&id, |m| (m.cfg.clone(), m.gate.clone())) else { return };
+            let _g = gate.lock().await;
+            match self.connect_core(&cfg).await {
+                Ok(()) => return,
+                Err(e) if matches!(e.code.as_str(), "ssh_auth" | "incompatible" | "herdr_not_found") => return,
+                Err(e) => self.set_state(&id, MachineState::Disconnected, Some(e)),
+            }
+        }
+    }
+
+    // ---- registry ------------------------------------------------------
+
+    pub async fn add(&self, ssh_target: String, label: Option<String>, herdr_path: Option<String>) -> AppResult<MachineView> {
+        let target = ssh_target.trim().to_string();
+        if target.is_empty() || target.starts_with('-') || target.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(AppError::new("invalid", format!("invalid ssh target {ssh_target:?}")));
+        }
+        let label = label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).unwrap_or_else(|| target.clone());
+        let herdr_path = herdr_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        let id = {
+            let mut ms = self.machines.lock().unwrap();
+            let taken: Vec<String> = ms.iter().map(|m| m.cfg.id.clone()).collect();
+            let id = slug(&label, &taken);
+            ms.push(Machine::new(MachineConfig { id: id.clone(), label, ssh_target: target, herdr_path, enabled: true }));
+            id
+        };
+        if let Err(e) = self.persist() {
+            self.machines.lock().unwrap().retain(|m| m.cfg.id != id);
+            return Err(e);
+        }
+        self.emit_now(&id);
+        self.with_machine(&id, |m| m.view())
+    }
+
+    pub async fn remove(&self, id: &str) -> AppResult<()> {
+        if id == LOCAL {
+            return Err(AppError::new("invalid", "the local machine cannot be removed"));
+        }
+        self.with_machine(id, |_| ())?;
+        self.disconnect(id).await;
+        if let Some(s) = self.ssh_of(id) {
+            let _ = std::fs::remove_file(&s.ctl);
+        }
+        self.machines.lock().unwrap().retain(|m| m.cfg.id != id);
+        self.throttle.lock().unwrap().remove(id);
+        self.persist()
+    }
+
+    /// Set the herdr path override, persist it and reconnect.
+    pub async fn update(&self, id: &str, herdr_path: Option<String>) -> AppResult<MachineView> {
+        if id == LOCAL {
+            return Err(AppError::new("invalid", "the local machine has no settings to update"));
+        }
+        let herdr_path = herdr_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        self.with_machine(id, |m| m.cfg.herdr_path = herdr_path)?;
+        self.persist()?;
+        // A failed connect is reported through the Machine's state and error.
+        let _ = self.connect(id).await;
+        self.with_machine(id, |m| m.view())
     }
 
     // ---- sessions ------------------------------------------------------
@@ -442,19 +663,42 @@ impl MachineManager {
             return Err(AppError::new("herdr_error", format!("could not start {name}: {}", out.stderr.trim())));
         }
         let deadline = tokio::time::Instant::now() + START_WAIT;
+        // Transient errors (an ssh hiccup, a socket not yet there) never end the wait early.
+        let mut last_err: Option<AppError> = None;
         loop {
-            if let Some(entry) = self.list_sessions(id).await?.into_iter().find(|e| e.name == name) {
-                let socket = t.local_socket(&entry).await?;
-                if rpc::call(&socket, "session.snapshot", json!({})).await.is_ok() {
-                    break;
-                }
+            match self.probe_started(id, name, t.as_ref()).await {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(e) => last_err = Some(e),
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(AppError::new("timeout", format!("session {name} did not start within {}s", START_WAIT.as_secs())));
+                return Err(last_err
+                    .unwrap_or_else(|| AppError::new("timeout", format!("session {name} did not start within {}s", START_WAIT.as_secs()))));
             }
             tokio::time::sleep(START_POLL).await;
         }
         self.refresh_sessions(id).await
+    }
+
+    /// One poll of `start_session`: is `name` listed running and answering a snapshot?
+    async fn probe_started(&self, id: &str, name: &str, t: &dyn Transport) -> AppResult<bool> {
+        let Some(entry) = self.list_sessions(id).await?.into_iter().find(|e| e.name == name && e.running) else {
+            return Ok(false);
+        };
+        let socket = t.local_socket(&entry).await?;
+        match rpc::call(&socket, "session.snapshot", json!({})).await {
+            Ok(_) => Ok(true),
+            Err(e) => Err(self.forward_refusal(id, e)),
+        }
+    }
+
+    /// Over ssh, a peer that closes before any frame means sshd refused the socket forward.
+    fn forward_refusal(&self, id: &str, e: AppError) -> AppError {
+        if id != LOCAL && rpc::closed_early(&e) {
+            classify_ssh_error("administratively prohibited")
+        } else {
+            e
+        }
     }
 
     pub async fn stop_session(&self, id: &str, name: &str) -> AppResult<()> {
@@ -507,6 +751,7 @@ impl MachineManager {
         let mut attempt = 0u32;
         loop {
             let Ok(entry) = self.session(&id, &name) else { return };
+            let mut got_view = false;
             let err = match transport.local_socket(&entry).await {
                 Err(e) => e,
                 Ok(socket) => {
@@ -517,6 +762,7 @@ impl MachineManager {
                         match ev {
                             WatchEvent::View(v) => {
                                 attempt = 0;
+                                got_view = true;
                                 self.update_session(&id, &name, |s| {
                                     s.view = Some(v);
                                     s.error = None;
@@ -539,7 +785,17 @@ impl MachineManager {
                     closed.unwrap_or_else(|| AppError::new("io", "watcher ended"))
                 }
             };
+            // The first snapshot over a freshly forwarded socket ending in EOF: sshd refused it.
+            let err = if !got_view { self.forward_refusal(&id, err) } else { err };
             self.update_session(&id, &name, |s| s.error = Some(err));
+            if let Some(ssh) = self.ssh_of(&id) {
+                if !master_alive(&ssh.ctl, &ssh.target).await {
+                    let me = self.clone();
+                    let id = id.clone();
+                    tokio::spawn(async move { me.on_master_lost(&id).await });
+                    return;
+                }
+            }
             if let Ok(list) = self.list_sessions(&id).await {
                 if self.apply_list(&id, list).is_err() || !self.session_running(&id, &name) {
                     return; // stopped (apply_list already marked it) or machine gone
@@ -625,6 +881,120 @@ mod tests {
         fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> { self.inner.wrap(argv, tty) }
         async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { self.inner.local_socket(s).await }
         async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> { self.released.lock().unwrap().push(s.name.clone()); Ok(()) }
+    }
+
+    #[test]
+    fn backoff_schedule() {
+        let s: Vec<u64> = (0..9).map(|a| backoff(a).as_secs()).collect();
+        assert_eq!(s, vec![1, 2, 4, 8, 16, 32, 60, 60, 60]);
+    }
+    #[tokio::test]
+    async fn add_and_remove_persist() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("m.json");
+        let mgr = MachineManager::new(p.clone(), Arc::new(|_| {}));
+        let v = mgr.add("cuong@devtuf.lan".into(), Some("Dev Tuf".into()), None).await.unwrap();
+        assert_eq!((v.id.as_str(), v.kind.as_str(), v.state.clone()), ("dev-tuf", "ssh", MachineState::Disconnected));
+        assert_eq!(load_registry(&p)[0].ssh_target, "cuong@devtuf.lan");
+        mgr.remove("dev-tuf").await.unwrap();
+        assert!(load_registry(&p).is_empty());
+        assert!(mgr.views().iter().all(|m| m.id != "dev-tuf"));
+    }
+    #[tokio::test]
+    async fn add_rejects_option_like_targets() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        assert_eq!(mgr.add("-oProxyCommand=x".into(), None, None).await.unwrap_err().code, "invalid");
+        assert_eq!(mgr.add("  ".into(), None, None).await.unwrap_err().code, "invalid");
+    }
+
+    async fn wait_for(mut cond: impl FnMut() -> bool) -> bool {
+        for _ in 0..100 {
+            if cond() { return true; }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn forward_refusal_marks_the_session() {
+        // sshd refuses the forward: the local socket accepts, then closes with no frame.
+        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let sock = d.path().join("x.sock");
+        let l = tokio::net::UnixListener::bind(&sock).unwrap();
+        tokio::spawn(async move { while let Ok((s, _)) = l.accept().await { drop(s); } });
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let s = sock.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: s.clone() }) as Arc<dyn Transport>));
+        mgr.add("box".into(), None, None).await.unwrap();
+        mgr.connect("box").await.unwrap();
+        let m = mgr.clone();
+        assert!(wait_for(move || m.views().iter().find(|v| v.id == "box").unwrap().sessions[0].error.as_ref().is_some_and(|e| e.code == "ssh_forward_denied")).await);
+        mgr.disconnect("box").await;
+    }
+
+    #[tokio::test]
+    async fn dropped_connection_keeps_last_snapshot_and_closes_terminals() {
+        use crate::attach::{AttachEvent, AttachKey, AttachManager, Sink};
+        struct Rec(Arc<Mutex<Vec<AttachEvent>>>);
+        impl Sink for Rec {
+            fn data(&self, _: Vec<u8>) {}
+            fn event(&self, e: AttachEvent) { self.0.lock().unwrap().push(e); }
+        }
+        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        let att = AttachManager::new(std::time::Duration::from_secs(15));
+        mgr.set_attach_manager(att.clone());
+        mgr.add("box".into(), None, None).await.unwrap();
+        mgr.connect("box").await.unwrap();
+        let m = mgr.clone();
+        assert!(wait_for(move || !m.views().iter().find(|v| v.id == "box").unwrap().sessions[0].workspaces.is_empty()).await);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        att.open(AttachKey { machine_id: "box".into(), session: "default".into(), terminal_id: "t".into() }, vec!["cat".into()], 80, 24, Arc::new(Rec(events.clone()))).unwrap();
+
+        mgr.on_master_lost("box").await;
+        let v = mgr.views().into_iter().find(|v| v.id == "box").unwrap();
+        assert_eq!(v.state, MachineState::Disconnected);
+        assert_eq!(v.sessions.len(), 2);
+        assert!(!v.sessions[0].workspaces.is_empty(), "last snapshot is kept");
+        assert!(wait_for(|| events.lock().unwrap().contains(&AttachEvent::Detached)).await);
+        // An explicit disconnect clears it.
+        mgr.disconnect("box").await;
+        assert!(mgr.views().into_iter().find(|v| v.id == "box").unwrap().sessions.is_empty());
+    }
+
+    /// `session list` fails on calls 1..=3 (call 0 is the connect); start_session must keep polling.
+    struct FlakyT { inner: FakeT, lists: std::sync::atomic::AtomicU32 }
+    #[async_trait::async_trait]
+    impl Transport for FlakyT {
+        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
+            if argv.join(" ").contains("session list") {
+                let n = self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if (1..=3).contains(&n) {
+                    return vec!["sh".into(), "-c".into(), "echo boom >&2; exit 1".into()];
+                }
+            }
+            self.inner.wrap(argv, tty)
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { self.inner.local_socket(s).await }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> { self.inner.release_socket(s).await }
+    }
+
+    #[tokio::test]
+    async fn start_session_polls_through_transient_errors() {
+        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FlakyT { inner: FakeT { sock: sock.clone() }, lists: Default::default() }) as Arc<dyn Transport>));
+        // Initial connect would hit the failing list; the first call (count 0) passes.
+        mgr.connect("local").await.unwrap();
+        mgr.start_session("local", "default").await.unwrap();
     }
 
     #[tokio::test]

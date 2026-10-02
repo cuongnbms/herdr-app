@@ -5,6 +5,24 @@ import type { AttachEvent, MachineView, PaneStatusEvent } from "./types";
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
 export const machineDisconnect = (id: string) => invoke<void>("machine_disconnect", { id });
+export const sshHosts = () => invoke<string[]>("ssh_hosts");
+export const machineAdd = (sshTarget: string, label: string | null, herdrPath: string | null) =>
+  invoke<MachineView>("machine_add", { sshTarget, label, herdrPath });
+export const machineRemove = (id: string) => invoke<void>("machine_remove", { id });
+export const machineUpdate = (id: string, herdrPath: string | null) =>
+  invoke<MachineView>("machine_update", { id, herdrPath });
+export const machineMasterAlive = (id: string) => invoke<boolean>("machine_master_alive", { id });
+export const connectOpen = (
+  machineId: string,
+  cols: number,
+  rows: number,
+  data: Channel<ArrayBuffer>,
+  events: Channel<AttachEvent>,
+) => invoke<void>("connect_open", { machineId, cols, rows, data, events });
+export const connectWrite = (machineId: string, data: string) => invoke<void>("connect_write", { machineId, data });
+export const connectResize = (machineId: string, cols: number, rows: number) =>
+  invoke<void>("connect_resize", { machineId, cols, rows });
+export const connectClose = (machineId: string) => invoke<void>("connect_close", { machineId });
 export const sessionsRefresh = (machineId: string) => invoke<void>("sessions_refresh", { machineId });
 export const sessionStart = (machineId: string, session: string) =>
   invoke<void>("session_start", { machineId, session });

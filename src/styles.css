@@ -128,3 +128,17 @@ button { font: inherit; color: inherit; }
 .hit.active, .hit:hover { background: var(--bg-active); }
 .hit .agent { margin-left: 0; }
 .subtitle { margin-left: auto; color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+
+.suggest { margin: -6px 0 0; padding: 2px; list-style: none; max-height: 120px; overflow-y: auto; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+.suggest li { padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+.suggest li:hover { background: var(--bg-hover); }
+.dialog details { color: var(--fg-dim); }
+.dialog-error { padding: 0; }
+.dialog.connect { width: 640px; }
+.connect-term { height: 260px; padding: 6px; background: #16171a; border-radius: 6px; overflow: hidden; }
+.add-machine { margin: 6px 10px; padding: 3px 8px; border: 1px dashed var(--line); border-radius: 5px; background: none; color: var(--fg-dim); cursor: pointer; text-align: left; }
+.add-machine:hover { background: var(--bg-hover); color: var(--fg); }
+.machine.offline > .children { pointer-events: none; opacity: 0.55; }
+.machine-actions { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px 26px; }
+.machine-actions input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); font: inherit; }
+.machine-actions button { padding: 1px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-hover); cursor: pointer; }

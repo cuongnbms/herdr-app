@@ -3,6 +3,7 @@ pub mod commands;
 pub mod error;
 pub mod herdr;
 pub mod machines;
+pub mod sshconfig;
 pub mod transport;
 pub mod view;
 
@@ -22,6 +23,15 @@ pub fn run() {
             commands::machines_list,
             commands::machine_connect,
             commands::machine_disconnect,
+            commands::machine_add,
+            commands::machine_remove,
+            commands::machine_update,
+            commands::machine_master_alive,
+            commands::ssh_hosts,
+            commands::connect_open,
+            commands::connect_write,
+            commands::connect_resize,
+            commands::connect_close,
             commands::sessions_refresh,
             commands::session_start,
             commands::session_stop,
@@ -51,8 +61,10 @@ pub fn run() {
                     }
                 }),
             );
+            let attach = AttachManager::new(std::time::Duration::from_secs(15));
+            mgr.set_attach_manager(attach.clone());
             app.manage(mgr.clone());
-            app.manage(AttachManager::new(std::time::Duration::from_secs(15)));
+            app.manage(attach);
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mgr.connect("local").await {
                     tracing::error!("connect local: {e}");
@@ -60,8 +72,17 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // ControlPersist masters outlive us: end every ssh master on the way out.
+                if let Some(mgr) = app.try_state::<Arc<MachineManager>>() {
+                    let mgr = mgr.inner().clone();
+                    tauri::async_runtime::block_on(async move { mgr.disconnect_all_ssh().await });
+                }
+            }
+        });
 }
 
 /// Daily-rotating log files under `dir`, keeping the 5 most recent.

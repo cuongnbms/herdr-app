@@ -156,6 +156,46 @@ pub async fn master_exit(ctl: &Path, target: &str) {
     let _ = exec(&LocalTransport, &control_argv(ctl, target, "exit")).await;
 }
 
+/// Remove a control socket file left behind by a dead master (ssh would refuse to reuse it).
+pub async fn clear_stale_ctl(ctl: &Path, target: &str) {
+    if ctl.exists() && !master_alive(ctl, target).await {
+        let _ = std::fs::remove_file(ctl);
+    }
+}
+
+/// Start a master with `argv` (`ssh -f` forks, so the daemon inherits our descriptors):
+/// stdin and stdout are null and stderr goes to `errfile`, never a pipe we would read to EOF.
+/// Waits (30 s) for the foreground process only, then classifies a failure from `errfile`.
+pub async fn run_detached(argv: &[String], errfile: &Path) -> AppResult<()> {
+    let program = argv.first().ok_or_else(|| AppError::new("invalid", "empty command"))?;
+    let err = std::fs::File::create(errfile)?;
+    let mut child = tokio::process::Command::new(program)
+        .args(&argv[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(err)
+        .kill_on_drop(true)
+        .spawn()?;
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait()).await;
+    let text = std::fs::read_to_string(errfile).unwrap_or_default();
+    let _ = std::fs::remove_file(errfile);
+    match waited {
+        Err(_) => Err(AppError::new("timeout", format!("{program} took longer than 30s"))),
+        Ok(Err(e)) => Err(e.into()),
+        Ok(Ok(st)) if st.success() => Ok(()),
+        Ok(Ok(st)) => {
+            let e = classify_ssh_error(&text);
+            Err(if text.trim().is_empty() { AppError::new("io", format!("ssh exited with {st}")) } else { e })
+        }
+    }
+}
+
+/// Start the batch (non-interactive) ControlMaster for `ctl`.
+pub async fn start_master(machine_id: &str, ctl: &Path, target: &str) -> AppResult<()> {
+    let errfile = secure_runtime_dir()?.join(format!("{machine_id}-master.err"));
+    run_detached(&master_argv(ctl, target, true), &errfile).await
+}
+
 pub fn classify_ssh_error(stderr: &str) -> AppError {
     if stderr.contains("Permission denied") || stderr.contains("Host key verification failed") || stderr.contains("passphrase") {
         return AppError::new("ssh_auth", stderr.trim());
@@ -199,6 +239,26 @@ mod tests {
     fn control_commands_use_batch_mode() {
         let a = control_argv(Path::new("/c"), "h", "check");
         assert_eq!(a, ["ssh", "-S", "/c", "-o", "BatchMode=yes", "-O", "check", "h"]);
+    }
+    fn sh(script: &str) -> Vec<String> {
+        vec!["sh".into(), "-c".into(), script.into()]
+    }
+    #[tokio::test]
+    async fn detached_start_does_not_wait_for_the_forked_daemon() {
+        let d = tempfile::tempdir().unwrap();
+        let t = std::time::Instant::now();
+        // The background child inherits stderr and outlives the parent, like `ssh -f`.
+        run_detached(&sh("(sleep 4) & exit 0"), &d.path().join("e")).await.unwrap();
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+    }
+    #[tokio::test]
+    async fn detached_failure_is_classified_from_stderr() {
+        let d = tempfile::tempdir().unwrap();
+        let e = run_detached(&sh("echo 'u@h: Permission denied (publickey).' >&2; exit 255"), &d.path().join("e")).await.unwrap_err();
+        assert_eq!(e.code, "ssh_auth");
+        assert!(!d.path().join("e").exists());
+        let e = run_detached(&sh("exit 3"), &d.path().join("e")).await.unwrap_err();
+        assert_eq!(e.code, "io");
     }
     #[test]
     fn classifies_errors() {
