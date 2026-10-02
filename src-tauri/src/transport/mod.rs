@@ -165,6 +165,46 @@ pub fn parse_session_list(stdout: &str) -> Vec<SessionEntry> {
         .collect()
 }
 
+/// Prints each directory argument that holds no herdr server state.
+const CLIENT_ONLY_SCRIPT: &str = r#"for d; do
+  [ -e "$d/session.json" ] || [ -e "$d/herdr-server.log" ] || [ -e "$d/herdr.sock" ] || printf '%s\n' "$d"
+done"#;
+
+/// Drop stopped sessions whose directory holds only client files. `herdr --remote <target>
+/// --session <name>` creates such a directory on this side, and `herdr session list` then
+/// reports it as a stopped local session; starting it would launch an empty local server.
+/// On a failed check the list is returned unchanged.
+pub async fn drop_client_only(t: &dyn Transport, list: Vec<SessionEntry>) -> Vec<SessionEntry> {
+    let dir = |s: &SessionEntry| {
+        let socket = std::path::Path::new(&s.socket);
+        socket.parent().map(|p| p.to_string_lossy().into_owned())
+    };
+    let dirs: Vec<String> = list
+        .iter()
+        .filter(|s| !s.running && s.name != "default")
+        .filter_map(dir)
+        .collect();
+    if dirs.is_empty() {
+        return list;
+    }
+    let mut argv = vec![
+        "sh".into(),
+        "-c".into(),
+        CLIENT_ONLY_SCRIPT.into(),
+        "sh".into(),
+    ];
+    argv.extend(dirs);
+    let client_only: Vec<String> = match exec(t, &argv).await {
+        Ok(out) if out.status == 0 => out.stdout.lines().map(str::to_string).collect(),
+        _ => return list,
+    };
+    list.into_iter()
+        .filter(|s| {
+            s.running || s.name == "default" || !dir(s).is_some_and(|d| client_only.contains(&d))
+        })
+        .collect()
+}
+
 /// The first whitespace-separated token of `s` and the rest after it.
 fn split_token(s: &str) -> Option<(&str, &str)> {
     let s = s.trim_start();
@@ -415,5 +455,40 @@ broken               running  /only-one-path\n";
             .unwrap();
         assert_eq!(out.status, 0);
         assert!(out.stdout.contains("HOME="), "{}", out.stdout);
+    }
+
+    #[tokio::test]
+    async fn drops_stopped_sessions_that_only_hold_a_client_log() {
+        let d = tempfile::tempdir().unwrap();
+        let mk = |name: &str, files: &[&str]| {
+            let dir = d.path().join(name);
+            std::fs::create_dir(&dir).unwrap();
+            for f in files {
+                std::fs::write(dir.join(f), "").unwrap();
+            }
+            dir.join("herdr.sock").to_string_lossy().into_owned()
+        };
+        let entry = |name: &str, running: bool, socket: String| SessionEntry {
+            name: name.into(),
+            running,
+            socket,
+        };
+        let list = vec![
+            entry("default", false, mk("default", &[])),
+            entry("live", true, mk("live", &["herdr-client.log"])),
+            // `herdr --remote <target> --session ai-radar` leaves only a client log.
+            entry("ai-radar", false, mk("ai radar", &["herdr-client.log"])),
+            entry(
+                "saved",
+                false,
+                mk("saved", &["herdr-client.log", "session.json"]),
+            ),
+            entry("ran", false, mk("ran", &["herdr-server.log"])),
+        ];
+        let names = |l: Vec<SessionEntry>| l.into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert_eq!(
+            names(drop_client_only(&local::LocalTransport, list).await),
+            ["default", "live", "saved", "ran"]
+        );
     }
 }

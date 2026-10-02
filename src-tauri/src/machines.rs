@@ -9,7 +9,7 @@ use crate::{
     },
     transcript::ChatManager,
     transport::{
-        exec, herdr_argv,
+        drop_client_only, exec, herdr_argv,
         local::LocalTransport,
         parse_probe, parse_session_list, probe_argv,
         ssh::{
@@ -1007,7 +1007,7 @@ impl MachineManager {
                 format!("session list failed: {}", out.stderr.trim()),
             ));
         }
-        Ok(parse_session_list(&out.stdout))
+        Ok(drop_client_only(t.as_ref(), parse_session_list(&out.stdout)).await)
     }
 
     /// Reconcile the Machine's sessions with `list`; start watchers for newly running ones.
