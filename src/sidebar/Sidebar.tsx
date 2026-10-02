@@ -1,8 +1,41 @@
-import { sessionStart } from "../lib/ipc";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { herdrCall, sessionStart, sessionStop } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneView, SessionView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { StatusDot } from "./StatusDot";
+import { ConfirmDialog, ContextMenu, TextDialog } from "./ContextMenu";
+import type { MenuItem } from "./ContextMenu";
+import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
+
+type Dialog =
+  | { kind: "rename"; title: string; initial: string; run: (label: string) => Promise<unknown> }
+  | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
+  | { kind: "workspace"; machineId: string; session: string; defaultCwd: string };
+
+interface Actions {
+  menu: (e: MouseEvent, items: MenuItem[]) => void;
+  rename: (title: string, initial: string, run: (label: string) => Promise<unknown>) => void;
+  confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
+  newWorkspace: (machineId: string, session: string) => void;
+  guard: (run: () => Promise<unknown>) => void;
+}
+
+const ActionsCtx = createContext<Actions | null>(null);
+const useActions = () => useContext(ActionsCtx);
+
+/** A cwd to pre-fill for a new workspace: the selected pane's, else any pane's in the session. */
+function defaultCwdFor(machineId: string, sessionName: string): string {
+  const { machines, selected } = useApp.getState();
+  const session = machines[machineId]?.sessions.find((s) => s.name === sessionName);
+  const panes = session?.workspaces.flatMap((w) => w.tabs.flatMap((t) => t.panes)) ?? [];
+  if (selected && selected.machine_id === machineId && selected.session === sessionName) {
+    const cwd = panes.find((p) => p.pane_id === selected.pane_id)?.cwd;
+    if (cwd) return cwd;
+  }
+  return panes.find((p) => p.cwd)?.cwd ?? "";
+}
 
 const hl = (status: string) => (status === "blocked" ? " blocked" : "");
 
@@ -15,9 +48,23 @@ function PaneRow({ machineId, session, pane }: { machineId: string; session: str
   const selected = useApp((s) => s.selected);
   const ref = { machine_id: machineId, session, pane_id: pane.pane_id };
   const active = selected !== null && paneKey(selected) === paneKey(ref);
+  const a = useActions();
+  const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const items: MenuItem[] = a
+    ? [
+        { label: "Rename…", onSelect: () => a.rename("Rename pane", pane.title, (label) => call("pane.rename", { pane_id: pane.pane_id, label })()) },
+        { label: "Split right", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "right" })) },
+        { label: "Split down", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "down" })) },
+        { label: "Close pane", onSelect: () => a.confirm("Close pane", `Close "${pane.title}"?`, "Close", call("pane.close", { pane_id: pane.pane_id })) },
+      ]
+    : [];
   return (
     <li>
-      <button className={"row pane" + (active ? " active" : "") + hl(pane.status)} onClick={() => select(ref)}>
+      <button
+        className={"row pane" + (active ? " active" : "") + hl(pane.status)}
+        onClick={() => select(ref)}
+        onContextMenu={(e) => a?.menu(e, items)}
+      >
         <StatusDot status={pane.status} />
         <span className="title mono">{pane.title}</span>
         {pane.agent && <span className="agent">{pane.agent}</span>}
@@ -31,9 +78,23 @@ function WorkspaceNode({ machineId, session, ws }: { machineId: string; session:
   const open = useApp((s) => s.expanded[key] ?? true);
   const toggle = useApp((s) => s.toggle);
   const single = ws.tabs.length === 1;
+  const a = useActions();
+  const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const items: MenuItem[] = a
+    ? [
+        { label: "New tab", onSelect: () => a.guard(call("tab.create", { workspace_id: ws.workspace_id })) },
+        { label: "Rename…", onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
+        { label: "Close workspace", onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
+      ]
+    : [];
   return (
     <li>
-      <button className={"row workspace" + hl(ws.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button
+        className={"row workspace" + hl(ws.status)}
+        aria-expanded={open}
+        onClick={() => toggle(key, open)}
+        onContextMenu={(e) => a?.menu(e, items)}
+      >
         <Chevron open={open} />
         <StatusDot status={ws.status} />
         <span className="label">{ws.label}</span>
@@ -65,9 +126,22 @@ function TabNode({
   const key = `${wsKey}/${tab.tab_id}`;
   const open = useApp((s) => s.expanded[key] ?? true);
   const toggle = useApp((s) => s.toggle);
+  const a = useActions();
+  const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const items: MenuItem[] = a
+    ? [
+        { label: "Rename…", onSelect: () => a.rename("Rename tab", tab.label, (label) => call("tab.rename", { tab_id: tab.tab_id, label })()) },
+        { label: "Close tab", onSelect: () => a.confirm("Close tab", `Close tab "${tab.label}" and all its panes?`, "Close", call("tab.close", { tab_id: tab.tab_id })) },
+      ]
+    : [];
   return (
     <li>
-      <button className={"row tab" + hl(tab.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button
+        className={"row tab" + hl(tab.status)}
+        aria-expanded={open}
+        onClick={() => toggle(key, open)}
+        onContextMenu={(e) => a?.menu(e, items)}
+      >
         <Chevron open={open} />
         <StatusDot status={tab.status} />
         <span className="label">{tab.label}</span>
@@ -87,10 +161,21 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
   const key = `${machineId}/${session.name}`;
   const open = useApp((s) => s.expanded[key] ?? session.running);
   const toggle = useApp((s) => s.toggle);
+  const a = useActions();
+  const onMenu = (e: MouseEvent) =>
+    a?.menu(
+      e,
+      session.running
+        ? [
+            { label: "New workspace…", onSelect: () => a.newWorkspace(machineId, session.name) },
+            { label: "Stop session", onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },
+          ]
+        : [{ label: "Start session", onSelect: () => a.guard(() => sessionStart(machineId, session.name)) }],
+    );
   if (!session.running) {
     return (
       <li className="session stopped">
-        <div className="row">
+        <div className="row" onContextMenu={onMenu}>
           <StatusDot status={session.status} />
           <span className="label">{session.name}</span>
           <button
@@ -107,7 +192,12 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
   }
   return (
     <li className="session">
-      <button className={"row" + hl(session.status)} aria-expanded={open} onClick={() => toggle(key, open)}>
+      <button
+        className={"row" + hl(session.status)}
+        aria-expanded={open}
+        onClick={() => toggle(key, open)}
+        onContextMenu={onMenu}
+      >
         <Chevron open={open} />
         <StatusDot status={session.status} />
         <span className="label">{session.name}</span>
@@ -148,12 +238,68 @@ function MachineNode({ machine }: { machine: MachineView }) {
   );
 }
 
+function errorMessage(e: unknown): string {
+  return (e as { message?: string } | null)?.message ?? String(e);
+}
+
 export function Sidebar() {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const guard = useCallback((run: () => Promise<unknown>) => {
+    setError(null);
+    run().catch((e) => setError(errorMessage(e)));
+  }, []);
+  const actions = useMemo<Actions>(
+    () => ({
+      guard,
+      menu: (e, items) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, items });
+      },
+      rename: (title, initial, run) => setDialog({ kind: "rename", title, initial, run }),
+      confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
+      newWorkspace: (machineId, session) =>
+        setDialog({ kind: "workspace", machineId, session, defaultCwd: defaultCwdFor(machineId, session) }),
+    }),
+    [guard],
+  );
+  const closeDialog = useCallback(() => setDialog(null), []);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  let modal: ReactNode = null;
+  if (dialog?.kind === "rename") {
+    modal = (
+      <TextDialog title={dialog.title} initial={dialog.initial} submitLabel="Rename" onClose={closeDialog}
+        onSubmit={(v) => v.trim() && guard(() => dialog.run(v.trim()))} />
+    );
+  } else if (dialog?.kind === "confirm") {
+    modal = (
+      <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel}
+        onClose={closeDialog} onConfirm={() => guard(dialog.run)} />
+    );
+  } else if (dialog?.kind === "workspace") {
+    modal = (
+      <NewWorkspaceDialog machineId={dialog.machineId} session={dialog.session} defaultCwd={dialog.defaultCwd}
+        onClose={closeDialog} onError={setError} />
+    );
+  }
+
   return (
-    <ul className="tree">
-      {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
-    </ul>
+    <ActionsCtx.Provider value={actions}>
+      <ul className="tree">
+        {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
+      </ul>
+      {error && (
+        <p className="error action-error" role="alert" onClick={() => setError(null)}>
+          {error}
+        </p>
+      )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={closeMenu} />}
+      {modal}
+    </ActionsCtx.Provider>
   );
 }

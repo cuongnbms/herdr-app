@@ -26,10 +26,11 @@ button { font: inherit; color: inherit; }
 .sidebar {
   flex: 0 0 260px;
   width: 260px;
-  overflow-y: auto;
+  display: flex; flex-direction: column;
   background: var(--bg-side);
   border-right: 1px solid var(--line);
 }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .main > .empty { margin: auto; }
@@ -95,3 +96,35 @@ button { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--line);
 }
 .term-banner button { padding: 2px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg-hover); cursor: pointer; }
+
+.settings { position: relative; padding: 6px 10px; border-top: 1px solid var(--line); }
+.gear { border: 0; background: none; cursor: pointer; color: var(--fg-dim); font-size: 15px; }
+.popover {
+  position: absolute; bottom: 100%; left: 8px; right: 8px; padding: 10px;
+  background: var(--bg-active); border: 1px solid var(--line); border-radius: 8px;
+}
+.switch { display: flex; align-items: center; gap: 8px; }
+.note { margin: 8px 0 0; color: var(--fg-dim); font-size: 11px; }
+.action-error { cursor: pointer; }
+
+.overlay { position: fixed; inset: 0; z-index: 10; display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; background: rgba(0, 0, 0, 0.4); }
+.overlay.clear { background: none; padding: 0; display: block; }
+.ctx-menu { position: fixed; margin: 0; padding: 4px; list-style: none; min-width: 160px; background: var(--bg-active); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.ctx-menu button { display: block; width: 100%; padding: 4px 10px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer; }
+.ctx-menu button:hover { background: var(--bg-hover); }
+.dialog { display: flex; flex-direction: column; gap: 10px; width: 360px; max-width: 90vw; padding: 16px; background: var(--bg-side); border: 1px solid var(--line); border-radius: 10px; }
+.dialog h3 { margin: 0; font-size: 14px; }
+.dialog p { margin: 0; }
+.dialog label { display: flex; flex-direction: column; gap: 4px; color: var(--fg-dim); }
+.dialog input, .dialog select, .palette input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); font: inherit; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+.actions button { padding: 3px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-hover); cursor: pointer; }
+.actions .danger { background: var(--err); color: #1b1c20; border-color: var(--err); }
+.palette { width: 560px; max-width: 90vw; max-height: 60vh; display: flex; flex-direction: column; background: var(--bg-side); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.palette input { margin: 10px; font-size: 14px; }
+.palette ul { list-style: none; margin: 0; padding: 0 0 6px; overflow-y: auto; }
+.palette .empty { padding: 8px 14px; }
+.hit { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+.hit.active, .hit:hover { background: var(--bg-active); }
+.hit .agent { margin-left: 0; }
+.subtitle { margin-left: auto; color: var(--fg-dim); font-size: 11px; white-space: nowrap; }

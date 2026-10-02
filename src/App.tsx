@@ -1,6 +1,9 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import "./styles.css";
-import { machinesList, onMachine } from "./lib/ipc";
+import { machinesList, onMachine, onPaneStatus } from "./lib/ipc";
+import { notifyPaneStatus } from "./notify";
+import { Palette } from "./palette/Palette";
+import { Settings } from "./settings/Settings";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { useShallow } from "zustand/react/shallow";
@@ -12,6 +15,7 @@ const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   const sel = useApp(useShallow(selectedPane));
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,10 +33,41 @@ export default function App() {
     };
   }, [upsert]);
 
+  // Notifications: the permission prompt only happens lazily inside notifyPaneStatus.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void onPaneStatus((ev) => {
+      const { selected, machines } = useApp.getState();
+      void notifyPaneStatus(ev, selected, machines);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Machines">
-        <Sidebar />
+        <div className="sidebar-scroll">
+          <Sidebar />
+        </div>
+        <Settings />
       </nav>
       <main className="main">
         {sel ? (
@@ -50,6 +85,7 @@ export default function App() {
           <p className="empty">Select a pane</p>
         )}
       </main>
+      {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>
   );
 }
