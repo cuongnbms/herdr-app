@@ -150,22 +150,58 @@ pub fn parse_probe(stdout: &str) -> AppResult<MachineInfo> {
 }
 
 /// Parse `herdr session list` output: a header line, then `name status directory socket` rows.
+/// Directory and socket may contain spaces, and a long directory overflows its column, so
+/// the socket is found as: the part after a whitespace run that starts with the directory
+/// plus `/` (herdr keeps the socket inside the session directory), else the text at the
+/// header's `socket` column when it starts a field there, else the last token.
 pub fn parse_session_list(stdout: &str) -> Vec<SessionEntry> {
-    stdout
-        .lines()
-        .skip(1)
-        .filter_map(|l| {
-            let t: Vec<&str> = l.split_whitespace().collect();
-            if t.len() < 4 {
-                return None;
+    let mut lines = stdout.lines();
+    let socket_col = lines.next().and_then(|h| h.find("socket"));
+    lines.filter_map(|l| parse_session_row(l, socket_col)).collect()
+}
+
+/// The first whitespace-separated token of `s` and the rest after it.
+fn split_token(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    let end = s.find(char::is_whitespace)?;
+    Some((&s[..end], &s[end..]))
+}
+
+fn parse_session_row(line: &str, socket_col: Option<usize>) -> Option<SessionEntry> {
+    let (name, rest) = split_token(line)?;
+    let (status, rest) = split_token(rest)?;
+    let rest = rest.trim();
+    if !rest.contains(char::is_whitespace) {
+        return None; // no directory + socket pair
+    }
+    let socket = socket_under_directory(rest)
+        .or_else(|| socket_at_column(line, socket_col?))
+        .or_else(|| rest.split_whitespace().last())?;
+    Some(SessionEntry { name: name.to_string(), running: status == "running", socket: socket.to_string() })
+}
+
+fn socket_under_directory(rest: &str) -> Option<&str> {
+    let mut prev_ws = false;
+    for (i, c) in rest.char_indices() {
+        let ws = c.is_whitespace();
+        if ws && !prev_ws {
+            let (dir, right) = (&rest[..i], rest[i..].trim_start());
+            if right.strip_prefix(dir).is_some_and(|r| r.starts_with('/')) {
+                return Some(right);
             }
-            Some(SessionEntry {
-                name: t[0].to_string(),
-                running: t[1] == "running",
-                socket: t[t.len() - 1].to_string(),
-            })
-        })
-        .collect()
+        }
+        prev_ws = ws;
+    }
+    None
+}
+
+fn socket_at_column(line: &str, col: usize) -> Option<&str> {
+    if col == 0 || col >= line.len() || !line.is_char_boundary(col) {
+        return None;
+    }
+    let (before, at) = line.split_at(col);
+    let starts_field = before.ends_with(char::is_whitespace) && !at.starts_with(char::is_whitespace);
+    starts_field.then(|| at.trim_end())
 }
 
 fn runtime_dir_path() -> PathBuf {
@@ -263,6 +299,23 @@ agent-workspace      stopped  /Users/me/.config/herdr/sessions/agent-workspace /
         assert_eq!(parse_session_list(out), vec![
             SessionEntry { name: "default".into(), running: true, socket: "/Users/me/.config/herdr/herdr.sock".into() },
             SessionEntry { name: "agent-workspace".into(), running: false, socket: "/Users/me/.config/herdr/sessions/agent-workspace/herdr.sock".into() },
+        ]);
+    }
+    #[test]
+    fn parses_session_list_with_spaces_in_paths() {
+        let out = "name                 status   directory                                        socket\n\
+work                 running  /Users/me/My Projects/herdr                      /Users/me/My Projects/herdr/herdr.sock\n\
+long                 stopped  /Users/me/My Projects/herdr/sessions/a long name /Users/me/My Projects/herdr/sessions/a long name/herdr.sock\n\
+moved                running  /srv/a b                                         /run/x y/herdr.sock\n\
+odd                  stopped  /a b /c/d.sock\n\
+broken               running  /only-one-path\n";
+        assert_eq!(parse_session_list(out), vec![
+            SessionEntry { name: "work".into(), running: true, socket: "/Users/me/My Projects/herdr/herdr.sock".into() },
+            SessionEntry { name: "long".into(), running: false, socket: "/Users/me/My Projects/herdr/sessions/a long name/herdr.sock".into() },
+            // Socket outside the directory: located by the header's socket column.
+            SessionEntry { name: "moved".into(), running: true, socket: "/run/x y/herdr.sock".into() },
+            // Neither rule applies: the last token.
+            SessionEntry { name: "odd".into(), running: false, socket: "/c/d.sock".into() },
         ]);
     }
     #[test]
