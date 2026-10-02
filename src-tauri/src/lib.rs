@@ -4,6 +4,7 @@ pub mod error;
 pub mod fonts;
 pub mod herdr;
 pub mod machines;
+pub mod quota;
 pub mod sshconfig;
 pub mod transcript;
 pub mod transport;
