@@ -70,4 +70,25 @@ describe("NewAgentDialog", () => {
     await waitFor(() => expect(onError).toHaveBeenCalledWith("agent did not become ready"));
     expect(useApp.getState().selected?.pane_id).toBe("w1:p7");
   });
+  it("focuses the Agent select when the folder is remembered, so Escape closes", () => {
+    setFolder(ref, "/home/me/api");
+    respond();
+    const { onClose } = open();
+    expect(document.activeElement).toBe(screen.getByLabelText("Agent"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("reports a tab.create failure without starting an agent", async () => {
+    vi.mocked(herdrCall).mockImplementation((_m, _s, method) =>
+      method === "tab.create" ? Promise.reject({ code: "io", message: "no such workspace" }) : Promise.resolve(undefined));
+    const { onError } = open();
+    fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/srv/x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("no such workspace"));
+    expect(herdrCall).toHaveBeenCalledTimes(1);
+    expect(herdrCall).not.toHaveBeenCalledWith("local", "default", "agent.start", expect.anything());
+    expect(useApp.getState().selected).toBeNull();
+    expect(getFolder(ref)).toBe("/srv/x");
+  });
 });

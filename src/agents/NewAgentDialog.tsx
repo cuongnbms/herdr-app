@@ -62,7 +62,7 @@ export function NewAgentDialog({
         <h3>New agent in {workspace.label}</h3>
         <label>
           Agent
-          <select value={agent} onChange={(e) => setAgent(e.target.value as Agent)}>
+          <select autoFocus={stored !== null} value={agent} onChange={(e) => setAgent(e.target.value as Agent)}>
             <option value="claude">claude</option>
             <option value="pi">pi</option>
           </select>
