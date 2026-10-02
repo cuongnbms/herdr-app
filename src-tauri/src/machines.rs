@@ -961,6 +961,10 @@ impl MachineManager {
         // From here on nothing about this Machine reaches the UI (no ghost row).
         self.with_machine(id, |m| m.removing = true)?;
         self.disconnect(id).await;
+        // Wait out a connect in flight: it abandons itself and ends its master through the
+        // control socket, which must still exist when it does.
+        let gate = self.with_machine(id, |m| m.gate.clone())?;
+        let _g = gate.lock().await;
         if let Some(s) = self.ssh_of(id) {
             let _ = std::fs::remove_file(&s.ctl);
         }
