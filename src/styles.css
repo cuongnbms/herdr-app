@@ -229,6 +229,15 @@ kbd {
 }
 .agents-empty { margin: 0; padding: 24px 16px; color: var(--fg-3); text-align: center; }
 .agent-cards { list-style: none; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ws-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px 2px; min-width: 0; }
+.ws-label { font-weight: 600; font-size: 12px; white-space: nowrap; }
+.ws-folder { flex: 1; min-width: 0; color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-add {
+  flex: none; margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; padding: 0;
+  border: none; border-radius: var(--r-md); background: none; color: var(--fg-3); cursor: pointer;
+}
+.ws-add:hover { background: var(--hover); color: var(--fg); }
+.ws-add svg { width: 14px; height: 14px; }
 .agent-card {
   position: relative; display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box;
   padding: 10px; border: 1px solid transparent; border-radius: var(--r-md);

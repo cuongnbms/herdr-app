@@ -4,28 +4,26 @@ import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from 
 import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
+import { PlusIcon } from "../ui/icons";
+import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
 
 export interface PaneEntry {
   pane: PaneView;
   workspace: WorkspaceView;
   tab: TabView;
-  /** "workspace · tab", or just the workspace when it has a single tab. */
+  /** The tab label when the workspace has several tabs, else "". */
   sub: string;
 }
 
-/** Every pane of a session in workspace/tab order, without the tab grouping. */
-export function sessionPanes(session: SessionView): PaneEntry[] {
-  return session.workspaces.flatMap((workspace) =>
-    workspace.tabs.flatMap((tab) =>
-      tab.panes.map((pane) => ({
-        pane,
-        workspace,
-        tab,
-        sub: workspace.tabs.length > 1 ? `${workspace.label} · ${tab.label}` : workspace.label,
-      })),
+/** A session's workspaces in order, each with its panes (empty workspaces included). */
+export function workspaceGroups(session: SessionView): { workspace: WorkspaceView; entries: PaneEntry[] }[] {
+  return session.workspaces.map((workspace) => ({
+    workspace,
+    entries: workspace.tabs.flatMap((tab) =>
+      tab.panes.map((pane) => ({ pane, workspace, tab, sub: workspace.tabs.length > 1 ? tab.label : "" })),
     ),
-  );
+  }));
 }
 
 const BADGE: Record<AgentStatus, string> = {
@@ -52,8 +50,6 @@ function AgentCard({ machineId, session, entry }: { machineId: string; session: 
         { label: "New tab", onSelect: () => a.guard(call("tab.create", { workspace_id: ws.workspace_id })) },
         { label: "Rename tab…", onSelect: () => a.rename("Rename tab", tab.label, (label) => call("tab.rename", { tab_id: tab.tab_id, label })()) },
         { label: "Close tab", onSelect: () => a.confirm("Close tab", `Close tab "${tab.label}" and all its panes?`, "Close", call("tab.close", { tab_id: tab.tab_id })) },
-        { label: "Rename workspace…", onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
-        { label: "Close workspace", onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
       ]
     : [];
   return (
@@ -69,11 +65,44 @@ function AgentCard({ machineId, session, entry }: { machineId: string; session: 
           <span className="agent-card-title">{pane.title}</span>
           <span className="agent-card-meta">
             <span className={`badge badge-${pane.status}`}>{BADGE[pane.status]}</span>
-            <span className="agent-card-sub">{entry.sub}</span>
+            {entry.sub && <span className="agent-card-sub">{entry.sub}</span>}
           </span>
         </span>
       </button>
     </li>
+  );
+}
+
+function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machineId: string; session: string; workspace: WorkspaceView; entries: PaneEntry[] }) {
+  const a = useActions();
+  const ref = { machine_id: machineId, session, workspace_id: ws.workspace_id };
+  const folder = useFolder(ref);
+  const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const items: MenuItem[] = a
+    ? [
+        { label: "New agent…", onSelect: () => a.newAgent(machineId, session, ws) },
+        { label: "Change folder…", onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
+        { label: "Rename workspace…", onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
+        { label: "Close workspace", onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
+      ]
+    : [];
+  return (
+    <section role="group" aria-label={ws.label} className="ws-group">
+      <div className="ws-head" onContextMenu={(e) => a?.menu(e, items)}>
+        <span className="ws-label">{ws.label}</span>
+        <span className="ws-folder" title={folder ?? "no folder"}>{folder ? folderName(folder) : "no folder"}</span>
+        <button className="ws-add" aria-label={`New agent in ${ws.label}`} onClick={() => a?.newAgent(machineId, session, ws)}>
+          <PlusIcon />
+        </button>
+      </div>
+      {entries.length > 0 && (
+        <ul className="agent-cards">
+          {entries.map((e) => (
+            <AgentCard key={e.pane.pane_id} machineId={machineId} session={session} entry={e} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -89,21 +118,20 @@ export function AgentList() {
         <p className="agents-empty">Select a session</p>
       </>
     );
-  const entries = sessionPanes(session);
+  const groups = workspaceGroups(session);
+  const total = groups.reduce((n, g) => n + g.entries.length, 0);
   return (
     <ActionsProvider>
       <div className="agents-head" data-tauri-drag-region>
         <span className="agents-title">{session.name}</span>
-        <span className="count">{entries.length}</span>
+        <span className="count">{total}</span>
       </div>
-      {entries.length === 0 ? (
+      {groups.length === 0 ? (
         <p className="agents-empty">{session.running ? "No panes" : "Session stopped"}</p>
       ) : (
-        <ul className="agent-cards">
-          {entries.map((e) => (
-            <AgentCard key={e.pane.pane_id} machineId={viewed.machine_id} session={session.name} entry={e} />
-          ))}
-        </ul>
+        groups.map((g) => (
+          <WorkspaceGroup key={g.workspace.workspace_id} machineId={viewed.machine_id} session={session.name} workspace={g.workspace} entries={g.entries} />
+        ))
       )}
     </ActionsProvider>
   );
