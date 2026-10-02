@@ -23,6 +23,8 @@ function createEntry() {
   const term = new Terminal({
     cursorBlink: true,
     scrollback: 5000,
+    // xterm scrolls in whole rows; animate through them instead of jumping.
+    smoothScrollDuration: 100,
     allowProposedApi: true,
     theme: TERM_THEME,
   });
@@ -63,10 +65,13 @@ export function TerminalLens({ pane, terminalId }: Props) {
       term.open(container);
       try {
         const gl = new WebglAddon();
-        gl.onContextLoss(() => gl.dispose());
+        gl.onContextLoss(() => {
+          console.warn("xterm WebGL context lost; falling back to DOM renderer");
+          gl.dispose();
+        });
         term.loadAddon(gl);
-      } catch {
-        /* DOM renderer fallback */
+      } catch (e) {
+        console.warn("xterm WebGL unavailable; using DOM renderer", e);
       }
     } else {
       container.appendChild(term.element);
