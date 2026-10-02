@@ -3,12 +3,13 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import "../fonts/fonts.css";
 import { attachKeyString, termAck, termOpen, termRelease, termResize, termWrite } from "../lib/ipc";
 import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
-import { Banner, type BannerKind } from "./Banner";
+import { Banner } from "./Banner";
+import { initialLensState, lensReducer } from "./lensState";
 import { dispose, getOrCreate } from "./termCache";
 
 interface Props {
@@ -41,22 +42,16 @@ function toBytes(buf: unknown): Uint8Array | null {
 export function TerminalLens({ pane, terminalId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const takeoverRef = useRef<(() => void) | null>(null);
-  const [banner, setBanner] = useState<{ kind: BannerKind; code?: number | null } | null>(null);
-  const [generation, setGeneration] = useState(0);
-  const [detached, setDetached] = useState(false);
+  const [lens, dispatch] = useReducer(lensReducer, initialLensState);
   const machineState = useApp((s) => s.machines[pane.machine_id]?.state);
+  const machineRef = useRef(machineState);
+  machineRef.current = machineState;
 
-  const attach = { machine_id: pane.machine_id, session: pane.session, terminal_id: terminalId };
-  const cacheKey = attachKeyString(attach);
+  const cacheKey = attachKeyString({ machine_id: pane.machine_id, session: pane.session, terminal_id: terminalId });
 
-  // Re-attach after an SSH drop once the machine is back.
   useEffect(() => {
-    if (detached && machineState === "connected") {
-      setDetached(false);
-      setBanner(null);
-      setGeneration((g) => g + 1);
-    }
-  }, [detached, machineState]);
+    dispatch({ type: "machine", machine: machineState });
+  }, [machineState]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -83,35 +78,27 @@ export function TerminalLens({ pane, terminalId }: Props) {
     }
 
     const open = (takeover: boolean) => {
+      // Data and detach handling deliberately ignore `live`: the cached xterm must keep
+      // streaming (and acking) while hidden, and a hidden pane must still be disposed on detach.
+      let closed = false;
       const data = new Channel<ArrayBuffer>();
       data.onmessage = (buf) => {
         const bytes = toBytes(buf);
-        if (!live || !bytes) return;
+        if (!bytes || closed) return;
         term.write(bytes, () => void termAck(key, bytes.byteLength).catch(() => {}));
       };
       const events = new Channel<AttachEvent>();
       events.onmessage = (ev) => {
-        if (!live) return;
-        switch (ev.type) {
-          case "attached":
-            setBanner(null);
-            break;
-          case "held":
-            setBanner({ kind: "held" });
-            break;
-          case "exited":
-            setBanner({ kind: "exited", code: ev.code });
-            break;
-          case "detached":
-            dispose(cacheKey);
-            setBanner({ kind: "detached" });
-            setDetached(true);
-            break;
+        if (ev.type === "detached") {
+          closed = true;
+          dispose(cacheKey);
         }
+        if (live) dispatch({ type: "event", event: ev, machine: machineRef.current });
       };
-      termOpen(key, term.cols, term.rows, takeover, data, events).catch((e) =>
-        console.error("term_open failed", e),
-      );
+      termOpen(key, term.cols, term.rows, takeover, data, events).catch((e) => {
+        console.error("term_open failed", e);
+        if (live) dispatch({ type: "open_failed", machine: machineRef.current });
+      });
     };
     takeoverRef.current = () => open(true);
     open(false);
@@ -155,11 +142,11 @@ export function TerminalLens({ pane, terminalId }: Props) {
       void termRelease(key).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cacheKey, generation]);
+  }, [cacheKey, lens.generation]);
 
   return (
     <div className="term-lens">
-      {banner && <Banner kind={banner.kind} code={banner.code} onTakeOver={() => takeoverRef.current?.()} />}
+      {lens.banner && <Banner kind={lens.banner.kind} code={lens.banner.code} onTakeOver={() => takeoverRef.current?.()} />}
       <div className="term-host" ref={containerRef} />
     </div>
   );
