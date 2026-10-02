@@ -24,6 +24,22 @@ describe("app store", () => {
     expect(getFolder({ machine_id: "local", session: "default", workspace_id: "w1" })).toBe("/x");
     expect(getFolder({ machine_id: "local", session: "default", workspace_id: "w7" })).toBeNull();
   });
+  it("keeps the folder of a just-created workspace the snapshot does not list yet", () => {
+    localStorage.clear();
+    const w1 = { machine_id: "local", session: "default", workspace_id: "w1" };
+    const w5 = { machine_id: "local", session: "default", workspace_id: "w5" };
+    setFolder(w1, "/x");
+    useApp.getState().upsertMachine(machine);
+    setFolder(w5, "/srv/new");
+    useApp.getState().upsertMachine({ ...machine, status: "idle" });
+    expect(getFolder(w5)).toBe("/srv/new");
+    expect(getFolder(w1)).toBe("/x");
+    const s = machine.sessions[0];
+    const w5View = { ...s.workspaces[0], workspace_id: "w5", tabs: [] };
+    useApp.getState().upsertMachine({ ...machine, sessions: [{ ...s, workspaces: [w5View] }] });
+    expect(getFolder(w1)).toBeNull();
+    expect(getFolder(w5)).toBe("/srv/new");
+  });
   it("upserts machines keeping order", () => {
     useApp.getState().upsertMachine(machine);
     useApp.getState().upsertMachine({ ...machine, id: "devtuf", label: "devtuf", kind: "ssh" });

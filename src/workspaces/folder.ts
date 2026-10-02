@@ -52,10 +52,25 @@ export function suggestFolder(ws: WorkspaceView): string {
   return "";
 }
 
-export function pruneFolders(machineId: string, session: SessionView): void {
-  if (!session.running || session.error || session.workspaces.length === 0) return;
+function isSnapshot(session: SessionView): boolean {
+  return session.running && !session.error && session.workspaces.length > 0;
+}
+
+/**
+ * Drop stored folders of Workspaces that left `session`. Does nothing unless
+ * `session` is a valid snapshot (running, no error, at least one Workspace).
+ *
+ * With a valid `previous` view of the same Session, prunes by diff: only ids
+ * listed in `previous` and missing from `session` are removed. A folder saved
+ * for a Workspace the snapshot does not list yet (just created, watcher refetch
+ * still pending) is kept. Without one (first snapshot of the Session in this
+ * app run) every stored id for the Session missing from `session` is removed.
+ */
+export function pruneFolders(machineId: string, session: SessionView, previous?: SessionView): void {
+  if (!isSnapshot(session)) return;
   const prefix = PREFIX + encodeURIComponent(machineId) + "/" + encodeURIComponent(session.name) + "/";
   const live = new Set(session.workspaces.map((w) => w.workspace_id));
+  const known = previous && isSnapshot(previous) ? new Set(previous.workspaces.map((w) => w.workspace_id)) : null;
   let removed = false;
   try {
     const doomed: string[] = [];
@@ -68,7 +83,7 @@ export function pruneFolders(machineId: string, session: SessionView): void {
       } catch {
         continue;
       }
-      if (!live.has(id)) doomed.push(key);
+      if (!live.has(id) && (!known || known.has(id))) doomed.push(key);
     }
     for (const key of doomed) localStorage.removeItem(key);
     removed = doomed.length > 0;

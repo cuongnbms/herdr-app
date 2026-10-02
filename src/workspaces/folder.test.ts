@@ -59,6 +59,23 @@ describe("workspace folder", () => {
     expect(getFolder({ ...ref, session: "other", workspace_id: "w2" })).toBe("/c");
   });
 
+  it("with a valid previous view prunes only workspaces that left since then", () => {
+    setFolder(ref, "/a");
+    setFolder({ ...ref, workspace_id: "w2" }, "/b");
+    setFolder({ ...ref, workspace_id: "w5" }, "/new");
+    const previous = session({ workspaces: [ws("w1", ["/a"]), ws("w2", ["/b"])] });
+    pruneFolders("local", session({}), previous);
+    expect(getFolder(ref)).toBe("/a");
+    expect(getFolder({ ...ref, workspace_id: "w2" })).toBeNull();
+    expect(getFolder({ ...ref, workspace_id: "w5" })).toBe("/new");
+  });
+
+  it("does a full prune when the previous view is not a valid snapshot", () => {
+    setFolder({ ...ref, workspace_id: "w5" }, "/new");
+    pruneFolders("local", session({}), session({ running: false, workspaces: [] }));
+    expect(getFolder({ ...ref, workspace_id: "w5" })).toBeNull();
+  });
+
   it("re-renders subscribers on change", () => {
     const { result } = renderHook(() => useFolder(ref));
     expect(result.current).toBeNull();

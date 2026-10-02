@@ -74,7 +74,10 @@ export const useApp = create<AppState>((set, get) => ({
       return { lensNote: note ? { ...rest, [key]: note } : rest };
     }),
   upsertMachine: (v) => {
-    for (const s of v.sessions) pruneFolders(v.id, s);
+    // Prune by diff against the previous view so a folder saved for a
+    // just-created Workspace survives until the snapshot lists it.
+    const prev = get().machines[v.id]?.sessions;
+    for (const s of v.sessions) pruneFolders(v.id, s, prev?.find((p) => p.name === s.name));
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
