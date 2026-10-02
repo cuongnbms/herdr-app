@@ -73,29 +73,39 @@ pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
     }
 }
 
-/// Apply a `pane_agent_status_changed` event. Returns the pane's previous status
-/// when it changed; `None` when unchanged or the pane is unknown.
-pub fn apply_status(snap: &mut Snapshot, ev: &AgentStatusChanged) -> Option<AgentStatus> {
-    let pane = snap.panes.iter_mut().find(|p| p.pane_id == ev.pane_id)?;
+/// What `apply_status` changed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// Anything visible changed (status or agent): the view must be re-sent.
+    pub changed: bool,
+    /// The pane's previous status, when the status itself changed.
+    pub previous: Option<AgentStatus>,
+}
+
+/// Apply a `pane_agent_status_changed` event. Nothing changes for an unknown pane.
+pub fn apply_status(snap: &mut Snapshot, ev: &AgentStatusChanged) -> Applied {
+    let Some(pane) = snap.panes.iter_mut().find(|p| p.pane_id == ev.pane_id) else { return Applied::default() };
     let previous = pane.agent_status;
     pane.agent_status = ev.agent_status;
 
+    let mut agent_changed = false;
     match snap.agents.iter_mut().find(|a| a.pane_id == ev.pane_id) {
         Some(a) => {
             a.agent_status = ev.agent_status;
-            if ev.agent.is_some() {
+            if ev.agent.is_some() && a.agent != ev.agent {
                 a.agent = ev.agent.clone();
+                agent_changed = true;
             }
         }
-        None if ev.agent.is_some() => snap.agents.push(AgentInfo {
-            pane_id: ev.pane_id.clone(),
-            agent: ev.agent.clone(),
-            agent_status: ev.agent_status,
-        }),
+        None if ev.agent.is_some() => {
+            snap.agents.push(AgentInfo { pane_id: ev.pane_id.clone(), agent: ev.agent.clone(), agent_status: ev.agent_status });
+            agent_changed = true;
+        }
         None => {}
     }
 
-    (previous != ev.agent_status).then_some(previous)
+    let previous = (previous != ev.agent_status).then_some(previous);
+    Applied { changed: agent_changed || previous.is_some(), previous }
 }
 
 /// All pane ids in the snapshot, sorted.
@@ -141,12 +151,20 @@ mod tests {
     fn applies_status_changes() {
         let mut s = fixture();
         let ev = AgentStatusChanged { pane_id: "w2:p1".into(), agent_status: AgentStatus::Working, agent: Some("claude".into()) };
-        assert_eq!(apply_status(&mut s, &ev), Some(AgentStatus::Idle));
-        assert_eq!(apply_status(&mut s, &ev), None);
+        assert_eq!(apply_status(&mut s, &ev), Applied { changed: true, previous: Some(AgentStatus::Idle) });
+        assert_eq!(apply_status(&mut s, &ev), Applied::default());
         let v = session_view("default", &s);
         assert_eq!(v.workspaces[1].tabs[0].panes[0].agent.as_deref(), Some("claude"));
         assert_eq!(v.workspaces[1].status, AgentStatus::Working);
         let unknown = AgentStatusChanged { pane_id: "w9:p9".into(), agent_status: AgentStatus::Done, agent: None };
-        assert_eq!(apply_status(&mut s, &unknown), None);
+        assert_eq!(apply_status(&mut s, &unknown), Applied::default());
+    }
+    #[test]
+    fn agent_only_change_is_a_change_without_a_status_transition() {
+        let mut s = fixture();
+        // w2:p1 is idle with no agent in the fixture.
+        let ev = AgentStatusChanged { pane_id: "w2:p1".into(), agent_status: AgentStatus::Idle, agent: Some("pi".into()) };
+        assert_eq!(apply_status(&mut s, &ev), Applied { changed: true, previous: None });
+        assert_eq!(apply_status(&mut s, &ev), Applied::default());
     }
 }

@@ -50,7 +50,7 @@ enum Handled {
     Gone,
 }
 
-/// Apply a status event to `snap`; send `View` then `Status` if it changed.
+/// Apply a status event to `snap`; send `View` if anything changed, then `Status` if the status did.
 fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &UnboundedSender<WatchEvent>) -> Handled {
     let Ok(change) = serde_json::from_value::<AgentStatusChanged>(ev.data.clone()) else {
         tracing::warn!("malformed pane_agent_status_changed, refetching: {}", ev.data);
@@ -59,8 +59,16 @@ fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounde
     if !snap.panes.iter().any(|p| p.pane_id == change.pane_id) {
         return Handled::Refetch;
     }
-    let Some(previous) = apply_status(snap, &change) else { return Handled::Done };
+    let applied = apply_status(snap, &change);
+    if !applied.changed {
+        return Handled::Done;
+    }
     let view = session_view(name, snap);
+    if tx.send(WatchEvent::View(view.clone())).is_err() {
+        return Handled::Gone;
+    }
+    // An agent-only change re-sends the view but is no status transition (no notification).
+    let Some(previous) = applied.previous else { return Handled::Done };
     let title = view
         .workspaces
         .iter()
@@ -69,10 +77,7 @@ fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounde
         .find(|p| p.pane_id == change.pane_id)
         .map(|p| p.title.clone())
         .unwrap_or_else(|| change.pane_id.clone());
-    let sent = tx.send(WatchEvent::View(view)).is_ok()
-        && tx
-            .send(WatchEvent::Status { pane_id: change.pane_id, status: change.agent_status, previous, title })
-            .is_ok();
+    let sent = tx.send(WatchEvent::Status { pane_id: change.pane_id, status: change.agent_status, previous, title }).is_ok();
     if sent { Handled::Done } else { Handled::Gone }
 }
 
@@ -231,6 +236,16 @@ mod tests {
             WatchEvent::Status { pane_id, status, previous, .. } => assert_eq!((pane_id.as_str(), status, previous), ("w2:p1", AgentStatus::Done, AgentStatus::Idle)),
             other => panic!("{other:?}"),
         }
+    }
+    #[tokio::test]
+    async fn agent_only_change_sends_a_view_but_no_status() {
+        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let (f, mut rx, _h) = started(snap).await;
+        f.emit("pane_agent_status_changed", json!({"pane_id":"w2:p1","agent_status":"idle","agent":"pi"}));
+        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes[0].agent.as_deref() == Some("pi")));
+        f.emit("pane_agent_status_changed", json!({"pane_id":"w2:p1","agent_status":"done","agent":"pi"}));
+        assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
+        assert!(matches!(next(&mut rx).await, WatchEvent::Status { status: AgentStatus::Done, previous: AgentStatus::Idle, .. }));
     }
     #[tokio::test]
     async fn structural_events_refetch_once_and_resubscribe() {
