@@ -217,3 +217,18 @@ herdr-app/
 ├── src/  App.tsx main.tsx sidebar/ terminal/ chat/ store/
 └── package.json  vite.config.ts  tsconfig.json
 ```
+
+## Refinements made while planning (2026-10-02)
+
+These override the sections above where they differ. Each came from reading herdr's API schema or upstream code while writing the plan.
+
+1. **Subscriptions.** herdr's `pane.agent_status_changed` subscription takes a `pane_id`, so the watcher subscribes once per Pane. Structural events (`workspace.*`, `tab.*`, `pane.created/closed/exited/moved`) are not patched into the model: each burst triggers one `session.snapshot` refetch after a 150 ms debounce, and the subscription is renewed when the Pane set changes. Only status events are applied incrementally.
+2. **Sidebar payload.** Rust sends the whole `MachineView` of one Machine (event `sidebar://machine`, throttled to 100 ms), not diffs. Trees hold dozens of Panes, so diffs are not worth their complexity.
+3. **Transport primitive.** `Transport` reduces to `wrap(argv, tty) -> argv` plus socket forwarding. Exec, PTYs and tails run the wrapped argv locally. Local and remote Transcript tails both use `tail -n +1 -F` (no `notify` crate).
+4. **SSH master.** The master starts as `ssh -M -S <ctl> -o ControlPersist=yes -f -N <target>`. It is tried first with `BatchMode=yes`, and the Connect dialog opens only when that fails with an auth error. With `-f`, the dialog's process exits once authentication succeeds. Masters are closed with `-O exit` on disconnect, on removal and on app exit, instead of relying on a 10-minute `ControlPersist`.
+5. **Socket location.** Control and forwarded sockets live in `/tmp/herdr-app-<uid>/` (0700), with short hashed names, because macOS caps Unix socket paths at 104 bytes.
+6. **One probe round-trip.** A single `sh` probe script reports `HOME`, the herdr path, the pi session directory (`PI_CODING_AGENT_SESSION_DIR`, else `PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), the herdr version and the protocol.
+7. **Transcript discovery.** pi reports `agent_session { kind: "path", value: <absolute path> }`, which is used directly. pi's fallback directory is `--<cwd without leading '/', with '/' '\' ':' → '-'>--`. Claude's project directory name follows Claude Code's own rule: names over 200 characters are truncated and given a base-36 hash suffix. Both `cwd` and `foreground_cwd` are tried.
+8. **Notifications** do not focus the Pane when clicked (the desktop notification plugin has no reliable click callback); the Command palette (`Cmd+K`) is the way to jump.
+9. **UI actions** go through one allow-listed passthrough command, `herdr_call(machine, session, method, params)`, instead of one Tauri command per herdr method.
+10. **Remote shells** are assumed POSIX-compatible (bash/zsh/sh) for quoting; fish as a login shell is unsupported in v1.
