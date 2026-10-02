@@ -296,8 +296,7 @@ type Chats<'a> = State<'a, Arc<ChatManager>>;
 
 const CHAT_PAGE: usize = 200;
 
-/// The Pane and the number of panes in its Session running the same agent in the same cwd.
-fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<(PaneView, usize), AppError> {
+fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<PaneView, AppError> {
     let views = mgr.views();
     let session = views
         .iter()
@@ -309,22 +308,100 @@ fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<(PaneView, usize), App
                 format!("unknown session {}/{}", r.machine_id, r.session),
             )
         })?;
-    let panes: Vec<&PaneView> = session
+    session
         .workspaces
         .iter()
         .flat_map(|w| &w.tabs)
         .flat_map(|t| &t.panes)
-        .collect();
-    let pane = panes
-        .iter()
         .find(|p| p.pane_id == r.pane_id)
-        .map(|p| (*p).clone())
-        .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))?;
-    let same = panes
-        .iter()
-        .filter(|p| p.agent == pane.agent && p.cwd == pane.cwd)
-        .count();
-    Ok((pane, same))
+        .cloned()
+        .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))
+}
+
+/// How long to wait for herdr to report a just-started Claude agent's session.
+const SESSION_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The transcript of the agent in a Pane: `path` when given (the user's choice), else located.
+async fn locate_pane(
+    mgr: &MachineManager,
+    pane_ref: &PaneRef,
+    path: Option<String>,
+) -> Result<Located, AppError> {
+    let PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    } = pane_ref;
+    let pane = find_pane(mgr, pane_ref)?;
+    let transport = mgr.transport(machine_id)?;
+    let fetch_agent = || {
+        mgr.call(
+            machine_id,
+            session,
+            "agent.get",
+            serde_json::json!({ "target": pane_id }),
+        )
+    };
+    let mut agent_get = match fetch_agent().await {
+        Ok(v) => v,
+        Err(_) if path.is_some() => Value::Null,
+        Err(e) => return Err(e),
+    };
+    // Without its session, a just-started Claude would get another pane's transcript.
+    if path.is_none() {
+        let deadline = tokio::time::Instant::now() + SESSION_WAIT;
+        while transcript::locate::awaiting_session(&agent_get)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            agent_get = fetch_agent().await?;
+        }
+    }
+    Ok(match path {
+        Some(p) => Located {
+            agent: agent_get["agent"]["agent"]
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| pane.agent.clone())
+                .unwrap_or_default(),
+            path: p,
+            ambiguous: false,
+            candidates: Vec::new(),
+        },
+        None => {
+            let info = mgr.info(machine_id)?;
+            // The agent may run from a different directory than the shell's cwd (best-effort).
+            let fg = match mgr.session(machine_id, session) {
+                Ok(entry) => match transport.local_socket(&entry).await {
+                    Ok(socket) => rpc::snapshot(&socket)
+                        .await
+                        .ok()
+                        .and_then(|s| s.panes.into_iter().find(|p| p.pane_id == pane.pane_id))
+                        .and_then(|p| p.foreground_cwd),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            };
+            transcript::locate::locate_in(&*transport, &info, &agent_get, &pane, fg.as_deref())
+                .await?
+        }
+    })
+}
+
+/// Locates a Pane's transcript without opening it (the Terminal fallback probes with this).
+#[tauri::command]
+pub async fn chat_locate(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+) -> Result<Located, AppError> {
+    let pane_ref = PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    };
+    locate_pane(&mgr, &pane_ref, None).await
 }
 
 #[tauri::command]
@@ -339,60 +416,11 @@ pub async fn chat_open(
 ) -> Result<Located, AppError> {
     let pane_ref = PaneRef {
         machine_id: machine_id.clone(),
-        session: session.clone(),
-        pane_id: pane_id.clone(),
+        session,
+        pane_id,
     };
-    let (pane, same) = find_pane(&mgr, &pane_ref)?;
+    let located = locate_pane(&mgr, &pane_ref, path).await?;
     let transport = mgr.transport(&machine_id)?;
-    let agent_get = match mgr
-        .call(
-            &machine_id,
-            &session,
-            "agent.get",
-            serde_json::json!({ "target": pane_id }),
-        )
-        .await
-    {
-        Ok(v) => v,
-        Err(_) if path.is_some() => Value::Null,
-        Err(e) => return Err(e),
-    };
-    let located = match path {
-        Some(p) => Located {
-            agent: agent_get["agent"]["agent"]
-                .as_str()
-                .map(str::to_string)
-                .or_else(|| pane.agent.clone())
-                .unwrap_or_default(),
-            path: p,
-            ambiguous: false,
-            candidates: Vec::new(),
-        },
-        None => {
-            let info = mgr.info(&machine_id)?;
-            // The agent may run from a different directory than the shell's cwd (best-effort).
-            let fg = match mgr.session(&machine_id, &session) {
-                Ok(entry) => match transport.local_socket(&entry).await {
-                    Ok(socket) => rpc::snapshot(&socket)
-                        .await
-                        .ok()
-                        .and_then(|s| s.panes.into_iter().find(|p| p.pane_id == pane.pane_id))
-                        .and_then(|p| p.foreground_cwd),
-                    Err(_) => None,
-                },
-                Err(_) => None,
-            };
-            transcript::locate::locate_in(
-                &*transport,
-                &info,
-                &agent_get,
-                &pane,
-                fg.as_deref(),
-                same,
-            )
-            .await?
-        }
-    };
     let parser = transcript::parser_for(&located.agent).ok_or_else(|| {
         AppError::new(
             "not_found",

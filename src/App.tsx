@@ -16,6 +16,7 @@ import { chosenLens, selectedPane, useApp } from "./store/app";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
+import { useTranscriptProbe } from "./chat/transcriptProbe";
 import { AlertIcon, LayersIcon, TerminalIcon } from "./ui/icons";
 
 function EmptyState({ icon, title, children }: { icon: React.ReactNode; title: string; children?: React.ReactNode }) {
@@ -137,6 +138,7 @@ export default function App() {
 
   const ref = sel ? { machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id } : null;
   const key = ref ? paneKey(ref) : "";
+  useTranscriptProbe(ref, sel?.pane.status);
 
   return (
     <div className="app">

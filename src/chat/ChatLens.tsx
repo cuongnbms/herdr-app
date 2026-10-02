@@ -63,8 +63,9 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
               open(null);
               break;
             case "fallback":
-              // In memory only: a fresh pane's transcript appears after its first prompt.
-              setLensNote(key, "No conversation transcript found for this pane; showing the terminal.");
+              // In memory only: a fresh pane's transcript appears after its first prompt, and
+              // useTranscriptProbe returns to Chat then.
+              setLensNote(key, "No conversation transcript for this pane yet; showing the terminal until there is one.");
               setLensOverride(key, "terminal");
               break;
             case "error":

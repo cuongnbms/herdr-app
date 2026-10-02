@@ -1,0 +1,43 @@
+import { useEffect } from "react";
+import * as ipc from "../lib/ipc";
+import { paneKey, type AgentStatus, type Located, type PaneRef } from "../lib/types";
+import { useApp } from "../store/app";
+
+/**
+ * A pane that fell back to the Terminal lens because its agent had no transcript yet (Claude
+ * writes it on the first prompt) returns to the Chat lens once the transcript exists. Looks
+ * again when the pane is shown and whenever its agent changes status, then once more after
+ * `retryMs`, since the status can change just before the file is written.
+ */
+export function useTranscriptProbe(
+  pane: PaneRef | null,
+  status: AgentStatus | undefined,
+  locate: (p: PaneRef) => Promise<Located> = ipc.chatLocate,
+  retryMs = 1500,
+) {
+  const key = pane ? paneKey(pane) : "";
+  const fallenBack = useApp((s) => (key ? s.lensOverride[key] === "terminal" : false));
+  useEffect(() => {
+    if (!pane || !fallenBack) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const probe = (retry: boolean) =>
+      locate(pane).then(
+        () => {
+          if (cancelled) return;
+          const { setLensOverride, setLensNote } = useApp.getState();
+          setLensNote(key, null);
+          setLensOverride(key, null);
+        },
+        () => {
+          if (!cancelled && retry) timer = setTimeout(() => void probe(false), retryMs);
+        },
+      );
+    void probe(true);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, status, fallenBack]);
+}

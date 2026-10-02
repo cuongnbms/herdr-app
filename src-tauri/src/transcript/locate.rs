@@ -110,25 +110,56 @@ async fn newest_in(t: &dyn Transport, dir: &str) -> AppResult<Vec<String>> {
         .collect())
 }
 
+/// `<id>.jsonl` in any Claude project directory under `home`.
+async fn claude_session_anywhere(
+    t: &dyn Transport,
+    home: &str,
+    id: &str,
+) -> AppResult<Option<String>> {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Ok(None);
+    }
+    let script = r#"for f in "$1"/.claude/projects/*/"$2".jsonl; do test -f "$f" && { echo "$f"; break; }; done"#;
+    let argv: Vec<String> = vec![
+        "sh".into(),
+        "-c".into(),
+        script.into(),
+        "sh".into(),
+        home.into(),
+        id.into(),
+    ];
+    let o = exec(t, &argv).await?;
+    Ok(o.stdout.lines().find(|l| !l.is_empty()).map(str::to_string))
+}
+
+/// Whether herdr detected a Claude agent but has not reported its session yet: herdr learns
+/// the id from Claude's SessionStart hook, shortly after the agent shows up in the pane.
+pub fn awaiting_session(agent_get: &Value) -> bool {
+    agent_get["agent"]["agent"] == "claude" && agent_get["agent"]["agent_session"].is_null()
+}
+
 pub async fn locate(
     t: &dyn Transport,
     info: &MachineInfo,
     agent_get: &Value,
     pane: &PaneView,
-    same_agent_same_cwd: usize,
 ) -> AppResult<Located> {
-    locate_in(t, info, agent_get, pane, None, same_agent_same_cwd).await
+    locate_in(t, info, agent_get, pane, None).await
 }
 
 /// Like `locate`, also trying the pane's `foreground_cwd`: an exact Claude session id in the
-/// `cwd` dir, then in the `foreground_cwd` dir, then the newest file in each in turn.
+/// `cwd` dir, then in the `foreground_cwd` dir, then in any project dir. Without a session from
+/// herdr, the newest file in each dir in turn, flagged as ambiguous.
 pub async fn locate_in(
     t: &dyn Transport,
     info: &MachineInfo,
     agent_get: &Value,
     pane: &PaneView,
     foreground_cwd: Option<&str>,
-    same_agent_same_cwd: usize,
 ) -> AppResult<Located> {
     let agent = agent_get["agent"]["agent"]
         .as_str()
@@ -180,12 +211,23 @@ pub async fn locate_in(
                     return Ok(found(path.clone(), false, vec![path]));
                 }
             }
+            // The agent may have started in another directory than the pane's cwd.
+            if let Some(path) = claude_session_anywhere(t, home, id).await? {
+                return Ok(found(path.clone(), false, vec![path]));
+            }
+            // Claude writes its transcript only after the first prompt: the newest file in the
+            // directory would be another pane's conversation.
+            return Err(AppError::new(
+                "not_found",
+                format!("no transcript yet for claude session {id}"),
+            ));
         }
     }
+    // No session from herdr: the newest file is a guess, whatever else runs in this directory.
     for dir in &dirs {
         let candidates = newest_in(t, dir).await?;
         if let Some(first) = candidates.first() {
-            return Ok(found(first.clone(), same_agent_same_cwd > 1, candidates));
+            return Ok(found(first.clone(), true, candidates));
         }
     }
     Err(AppError::new(
@@ -278,7 +320,6 @@ mod tests {
             &info,
             &json!({"agent":{"agent":"claude"}}),
             &pane,
-            2,
         )
         .await
         .unwrap();
@@ -290,10 +331,84 @@ mod tests {
             &info,
             &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"old"}}}),
             &pane,
-            2,
         )
         .await
         .unwrap();
         assert!(exact.path.ends_with("/old.jsonl") && !exact.ambiguous);
+    }
+
+    fn claude_fixture() -> (
+        tempfile::TempDir,
+        crate::transport::MachineInfo,
+        crate::view::PaneView,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir("/w/app"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("other-pane.jsonl"), "{}\n").unwrap();
+        let info = crate::transport::MachineInfo {
+            home: home.path().to_string_lossy().into(),
+            herdr: "herdr".into(),
+            pi_dir: "/none".into(),
+            version: "0.9.3".into(),
+            protocol: 22,
+        };
+        let pane = crate::view::PaneView {
+            pane_id: "w1:p1".into(),
+            terminal_id: "t".into(),
+            title: "x".into(),
+            cwd: Some("/w/app".into()),
+            agent: Some("claude".into()),
+            status: Default::default(),
+        };
+        (home, info, pane)
+    }
+
+    #[tokio::test]
+    async fn known_session_without_its_file_is_not_found_not_another_panes_transcript() {
+        let (_home, info, pane) = claude_fixture();
+        let err = locate(
+            &crate::transport::local::LocalTransport,
+            &info,
+            &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"fresh-id"}}}),
+            &pane,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "not_found");
+    }
+
+    #[tokio::test]
+    async fn known_session_is_found_in_another_project_dir() {
+        let (home, info, pane) = claude_fixture();
+        let elsewhere = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir("/w/app/.worktrees/x"));
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("sid.jsonl"), "{}\n").unwrap();
+        let got = locate(
+            &crate::transport::local::LocalTransport,
+            &info,
+            &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"sid"}}}),
+            &pane,
+        )
+        .await
+        .unwrap();
+        assert!(got.path.ends_with("/sid.jsonl"), "{}", got.path);
+        assert!(!got.ambiguous);
+    }
+
+    #[test]
+    fn awaits_a_claude_session_herdr_has_not_reported() {
+        assert!(awaiting_session(&json!({"agent":{"agent":"claude"}})));
+        assert!(!awaiting_session(
+            &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"sid"}}})
+        ));
+        assert!(!awaiting_session(&json!({"agent":{"agent":"pi"}})));
+        assert!(!awaiting_session(&Value::Null));
     }
 }

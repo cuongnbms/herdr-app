@@ -78,6 +78,8 @@ export const termClose = (key: AttachKey) => invoke<void>("term_close", { key })
 
 export const chatOpen = (p: PaneRef, path: string | null, events: Channel<ChatEvent>) =>
   invoke<Located>("chat_open", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, path, events });
+export const chatLocate = (p: PaneRef) =>
+  invoke<Located>("chat_locate", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const chatPage = (p: PaneRef, before: number) =>
   invoke<ChatItem[]>("chat_page", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, before });
 export const chatClose = (p: PaneRef) =>

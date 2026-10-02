@@ -47,6 +47,7 @@ pub fn run() {
             commands::term_release,
             commands::term_close,
             commands::chat_open,
+            commands::chat_locate,
             commands::chat_page,
             commands::chat_close,
             commands::system_fonts,
