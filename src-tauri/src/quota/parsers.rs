@@ -31,7 +31,7 @@ pub fn parse_date(v: &Value) -> Option<i64> {
         Value::Number(n) => n.as_f64().map(secs_or_ms),
         Value::String(s) => {
             let s = s.trim();
-            if let Ok(n) = s.parse::<f64>() {
+            if let Some(n) = s.parse::<f64>().ok().filter(|n| n.is_finite()) {
                 return Some(secs_or_ms(n));
             }
             chrono::DateTime::parse_from_rfc3339(s)
@@ -53,8 +53,18 @@ pub fn duration_label(secs: Option<u64>) -> String {
     }
 }
 
-fn window(label: &str, pct: f64, resets_at: Option<i64>, duration_secs: Option<u64>) -> QuotaWindow {
-    QuotaWindow { label: label.into(), used_percent: pct, resets_at, duration_secs }
+fn window(
+    label: &str,
+    pct: f64,
+    resets_at: Option<i64>,
+    duration_secs: Option<u64>,
+) -> QuotaWindow {
+    QuotaWindow {
+        label: label.into(),
+        used_percent: pct,
+        resets_at,
+        duration_secs,
+    }
 }
 
 pub fn parse(provider: Provider, body: &[u8]) -> Vec<QuotaWindow> {
@@ -86,7 +96,12 @@ fn claude(root: &Value) -> Vec<QuotaWindow> {
                         _ => return None,
                     };
                     let pct = percent(&l["percent"])?;
-                    Some(window(&label, pct, parse_date(&l["resets_at"]), Some(duration)))
+                    Some(window(
+                        &label,
+                        pct,
+                        parse_date(&l["resets_at"]),
+                        Some(duration),
+                    ))
                 })
                 .collect()
         })
@@ -99,7 +114,12 @@ fn claude(root: &Value) -> Vec<QuotaWindow> {
         .filter_map(|(key, label, duration)| {
             let w = &root[key];
             let pct = percent(&w["utilization"]).or_else(|| percent(&w["used_percentage"]))?;
-            Some(window(label, pct, parse_date(&w["resets_at"]), Some(duration)))
+            Some(window(
+                label,
+                pct,
+                parse_date(&w["resets_at"]),
+                Some(duration),
+            ))
         })
         .collect()
 }
@@ -139,7 +159,11 @@ fn opencode_go(root: &Value) -> Vec<QuotaWindow> {
 }
 
 fn grok(root: &Value) -> Option<QuotaWindow> {
-    let cfg = if root["config"].is_object() { &root["config"] } else { root };
+    let cfg = if root["config"].is_object() {
+        &root["config"]
+    } else {
+        root
+    };
     let period = &cfg["currentPeriod"];
     let has_period = period.is_object();
     let pct = match cfg.get("creditUsagePercent") {
@@ -169,7 +193,12 @@ mod tests {
     use serde_json::json;
 
     fn w(label: &str, pct: f64, resets_at: Option<i64>, duration_secs: Option<u64>) -> QuotaWindow {
-        QuotaWindow { label: label.into(), used_percent: pct, resets_at, duration_secs }
+        QuotaWindow {
+            label: label.into(),
+            used_percent: pct,
+            resets_at,
+            duration_secs,
+        }
     }
     fn win(p: Provider, s: &str) -> Vec<QuotaWindow> {
         parse(p, s.as_bytes())
@@ -179,18 +208,33 @@ mod tests {
 
     #[test]
     fn dates_iso_with_six_fraction_digits_and_offset() {
-        assert_eq!(parse_date(&json!("2026-09-17T14:00:00.551304+00:00")), Some(1_789_653_600_551));
+        assert_eq!(
+            parse_date(&json!("2026-09-17T14:00:00.551304+00:00")),
+            Some(1_789_653_600_551)
+        );
     }
     #[test]
     fn dates_iso_millis_zulu_no_fraction_and_non_utc() {
-        assert_eq!(parse_date(&json!("2026-09-17T17:23:46.966Z")), Some(1_789_665_826_966));
-        assert_eq!(parse_date(&json!("2026-09-22T02:00:00+00:00")), Some(1_790_042_400_000));
-        assert_eq!(parse_date(&json!("2026-09-17T21:00:00+07:00")), Some(1_789_653_600_000));
+        assert_eq!(
+            parse_date(&json!("2026-09-17T17:23:46.966Z")),
+            Some(1_789_665_826_966)
+        );
+        assert_eq!(
+            parse_date(&json!("2026-09-22T02:00:00+00:00")),
+            Some(1_790_042_400_000)
+        );
+        assert_eq!(
+            parse_date(&json!("2026-09-17T21:00:00+07:00")),
+            Some(1_789_653_600_000)
+        );
     }
     #[test]
     fn dates_epoch_seconds_millis_and_numeric_strings() {
         assert_eq!(parse_date(&json!(1_790_250_529)), Some(1_790_250_529_000));
-        assert_eq!(parse_date(&json!(1_790_250_529_000_i64)), Some(1_790_250_529_000));
+        assert_eq!(
+            parse_date(&json!(1_790_250_529_000_i64)),
+            Some(1_790_250_529_000)
+        );
         assert_eq!(parse_date(&json!("1790250529")), Some(1_790_250_529_000));
     }
     #[test]
@@ -199,6 +243,8 @@ mod tests {
         assert_eq!(parse_date(&json!("")), None);
         assert_eq!(parse_date(&json!(null)), None);
         assert_eq!(parse_date(&json!(true)), None);
+        assert_eq!(parse_date(&json!("NaN")), None);
+        assert_eq!(parse_date(&json!("inf")), None);
     }
 
     // Claude
@@ -216,11 +262,14 @@ mod tests {
 
     #[test]
     fn claude_reads_limits_including_per_model_weeks() {
-        assert_eq!(win(Provider::Claude, CLAUDE), vec![
-            w("5h", 19.0, Some(1_789_653_600_000), Some(FIVE_HOURS)),
-            w("week", 28.0, Some(1_790_042_400_000), Some(WEEK)),
-            w("week · Fable", 10.0, Some(1_790_042_399_000), Some(WEEK)),
-        ]);
+        assert_eq!(
+            win(Provider::Claude, CLAUDE),
+            vec![
+                w("5h", 19.0, Some(1_789_653_600_000), Some(FIVE_HOURS)),
+                w("week", 28.0, Some(1_790_042_400_000), Some(WEEK)),
+                w("week · Fable", 10.0, Some(1_790_042_399_000), Some(WEEK)),
+            ]
+        );
     }
     #[test]
     fn claude_skips_unknown_kinds_and_scoped_without_model_name() {
@@ -228,16 +277,22 @@ mod tests {
           {"kind":"session","percent":5,"resets_at":null},
           {"kind":"daily_mystery","percent":50,"resets_at":null},
           {"kind":"weekly_scoped","percent":7,"resets_at":null,"scope":{"model":null}}]}"#;
-        assert_eq!(win(Provider::Claude, s), vec![w("5h", 5.0, None, Some(FIVE_HOURS))]);
+        assert_eq!(
+            win(Provider::Claude, s),
+            vec![w("5h", 5.0, None, Some(FIVE_HOURS))]
+        );
     }
     #[test]
     fn claude_falls_back_to_older_shape() {
         let s = r#"{"five_hour":{"utilization":16.0,"resets_at":"2026-09-17T14:00:00.996301+00:00"},
                     "seven_day":{"used_percentage":28.0,"resets_at":"2026-09-22T02:00:00.996324+00:00"}}"#;
-        assert_eq!(win(Provider::Claude, s), vec![
-            w("5h", 16.0, Some(1_789_653_600_996), Some(FIVE_HOURS)),
-            w("week", 28.0, Some(1_790_042_400_996), Some(WEEK)),
-        ]);
+        assert_eq!(
+            win(Provider::Claude, s),
+            vec![
+                w("5h", 16.0, Some(1_789_653_600_996), Some(FIVE_HOURS)),
+                w("week", 28.0, Some(1_790_042_400_996), Some(WEEK)),
+            ]
+        );
     }
 
     // Codex
@@ -249,17 +304,23 @@ mod tests {
           "secondary_window":null},
           "additional_rate_limits":[{"limit_name":"GPT-5.3-Codex-Spark","rate_limit":{
           "primary_window":{"used_percent":40,"limit_window_seconds":18000,"reset_at":1789665826}}}]}"#;
-        assert_eq!(win(Provider::Codex, s), vec![w("week", 0.0, Some(1_790_250_529_000), Some(WEEK))]);
+        assert_eq!(
+            win(Provider::Codex, s),
+            vec![w("week", 0.0, Some(1_790_250_529_000), Some(WEEK))]
+        );
     }
     #[test]
     fn codex_reads_both_windows() {
         let s = r#"{"rate_limit":{
           "primary_window":{"used_percent":42.5,"limit_window_seconds":18000,"reset_at":1789665826},
           "secondary_window":{"used_percent":12,"limit_window_seconds":604800,"reset_at":1790250529}}}"#;
-        assert_eq!(win(Provider::Codex, s), vec![
-            w("5h", 42.5, Some(1_789_665_826_000), Some(FIVE_HOURS)),
-            w("week", 12.0, Some(1_790_250_529_000), Some(WEEK)),
-        ]);
+        assert_eq!(
+            win(Provider::Codex, s),
+            vec![
+                w("5h", 42.5, Some(1_789_665_826_000), Some(FIVE_HOURS)),
+                w("week", 12.0, Some(1_790_250_529_000), Some(WEEK)),
+            ]
+        );
     }
     #[test]
     fn codex_keeps_any_window_length() {
@@ -267,8 +328,14 @@ mod tests {
           "primary_window":{"used_percent":1,"limit_window_seconds":10800,"reset_at":1789665826},
           "secondary_window":{"used_percent":2,"reset_at":1790250529}}}"#;
         let got = win(Provider::Codex, s);
-        assert_eq!(got.iter().map(|w| w.duration_secs).collect::<Vec<_>>(), vec![Some(10_800), None]);
-        assert_eq!(got.iter().map(|w| w.label.as_str()).collect::<Vec<_>>(), vec!["3h", "limit"]);
+        assert_eq!(
+            got.iter().map(|w| w.duration_secs).collect::<Vec<_>>(),
+            vec![Some(10_800), None]
+        );
+        assert_eq!(
+            got.iter().map(|w| w.label.as_str()).collect::<Vec<_>>(),
+            vec!["3h", "limit"]
+        );
     }
     #[test]
     fn duration_labels() {
@@ -287,11 +354,14 @@ mod tests {
         let s = r#"{"usage":{"rolling":{"status":"ok","percent":0,"resetsAt":"2026-09-17T17:23:46.000Z"},
                   "weekly":{"status":"ok","percent":19,"resetsAt":"2026-09-21T00:00:00.000Z"},
                   "monthly":{"status":"rate-limited","percent":100,"resetsAt":"2026-10-17T01:46:02.000Z"}}}"#;
-        assert_eq!(win(Provider::OpencodeGo, s), vec![
-            w("5h", 0.0, Some(1_789_665_826_000), Some(FIVE_HOURS)),
-            w("week", 19.0, Some(1_789_948_800_000), Some(WEEK)),
-            w("month", 100.0, Some(1_792_201_562_000), None),
-        ]);
+        assert_eq!(
+            win(Provider::OpencodeGo, s),
+            vec![
+                w("5h", 0.0, Some(1_789_665_826_000), Some(FIVE_HOURS)),
+                w("week", 19.0, Some(1_789_948_800_000), Some(WEEK)),
+                w("month", 100.0, Some(1_792_201_562_000), None),
+            ]
+        );
     }
 
     // Grok
@@ -302,24 +372,35 @@ mod tests {
           "creditUsagePercent":100.0,"onDemandCap":{"val":0},"isUnifiedBillingUser":true,
           "billingPeriodStart":"2026-09-13T01:30:30.900554+00:00","billingPeriodEnd":"2026-09-20T01:30:30.900554+00:00"}}"#;
         // Length from the period's own start to end, rounded to whole seconds.
-        assert_eq!(win(Provider::Grok, s), vec![w("week", 100.0, Some(1_789_867_830_000), Some(604_799))]);
+        assert_eq!(
+            win(Provider::Grok, s),
+            vec![w("week", 100.0, Some(1_789_867_830_000), Some(604_799))]
+        );
     }
     #[test]
     fn grok_without_percent_but_with_period_is_zero() {
         let s = r#"{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY","end":"2026-09-20T01:30:30+00:00"}}}"#;
-        assert_eq!(win(Provider::Grok, s), vec![w("month", 0.0, Some(1_789_867_830_000), None)]);
+        assert_eq!(
+            win(Provider::Grok, s),
+            vec![w("month", 0.0, Some(1_789_867_830_000), None)]
+        );
     }
     #[test]
     fn grok_with_period_but_malformed_percent_has_no_window() {
         for bad in ["true", "null", "\"100\""] {
-            let s = format!(r#"{{"config":{{"currentPeriod":{{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-09-20T01:30:30+00:00"}},"creditUsagePercent":{bad}}}}}"#);
+            let s = format!(
+                r#"{{"config":{{"currentPeriod":{{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-09-20T01:30:30+00:00"}},"creditUsagePercent":{bad}}}}}"#
+            );
             assert_eq!(win(Provider::Grok, &s), vec![], "{bad}");
         }
     }
     #[test]
     fn grok_falls_back_to_billing_period() {
         assert_eq!(
-            win(Provider::Grok, r#"{"creditUsagePercent":3,"billingPeriodEnd":"2026-09-20T01:30:30Z"}"#),
+            win(
+                Provider::Grok,
+                r#"{"creditUsagePercent":3,"billingPeriodEnd":"2026-09-20T01:30:30Z"}"#
+            ),
             vec![w("period", 3.0, Some(1_789_867_830_000), None)]
         );
         let s = r#"{"creditUsagePercent":3,"billingPeriodStart":"2026-09-13T01:30:30Z","billingPeriodEnd":"2026-09-20T01:30:30Z"}"#;
@@ -327,7 +408,10 @@ mod tests {
     }
     #[test]
     fn grok_with_neither_percent_nor_period_has_no_window() {
-        assert_eq!(win(Provider::Grok, r#"{"config":{"prepaidBalance":{"val":0}}}"#), vec![]);
+        assert_eq!(
+            win(Provider::Grok, r#"{"config":{"prepaidBalance":{"val":0}}}"#),
+            vec![]
+        );
     }
 
     // Shared
@@ -337,10 +421,13 @@ mod tests {
         let s = r#"{"usage":{"rolling":{"percent":130,"resetsAt":null},
                   "weekly":{"percent":-4,"resetsAt":null},
                   "monthly":{"percent":true,"resetsAt":null}}}"#;
-        assert_eq!(win(Provider::OpencodeGo, s), vec![
-            w("5h", 100.0, None, Some(FIVE_HOURS)),
-            w("week", 0.0, None, Some(WEEK)),
-        ]);
+        assert_eq!(
+            win(Provider::OpencodeGo, s),
+            vec![
+                w("5h", 100.0, None, Some(FIVE_HOURS)),
+                w("week", 0.0, None, Some(WEEK)),
+            ]
+        );
     }
     #[test]
     fn unreadable_bodies_have_no_windows() {

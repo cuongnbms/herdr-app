@@ -33,6 +33,17 @@ describe("AgentDashboard", () => {
     expect(within(column(/needs you/i)).getByText("None")).toBeTruthy();
   });
 
+  it("keeps the Quota column when filters hide every agent", () => {
+    render(<AgentDashboard />);
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }));
+    // Only devtuf machines AND only pi agents: pi runs on local only, so nothing matches.
+    fireEvent.click(screen.getByRole("checkbox", { name: /devtuf/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^pi/ }));
+    expect(screen.getByText("0 of 4 shown")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Quota" })).toBeTruthy();
+    expect(within(column(/needs you/i)).getByText("None")).toBeTruthy();
+  });
+
   it("sorts agents into Needs you, Working, Done and Idle with counts", () => {
     render(<AgentDashboard />);
     expect(screen.getByText("4 total")).toBeTruthy();

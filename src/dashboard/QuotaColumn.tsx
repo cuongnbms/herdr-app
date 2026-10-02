@@ -7,7 +7,7 @@ import { WARN_PERCENT, elapsedFraction, percent, tone, untilReset, updatedAgo } 
 import { useQuota } from "../quota/store";
 import { RefreshIcon } from "../ui/icons";
 
-function Window({ w, now }: { w: QuotaWindow; now: number }) {
+function WindowRow({ w, now }: { w: QuotaWindow; now: number }) {
   const frac = elapsedFraction(w.resetsAt, w.durationSecs, now);
   const reset = untilReset(w.resetsAt, now);
   const pct = Math.min(100, Math.max(0, w.usedPercent));
@@ -33,7 +33,7 @@ function Body({ entry, now }: { entry: QuotaEntry; now: number }) {
     case "notSignedIn":
       return <p className="dash-quota-note">not signed in</p>;
     case "ok":
-      return <>{entry.report.windows.map((w) => <Window key={w.label} w={w} now={now} />)}</>;
+      return <>{entry.report.windows.map((w, i) => <WindowRow key={`${i}-${w.label}`} w={w} now={now} />)}</>;
     case "problem":
       return (
         <>
@@ -42,7 +42,7 @@ function Body({ entry, now }: { entry: QuotaEntry; now: number }) {
           </p>
           {entry.last && (
             <div className="dash-quota-stale">
-              {entry.last.windows.map((w) => <Window key={w.label} w={w} now={now} />)}
+              {entry.last.windows.map((w, i) => <WindowRow key={`${i}-${w.label}`} w={w} now={now} />)}
             </div>
           )}
         </>
