@@ -1,5 +1,6 @@
 //! Transcript discovery and streaming: find an agent's JSONL transcript on a Machine and
 //! tail it into chat items.
+pub mod claude;
 pub mod locate;
 pub mod tail;
 
@@ -43,8 +44,11 @@ pub trait Parser: Send {
 }
 
 /// The transcript parser for an agent; `claude` lands in Task 15, `pi` in Task 16.
-pub fn parser_for(_agent: &str) -> Option<Box<dyn Parser>> {
-    None
+pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
+    match agent {
+        "claude" => Some(Box::new(claude::ClaudeParser::default())),
+        _ => None,
+    }
 }
 
 /// One live transcript tail per Pane.
