@@ -10,7 +10,7 @@ import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { Banner } from "./Banner";
 import { initialLensState, lensReducer } from "./lensState";
-import { dispose, getOrCreate } from "./termCache";
+import { claim, disposeIf, getOrCreate } from "./termCache";
 
 interface Props {
   pane: PaneRef;
@@ -81,6 +81,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
       // Data and detach handling deliberately ignore `live`: the cached xterm must keep
       // streaming (and acking) while hidden, and a hidden pane must still be disposed on detach.
       let closed = false;
+      const token = claim(cacheKey);
       const data = new Channel<ArrayBuffer>();
       data.onmessage = (buf) => {
         const bytes = toBytes(buf);
@@ -91,7 +92,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
       events.onmessage = (ev) => {
         if (ev.type === "detached") {
           closed = true;
-          dispose(cacheKey);
+          disposeIf(cacheKey, token);
         }
         if (live) dispatch({ type: "event", event: ev, machine: machineRef.current });
       };
@@ -146,7 +147,14 @@ export function TerminalLens({ pane, terminalId }: Props) {
 
   return (
     <div className="term-lens">
-      {lens.banner && <Banner kind={lens.banner.kind} code={lens.banner.code} onTakeOver={() => takeoverRef.current?.()} />}
+      {lens.banner && (
+        <Banner
+          kind={lens.banner.kind}
+          code={lens.banner.code}
+          onTakeOver={() => takeoverRef.current?.()}
+          onReattach={() => dispatch({ type: "reattach" })}
+        />
+      )}
       <div className="term-host" ref={containerRef} />
     </div>
   );

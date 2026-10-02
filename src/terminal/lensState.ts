@@ -14,7 +14,9 @@ export interface LensState {
 export type LensAction =
   | { type: "event"; event: AttachEvent; machine: MachineState | undefined }
   | { type: "open_failed"; machine: MachineState | undefined }
-  | { type: "machine"; machine: MachineState | undefined };
+  | { type: "machine"; machine: MachineState | undefined }
+  /** The user asked to reattach now (the Disconnected banner's button). */
+  | { type: "reattach" };
 
 export const initialLensState: LensState = { banner: null, pending: false, sawDown: false, generation: 0 };
 
@@ -47,6 +49,8 @@ export function lensReducer(s: LensState, a: LensAction): LensState {
       if (!s.pending) return s;
       if (a.machine !== "connected") return s.sawDown ? s : { ...s, sawDown: true };
       if (!s.sawDown) return s;
+      return { banner: null, pending: false, sawDown: false, generation: s.generation + 1 };
+    case "reattach":
       return { banner: null, pending: false, sawDown: false, generation: s.generation + 1 };
   }
 }

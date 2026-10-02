@@ -4,9 +4,10 @@ interface Props {
   kind: BannerKind;
   code?: number | null;
   onTakeOver: () => void;
+  onReattach: () => void;
 }
 
-export function Banner({ kind, code, onTakeOver }: Props) {
+export function Banner({ kind, code, onTakeOver, onReattach }: Props) {
   if (kind === "held") {
     return (
       <div className="term-banner" role="status">
@@ -25,6 +26,7 @@ export function Banner({ kind, code, onTakeOver }: Props) {
   return (
     <div className="term-banner" role="status">
       <span>Disconnected. Waiting for the machine to reconnect…</span>
+      <button onClick={onReattach}>Reattach</button>
     </div>
   );
 }

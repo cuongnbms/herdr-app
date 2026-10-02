@@ -28,4 +28,8 @@ describe("lensReducer", () => {
     const s = r(init, { type: "open_failed", machine: "connected" });
     expect(s).toMatchObject({ pending: true, sawDown: false });
   });
+  it("a manual reattach re-runs the attach at once", () => {
+    const s = r(r(init, { type: "event", event: { type: "detached" }, machine: "connected" }), { type: "reattach" });
+    expect(s).toMatchObject({ generation: 1, pending: false, sawDown: false, banner: null });
+  });
 });
