@@ -10,7 +10,7 @@ import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { Banner } from "./Banner";
 import { watchTermFont } from "../settings/store";
-import { TERM_THEME } from "./theme";
+import { watchTermTheme } from "../settings/theme";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 
@@ -26,12 +26,20 @@ function createEntry() {
     // xterm scrolls in whole rows; animate through them instead of jumping.
     smoothScrollDuration: 100,
     allowProposedApi: true,
-    theme: TERM_THEME,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.attachCustomKeyEventHandler((e) => !e.metaKey);
-  return { term, fit, cleanup: watchTermFont(term, fit) };
+  const unwatchFont = watchTermFont(term, fit);
+  const unwatchTheme = watchTermTheme(term);
+  return {
+    term,
+    fit,
+    cleanup: () => {
+      unwatchFont();
+      unwatchTheme();
+    },
+  };
 }
 
 function toBytes(buf: unknown): Uint8Array | null {

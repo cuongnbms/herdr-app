@@ -24,3 +24,28 @@ export const TERM_THEME: ITheme = {
   brightCyan: "#a3e0ff",
   brightWhite: "#f2f3f6",
 };
+
+/** Light variant; `background` matches `--surface-term` under `[data-theme="light"]`. */
+export const TERM_THEME_LIGHT: ITheme = {
+  background: "#fbfbfc",
+  foreground: "#24262b",
+  cursor: "#24262b",
+  cursorAccent: "#fbfbfc",
+  selectionBackground: "rgba(82, 96, 232, 0.22)",
+  black: "#24262b",
+  red: "#c8352e",
+  green: "#2f7d32",
+  yellow: "#9a6700",
+  blue: "#2a5fc9",
+  magenta: "#8a3fd1",
+  cyan: "#0b7a8f",
+  white: "#d4d6dc",
+  brightBlack: "#6e717c",
+  brightRed: "#e0453d",
+  brightGreen: "#3a9a3e",
+  brightYellow: "#b57d00",
+  brightBlue: "#3f74e0",
+  brightMagenta: "#a058e6",
+  brightCyan: "#1495ad",
+  brightWhite: "#f2f3f6",
+};
