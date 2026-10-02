@@ -50,11 +50,12 @@ impl Parser for ClaudeParser {
             }
         };
         let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
-        if !matches!(kind, "user" | "assistant")
-            || flag(&v, "isMeta")
-            || flag(&v, "isSidechain")
-            || flag(&v, "isCompactSummary")
-        {
+        if !matches!(kind, "user" | "assistant") {
+            tracing::trace!(record_type = kind, "skipping transcript record: unknown type");
+            return ParserOutput::None;
+        }
+        if let Some(reason) = ["isMeta", "isSidechain", "isCompactSummary"].into_iter().find(|k| flag(&v, k)) {
+            tracing::trace!(record_type = kind, reason, "skipping transcript record");
             return ParserOutput::None;
         }
         let content = v.get("message").and_then(|m| m.get("content"));
