@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { showToast } from "../ui/Toast";
-import type { AttachEvent, ChatEvent, ChatItem, Located, MachineView, PaneRef, PaneStatusEvent } from "./types";
+import type { AttachEvent, ChatEvent, ChatItem, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
@@ -87,3 +87,4 @@ export const chatPage = (p: PaneRef, before: number) =>
   invoke<ChatItem[]>("chat_page", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, before });
 export const chatClose = (p: PaneRef) =>
   invoke<void>("chat_close", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
+export const quotaFetch = (provider: QuotaProvider) => invoke<QuotaOutcome>("quota_fetch", { provider });

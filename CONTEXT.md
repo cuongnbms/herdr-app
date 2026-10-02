@@ -44,6 +44,20 @@ _Avoid_: mode, view
 The Agent's own conversation file (`.jsonl`) that the Chat lens reads.
 _Avoid_: history, log
 
+**Provider**:
+The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
+_Avoid_: vendor, model
+
+**Quota**:
+How much of a Provider account's usage allowance is used, read on this Mac only. It belongs to the Provider, never to a Machine or an Agent.
+_Avoid_: usage, limit, credits
+
+**Window**:
+One rolling or calendar period of a Quota (`5h`, `week`, `month`) with a used percent and a Reset.
+
+**Reset**:
+The moment a Window's used percent goes back to zero.
+
 ## Relationships
 
 - A **Machine** has zero or more **Sessions**
@@ -51,6 +65,7 @@ _Avoid_: history, log
 - Each **Pane** has exactly one **Terminal**
 - A **Pane** has at most one **Agent**; an **Agent** has at most one **Transcript** the app can find
 - A **Terminal** has at most one **Attach** at a time
+- A **Provider** has one **Quota**; a **Quota** has one or more **Windows**, each with at most one **Reset**
 
 ## Example dialogue
 

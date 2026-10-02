@@ -102,3 +102,18 @@ export interface Located {
   ambiguous: boolean;
   candidates: string[];
 }
+
+export type QuotaProvider = "claude" | "codex" | "opencodeGo" | "grok";
+export interface QuotaWindow {
+  label: string;
+  usedPercent: number;
+  resetsAt: number | null;
+  durationSecs: number | null;
+}
+export type QuotaOutcome =
+  | { kind: "ok"; windows: QuotaWindow[]; fetchedAt: number }
+  | { kind: "notSignedIn" }
+  | { kind: "signInExpired" }
+  | { kind: "noSubscription" }
+  | { kind: "rateLimited"; until: number }
+  | { kind: "failed"; reason: string };

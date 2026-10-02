@@ -4,6 +4,7 @@ pub mod error;
 pub mod fonts;
 pub mod herdr;
 pub mod machines;
+pub mod quota;
 pub mod sshconfig;
 pub mod transcript;
 pub mod transport;
@@ -51,6 +52,7 @@ pub fn run() {
             commands::chat_page,
             commands::chat_close,
             commands::system_fonts,
+            commands::quota_fetch,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
