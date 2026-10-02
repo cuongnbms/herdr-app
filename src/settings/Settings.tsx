@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
+import { THEME_PREFS, useTheme } from "./theme";
 
 function Stepper({
   label,
@@ -54,6 +55,33 @@ function GeneralSettings() {
   );
 }
 
+function AppearanceSettings() {
+  const pref = useTheme((s) => s.pref);
+  const setPref = useTheme((s) => s.setPref);
+  const i = THEME_PREFS.findIndex((t) => t.id === pref);
+  return (
+    <>
+      <div className="setting-row">
+        <span id="theme-label">Theme</span>
+        <div
+          className="seg seg-n"
+          role="group"
+          aria-labelledby="theme-label"
+          style={{ "--n": THEME_PREFS.length, "--i": i } as CSSProperties}
+        >
+          <span className="seg-thumb" />
+          {THEME_PREFS.map((t) => (
+            <button key={t.id} aria-pressed={t.id === pref} onClick={() => setPref(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="note">System follows the macOS appearance.</p>
+    </>
+  );
+}
+
 function FontSettings() {
   const s = useSettings();
   const isDefault =
@@ -78,6 +106,7 @@ function FontSettings() {
 /** Add a section here for each new group of settings. */
 const SECTIONS = [
   { id: "general", label: "General", Body: GeneralSettings },
+  { id: "appearance", label: "Appearance", Body: AppearanceSettings },
   { id: "fonts", label: "Fonts", Body: FontSettings },
 ] as const;
 

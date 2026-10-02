@@ -6,6 +6,7 @@ import { notifyPaneStatus } from "./notify";
 import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
 import { applyChatFont, useSettings } from "./settings/store";
+import { applyTheme, useTheme } from "./settings/theme";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { AgentList } from "./agents/AgentList";
@@ -89,7 +90,11 @@ export default function App() {
   const dashboardOpen = useApp((s) => s.dashboardOpen);
   const chatFontSize = useSettings((s) => s.chatFontSize);
 
+  const theme = useTheme((s) => s.theme);
+  const themePref = useTheme((s) => s.pref);
+
   useEffect(() => applyChatFont(chatFontSize), [chatFontSize]);
+  useEffect(() => applyTheme(theme, themePref), [theme, themePref]);
 
   useEffect(() => {
     let cancelled = false;

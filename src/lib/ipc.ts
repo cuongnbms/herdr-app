@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { showToast } from "../ui/Toast";
 import type { AttachEvent, ChatEvent, ChatItem, Located, MachineView, PaneRef, PaneStatusEvent } from "./types";
 
@@ -8,6 +9,8 @@ export const machineConnect = (id: string) => invoke<void>("machine_connect", { 
 export const machineDisconnect = (id: string) => invoke<void>("machine_disconnect", { id });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
 export const systemFonts = () => invoke<string[]>("system_fonts");
+/** Native appearance (vibrancy, traffic lights); `null` follows the system. */
+export const setWindowTheme = (theme: "light" | "dark" | null) => getCurrentWindow().setTheme(theme);
 export const machineAdd = (sshTarget: string, label: string | null, herdrPath: string | null) =>
   invoke<MachineView>("machine_add", { sshTarget, label, herdrPath });
 export const machineRemove = (id: string) => invoke<void>("machine_remove", { id });

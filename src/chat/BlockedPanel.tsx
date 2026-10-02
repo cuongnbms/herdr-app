@@ -7,7 +7,7 @@ import { herdrCall } from "../lib/ipc";
 import { paneKey, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { watchTermFont } from "../settings/store";
-import { TERM_THEME } from "../terminal/theme";
+import { watchTermTheme } from "../settings/theme";
 
 const QUICK: { label: string; key: string }[] = [
   { label: "1", key: "1" },
@@ -37,11 +37,11 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
       disableStdin: true,
       cursorBlink: false,
       scrollback: 200,
-      theme: TERM_THEME,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     const unwatchFont = watchTermFont(term, fit, -1);
+    const unwatchTheme = watchTermTheme(term);
     term.open(host);
     termRef.current = term;
     try {
@@ -52,6 +52,7 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
     return () => {
       termRef.current = null;
       unwatchFont();
+      unwatchTheme();
       term.dispose();
     };
   }, []);

@@ -6,6 +6,7 @@ vi.mock("../lib/ipc", () => ({
 }));
 import { Settings } from "./Settings";
 import { DEFAULTS, loadFonts, useSettings } from "./store";
+import { useTheme } from "./theme";
 
 beforeEach(() => {
   localStorage.clear();
@@ -19,6 +20,18 @@ function openSettings() {
 }
 
 describe("Settings dialog", () => {
+  it("switches the theme from the Appearance section", () => {
+    useTheme.setState({ pref: "dark", theme: "dark" });
+    render(<Settings />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Appearance" }));
+    expect(screen.getByRole("button", { name: "Dark" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Light" }));
+    expect(useTheme.getState()).toMatchObject({ pref: "light", theme: "light" });
+    expect(screen.getByRole("button", { name: "Light" }).getAttribute("aria-pressed")).toBe("true");
+    expect(JSON.parse(localStorage.getItem("herdr-app:settings")!).theme).toBe("light");
+  });
+
   it("opens as a dialog on the General section and switches sections", () => {
     render(<Settings />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
