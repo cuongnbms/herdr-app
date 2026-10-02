@@ -104,7 +104,9 @@ pub struct AgentStatusChanged {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> Snapshot { serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap() }
+    fn fixture() -> Snapshot {
+        serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap()
+    }
     #[test]
     fn parses_snapshot_and_unknown_status() {
         let s = fixture();

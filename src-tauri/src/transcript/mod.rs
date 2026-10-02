@@ -18,12 +18,29 @@ pub use tail::{spawn_tail, TailHandle};
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChatItem {
-    User { text: String },
-    AssistantText { markdown: String },
-    Thinking { text: String },
-    ToolCall { id: String, name: String, input_summary: String, input: Value },
-    ToolResult { call_id: String, output: String, is_error: bool },
-    System { text: String },
+    User {
+        text: String,
+    },
+    AssistantText {
+        markdown: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input_summary: String,
+        input: Value,
+    },
+    ToolResult {
+        call_id: String,
+        output: String,
+        is_error: bool,
+    },
+    System {
+        text: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -87,14 +104,22 @@ impl ChatManager {
     }
 
     pub fn page(&self, pane: &PaneRef, before: usize, limit: usize) -> Option<Vec<ChatItem>> {
-        self.handles.lock().unwrap().get(pane).map(|h| h.page(before, limit))
+        self.handles
+            .lock()
+            .unwrap()
+            .get(pane)
+            .map(|h| h.page(before, limit))
     }
 
     /// End every tail of the Machine (it was disconnected or removed).
     pub fn close_machine(&self, machine_id: &str) {
         let gone: Vec<TailHandle> = {
             let mut map = self.handles.lock().unwrap();
-            let keys: Vec<PaneRef> = map.keys().filter(|p| p.machine_id == machine_id).cloned().collect();
+            let keys: Vec<PaneRef> = map
+                .keys()
+                .filter(|p| p.machine_id == machine_id)
+                .cloned()
+                .collect();
             keys.into_iter().filter_map(|k| map.remove(&k)).collect()
         };
         drop(gone);
@@ -120,9 +145,18 @@ mod tests {
         std::fs::write(&p, "").unwrap();
         let path: String = p.to_string_lossy().into();
         let chats = ChatManager::default();
-        let pane = |m: &str| PaneRef { machine_id: m.into(), session: "default".into(), pane_id: "w1:p1".into() };
+        let pane = |m: &str| PaneRef {
+            machine_id: m.into(),
+            session: "default".into(),
+            pane_id: "w1:p1".into(),
+        };
         for m in ["a", "b"] {
-            let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), path.clone(), Box::new(NoItems), Arc::new(|_| {}));
+            let h = spawn_tail(
+                Arc::new(crate::transport::local::LocalTransport),
+                path.clone(),
+                Box::new(NoItems),
+                Arc::new(|_| {}),
+            );
             chats.insert(pane(m), h);
         }
         chats.close_machine("a");

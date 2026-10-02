@@ -104,7 +104,9 @@ fn init_logging(dir: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error
         .max_log_files(5)
         .build(&dir)?;
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .with_writer(appender)
         .with_ansi(false)
         .try_init()

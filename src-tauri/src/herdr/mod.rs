@@ -1,7 +1,7 @@
 pub mod codec;
-pub mod model;
 #[cfg(test)]
 pub mod fake;
+pub mod model;
 pub mod rpc;
 pub mod types;
 pub mod watcher;

@@ -45,7 +45,12 @@ pub trait Sink: Send + Sync {
 }
 
 /// `herdr [--session S] terminal attach [--takeover] <terminal_id>`.
-pub fn attach_argv(info: &MachineInfo, session: &str, terminal_id: &str, takeover: bool) -> Vec<String> {
+pub fn attach_argv(
+    info: &MachineInfo,
+    session: &str,
+    terminal_id: &str,
+    takeover: bool,
+) -> Vec<String> {
     let mut args = vec!["terminal", "attach"];
     if takeover {
         args.push("--takeover");
@@ -81,7 +86,10 @@ impl Entry {
     }
     /// Emit `Attached` once, unless the attach was refused or has ended.
     fn emit_attached(&self) {
-        if !self.held.load(Ordering::SeqCst) && !self.closed.load(Ordering::SeqCst) && !self.attached.swap(true, Ordering::SeqCst) {
+        if !self.held.load(Ordering::SeqCst)
+            && !self.closed.load(Ordering::SeqCst)
+            && !self.attached.swap(true, Ordering::SeqCst)
+        {
             self.sink().event(AttachEvent::Attached);
         }
     }
@@ -99,7 +107,10 @@ pub struct AttachManager {
 
 impl AttachManager {
     pub fn new(idle: Duration) -> Arc<Self> {
-        Arc::new(Self { idle, entries: Arc::new(Mutex::new(HashMap::new())) })
+        Arc::new(Self {
+            idle,
+            entries: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     fn get(&self, key: &AttachKey) -> AppResult<Arc<Entry>> {
@@ -108,11 +119,23 @@ impl AttachManager {
             .unwrap()
             .get(key)
             .cloned()
-            .ok_or_else(|| AppError::new("not_found", format!("terminal {} is not attached", key.terminal_id)))
+            .ok_or_else(|| {
+                AppError::new(
+                    "not_found",
+                    format!("terminal {} is not attached", key.terminal_id),
+                )
+            })
     }
 
     /// Spawn `argv` verbatim on a PTY, or reuse the live attach for `key`.
-    pub fn open(&self, key: AttachKey, argv: Vec<String>, cols: u16, rows: u16, sink: Arc<dyn Sink>) -> AppResult<()> {
+    pub fn open(
+        &self,
+        key: AttachKey,
+        argv: Vec<String>,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn Sink>,
+    ) -> AppResult<()> {
         // Held across check + spawn + insert so concurrent opens of one key cannot both spawn.
         let mut map = self.entries.lock().unwrap();
         if let Some(e) = map.get(&key).cloned() {
@@ -127,7 +150,12 @@ impl AttachManager {
                 *e.unacked.lock().unwrap() = 0;
                 e.resume.notify_all();
                 if let Some(m) = e.master.lock().unwrap().as_ref() {
-                    let _ = m.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                    let _ = m.resize(PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
                 }
                 // Not yet attached: the settle thread will announce it to the new sink.
                 if e.attached.load(Ordering::SeqCst) {
@@ -136,14 +164,24 @@ impl AttachManager {
                 return Ok(());
             }
         }
-        let program = argv.first().ok_or_else(|| AppError::new("invalid", "empty command"))?;
+        let program = argv
+            .first()
+            .ok_or_else(|| AppError::new("invalid", "empty command"))?;
         let pair = native_pty_system()
-            .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| AppError::new("io", e.to_string()))?;
         let mut cmd = CommandBuilder::new(program);
         cmd.args(&argv[1..]);
         cmd.env("TERM", "xterm-256color");
-        let mut child = pair.slave.spawn_command(cmd).map_err(|e| AppError::new("io", e.to_string()))?;
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| AppError::new("io", e.to_string()))?;
         drop(pair.slave);
         let io = pair
             .master
@@ -224,9 +262,16 @@ impl AttachManager {
     pub fn resize(&self, key: &AttachKey, cols: u16, rows: u16) -> AppResult<()> {
         let e = self.get(key)?;
         let master = e.master.lock().unwrap();
-        let m = master.as_ref().ok_or_else(|| AppError::new("not_found", "terminal has exited"))?;
-        m.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| AppError::new("io", e.to_string()))
+        let m = master
+            .as_ref()
+            .ok_or_else(|| AppError::new("not_found", "terminal has exited"))?;
+        m.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| AppError::new("io", e.to_string()))
     }
 
     pub fn ack(&self, key: &AttachKey, bytes: usize) {
@@ -248,7 +293,10 @@ impl AttachManager {
                 detach(&entries, &e);
             }
         };
-        match tokio::runtime::Handle::try_current().ok().or_else(|| e.handle.clone()) {
+        match tokio::runtime::Handle::try_current()
+            .ok()
+            .or_else(|| e.handle.clone())
+        {
             Some(h) => {
                 h.spawn(async move {
                     tokio::time::sleep(idle).await;
@@ -287,8 +335,14 @@ impl AttachManager {
     }
 
     pub fn close_machine(&self, machine_id: &str) {
-        let list: Vec<Arc<Entry>> =
-            self.entries.lock().unwrap().values().filter(|e| e.key.machine_id == machine_id).cloned().collect();
+        let list: Vec<Arc<Entry>> = self
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| e.key.machine_id == machine_id)
+            .cloned()
+            .collect();
         for e in list {
             detach(&self.entries, &e);
         }
@@ -336,7 +390,9 @@ fn read_loop(e: &Arc<Entry>, mut reader: Box<dyn Read + Send>) {
         let sink = e.sink();
         if head.len() < HELD_SCAN {
             head.extend_from_slice(&buf[..n.min(HELD_SCAN - head.len())]);
-            if !e.held.load(Ordering::SeqCst) && head.windows(HELD_MARKER.len()).any(|w| w == HELD_MARKER) {
+            if !e.held.load(Ordering::SeqCst)
+                && head.windows(HELD_MARKER.len()).any(|w| w == HELD_MARKER)
+            {
                 e.held.store(true, Ordering::SeqCst);
                 sink.event(AttachEvent::Held);
             }
@@ -369,34 +425,83 @@ mod tests {
     use std::time::Duration;
 
     #[derive(Default)]
-    struct Rec { bytes: Mutex<Vec<u8>>, events: Mutex<Vec<AttachEvent>> }
-    impl Sink for Rec {
-        fn data(&self, b: Vec<u8>) { self.bytes.lock().unwrap().extend(b) }
-        fn event(&self, e: AttachEvent) { self.events.lock().unwrap().push(e) }
+    struct Rec {
+        bytes: Mutex<Vec<u8>>,
+        events: Mutex<Vec<AttachEvent>>,
     }
-    fn key(t: &str) -> AttachKey { AttachKey { machine_id: "local".into(), session: "default".into(), terminal_id: t.into() } }
-    fn sh(cmd: &str) -> Vec<String> { vec!["sh".into(), "-c".into(), cmd.into()] }
-    async fn wait_for(cond: impl Fn() -> bool) { for _ in 0..100 { if cond() { return; } tokio::time::sleep(Duration::from_millis(30)).await; } panic!("timed out"); }
+    impl Sink for Rec {
+        fn data(&self, b: Vec<u8>) {
+            self.bytes.lock().unwrap().extend(b)
+        }
+        fn event(&self, e: AttachEvent) {
+            self.events.lock().unwrap().push(e)
+        }
+    }
+    fn key(t: &str) -> AttachKey {
+        AttachKey {
+            machine_id: "local".into(),
+            session: "default".into(),
+            terminal_id: t.into(),
+        }
+    }
+    fn sh(cmd: &str) -> Vec<String> {
+        vec!["sh".into(), "-c".into(), cmd.into()]
+    }
+    async fn wait_for(cond: impl Fn() -> bool) {
+        for _ in 0..100 {
+            if cond() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        panic!("timed out");
+    }
 
     #[tokio::test]
     async fn echoes_input_and_reports_exit() {
         let m = AttachManager::new(Duration::from_millis(200));
         let rec = Arc::new(Rec::default());
-        m.open(key("a"), sh("read l; echo got:$l; exit 3"), 80, 24, rec.clone()).unwrap();
+        m.open(
+            key("a"),
+            sh("read l; echo got:$l; exit 3"),
+            80,
+            24,
+            rec.clone(),
+        )
+        .unwrap();
         m.write(&key("a"), b"hello\n").unwrap();
-        wait_for(|| rec.events.lock().unwrap().iter().any(|e| matches!(e, AttachEvent::Exited { .. }))).await;
+        wait_for(|| {
+            rec.events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, AttachEvent::Exited { .. }))
+        })
+        .await;
         assert!(String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:hello"));
         assert!(rec.events.lock().unwrap().contains(&AttachEvent::Attached));
-        assert!(rec.events.lock().unwrap().contains(&AttachEvent::Exited { code: Some(3) }));
+        assert!(rec
+            .events
+            .lock()
+            .unwrap()
+            .contains(&AttachEvent::Exited { code: Some(3) }));
     }
     #[tokio::test]
     async fn write_async_delivers_input() {
         let m = AttachManager::new(Duration::from_millis(200));
         let rec = Arc::new(Rec::default());
-        m.open(key("w"), sh("read l; echo got:$l"), 80, 24, rec.clone()).unwrap();
+        m.open(key("w"), sh("read l; echo got:$l"), 80, 24, rec.clone())
+            .unwrap();
         m.write_async(key("w"), b"async\n".to_vec()).await.unwrap();
-        wait_for(|| String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:async")).await;
-        assert_eq!(m.write_async(key("nope"), b"x".to_vec()).await.unwrap_err().code, "not_found");
+        wait_for(|| String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:async"))
+            .await;
+        assert_eq!(
+            m.write_async(key("nope"), b"x".to_vec())
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
     }
     #[tokio::test]
     async fn detects_held_attach() {
@@ -410,7 +515,14 @@ mod tests {
     async fn reader_pauses_without_acks() {
         let m = AttachManager::new(Duration::from_secs(5));
         let rec = Arc::new(Rec::default());
-        m.open(key("c"), sh("yes 0123456789abcdef | head -c 8000000"), 80, 24, rec.clone()).unwrap();
+        m.open(
+            key("c"),
+            sh("yes 0123456789abcdef | head -c 8000000"),
+            80,
+            24,
+            rec.clone(),
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(800)).await;
         let got = rec.bytes.lock().unwrap().len();
         assert!(got <= (1 << 20) + 65536, "read {got} bytes without acks");
@@ -422,10 +534,12 @@ mod tests {
     async fn release_detaches_after_idle_unless_reopened() {
         let m = AttachManager::new(Duration::from_millis(200));
         let rec = Arc::new(Rec::default());
-        m.open(key("d"), sh("sleep 30"), 80, 24, rec.clone()).unwrap();
+        m.open(key("d"), sh("sleep 30"), 80, 24, rec.clone())
+            .unwrap();
         m.release(&key("d"));
         tokio::time::sleep(Duration::from_millis(50)).await;
-        m.open(key("d"), sh("sleep 30"), 100, 30, rec.clone()).unwrap(); // reuse, no second process
+        m.open(key("d"), sh("sleep 30"), 100, 30, rec.clone())
+            .unwrap(); // reuse, no second process
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(!rec.events.lock().unwrap().contains(&AttachEvent::Detached));
         m.release(&key("d"));
@@ -435,12 +549,20 @@ mod tests {
     async fn reopen_after_unacked_backlog_still_delivers() {
         let m = AttachManager::new(Duration::from_secs(5));
         let old = Arc::new(Rec::default());
-        m.open(key("e"), sh("yes 0123456789abcdef | head -c 8000000"), 80, 24, old.clone()).unwrap();
+        m.open(
+            key("e"),
+            sh("yes 0123456789abcdef | head -c 8000000"),
+            80,
+            24,
+            old.clone(),
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(800)).await;
         assert!(old.bytes.lock().unwrap().len() > (1 << 20));
         m.release(&key("e"));
         let new = Arc::new(Rec::default());
-        m.open(key("e"), sh("sleep 30"), 80, 24, new.clone()).unwrap();
+        m.open(key("e"), sh("sleep 30"), 80, 24, new.clone())
+            .unwrap();
         wait_for(|| !new.bytes.lock().unwrap().is_empty()).await;
         m.close(&key("e"));
     }
@@ -448,10 +570,18 @@ mod tests {
     async fn reopen_of_held_key_respawns_with_new_argv() {
         let m = AttachManager::new(Duration::from_secs(5));
         let old = Arc::new(Rec::default());
-        m.open(key("f"), sh("echo 'already has an attached client'; sleep 2"), 80, 24, old.clone()).unwrap();
+        m.open(
+            key("f"),
+            sh("echo 'already has an attached client'; sleep 2"),
+            80,
+            24,
+            old.clone(),
+        )
+        .unwrap();
         wait_for(|| old.events.lock().unwrap().contains(&AttachEvent::Held)).await;
         let new = Arc::new(Rec::default());
-        m.open(key("f"), sh("echo fresh; sleep 5"), 80, 24, new.clone()).unwrap();
+        m.open(key("f"), sh("echo fresh; sleep 5"), 80, 24, new.clone())
+            .unwrap();
         wait_for(|| String::from_utf8_lossy(&new.bytes.lock().unwrap()).contains("fresh")).await;
         wait_for(|| new.events.lock().unwrap().contains(&AttachEvent::Attached)).await;
         assert!(!new.events.lock().unwrap().contains(&AttachEvent::Held));
@@ -461,15 +591,42 @@ mod tests {
     async fn close_while_reader_paused_detaches() {
         let m = AttachManager::new(Duration::from_secs(5));
         let rec = Arc::new(Rec::default());
-        m.open(key("g"), sh("yes 0123456789abcdef | head -c 8000000"), 80, 24, rec.clone()).unwrap();
+        m.open(
+            key("g"),
+            sh("yes 0123456789abcdef | head -c 8000000"),
+            80,
+            24,
+            rec.clone(),
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(800)).await;
         m.close(&key("g"));
         wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
     }
     #[test]
     fn builds_attach_argv() {
-        let info = crate::transport::MachineInfo { home: "/h".into(), herdr: "/h/herdr".into(), pi_dir: "/p".into(), version: "0.9.3".into(), protocol: 22 };
-        assert_eq!(attach_argv(&info, "ai", "term_x", true), vec!["/h/herdr", "--session", "ai", "terminal", "attach", "--takeover", "term_x"]);
-        assert_eq!(attach_argv(&info, "default", "term_x", false), vec!["/h/herdr", "terminal", "attach", "term_x"]);
+        let info = crate::transport::MachineInfo {
+            home: "/h".into(),
+            herdr: "/h/herdr".into(),
+            pi_dir: "/p".into(),
+            version: "0.9.3".into(),
+            protocol: 22,
+        };
+        assert_eq!(
+            attach_argv(&info, "ai", "term_x", true),
+            vec![
+                "/h/herdr",
+                "--session",
+                "ai",
+                "terminal",
+                "attach",
+                "--takeover",
+                "term_x"
+            ]
+        );
+        assert_eq!(
+            attach_argv(&info, "default", "term_x", false),
+            vec!["/h/herdr", "terminal", "attach", "term_x"]
+        );
     }
 }

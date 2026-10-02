@@ -6,8 +6,15 @@ use crate::error::{AppError, AppResult};
 /// One line received from herdr.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Frame {
-    Result { id: String, result: Value },
-    Error { id: String, code: String, message: String },
+    Result {
+        id: String,
+        result: Value,
+    },
+    Error {
+        id: String,
+        code: String,
+        message: String,
+    },
     Event(EventFrame),
 }
 
@@ -27,7 +34,10 @@ pub fn decode_frame(line: &str) -> AppResult<Frame> {
 
     if let Some(event) = obj.get("event").and_then(Value::as_str) {
         let data = obj.get("data").cloned().unwrap_or(Value::Null);
-        return Ok(Frame::Event(EventFrame { event: event.to_string(), data }));
+        return Ok(Frame::Event(EventFrame {
+            event: event.to_string(),
+            data,
+        }));
     }
     let id = match obj.get("id") {
         Some(Value::String(s)) => s.clone(),
@@ -35,11 +45,23 @@ pub fn decode_frame(line: &str) -> AppResult<Frame> {
         _ => return Err(bad()),
     };
     if let Some(result) = obj.get("result") {
-        return Ok(Frame::Result { id, result: result.clone() });
+        return Ok(Frame::Result {
+            id,
+            result: result.clone(),
+        });
     }
     if let Some(err) = obj.get("error") {
-        let field = |k: &str| err.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-        return Ok(Frame::Error { id, code: field("code"), message: field("message") });
+        let field = |k: &str| {
+            err.get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        return Ok(Frame::Error {
+            id,
+            code: field("code"),
+            message: field("message"),
+        });
     }
     Err(bad())
 }
@@ -54,16 +76,27 @@ mod tests {
         assert!(s.ends_with('\n'));
         assert_eq!(s.matches('\n').count(), 1);
         let v: serde_json::Value = serde_json::from_str(s.trim_end()).unwrap();
-        assert_eq!(v, json!({"id":"7","method":"agent.get","params":{"target":"w1:p1"}}));
+        assert_eq!(
+            v,
+            json!({"id":"7","method":"agent.get","params":{"target":"w1:p1"}})
+        );
     }
     #[test]
     fn decodes_result_error_and_event() {
         match decode_frame(r#"{"id":"1","result":{"type":"subscription_started"}}"#).unwrap() {
-            Frame::Result { id, result } => { assert_eq!(id, "1"); assert_eq!(result["type"], "subscription_started"); }
+            Frame::Result { id, result } => {
+                assert_eq!(id, "1");
+                assert_eq!(result["type"], "subscription_started");
+            }
             f => panic!("{f:?}"),
         }
-        match decode_frame(r#"{"id":"2","error":{"code":"not_found","message":"no pane w9:p9"}}"#).unwrap() {
-            Frame::Error { code, message, .. } => { assert_eq!(code, "not_found"); assert_eq!(message, "no pane w9:p9"); }
+        match decode_frame(r#"{"id":"2","error":{"code":"not_found","message":"no pane w9:p9"}}"#)
+            .unwrap()
+        {
+            Frame::Error { code, message, .. } => {
+                assert_eq!(code, "not_found");
+                assert_eq!(message, "no pane w9:p9");
+            }
             f => panic!("{f:?}"),
         }
         match decode_frame(r#"{"event":"pane_agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"done"}}"#).unwrap() {

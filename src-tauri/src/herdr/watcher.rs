@@ -9,7 +9,11 @@ use crate::{
     view::SessionView,
 };
 use serde_json::{json, Value};
-use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     sync::{mpsc::UnboundedSender, Notify},
     task::JoinHandle,
@@ -21,14 +25,29 @@ const DEBOUNCE: Duration = Duration::from_millis(150);
 #[derive(Debug)]
 pub enum WatchEvent {
     View(SessionView),
-    Status { pane_id: String, status: AgentStatus, previous: AgentStatus, title: String },
+    Status {
+        pane_id: String,
+        status: AgentStatus,
+        previous: AgentStatus,
+        title: String,
+    },
     Closed(AppError),
 }
 
 pub const STRUCTURAL: [&str; 13] = [
-    "workspace.created", "workspace.updated", "workspace.closed", "workspace.renamed", "workspace.reordered",
-    "tab.created", "tab.closed", "tab.renamed", "tab.moved",
-    "pane.created", "pane.closed", "pane.exited", "pane.moved",
+    "workspace.created",
+    "workspace.updated",
+    "workspace.closed",
+    "workspace.renamed",
+    "workspace.reordered",
+    "tab.created",
+    "tab.closed",
+    "tab.renamed",
+    "tab.moved",
+    "pane.created",
+    "pane.closed",
+    "pane.exited",
+    "pane.moved",
 ];
 
 fn closed() -> AppError {
@@ -38,7 +57,9 @@ fn closed() -> AppError {
 async fn subscribe_all(socket: &Path, snap: &Snapshot) -> AppResult<Subscription> {
     let mut subs: Vec<Value> = STRUCTURAL.iter().map(|t| json!({ "type": t })).collect();
     subs.extend(
-        pane_ids(snap).into_iter().map(|id| json!({ "type": "pane.agent_status_changed", "pane_id": id })),
+        pane_ids(snap)
+            .into_iter()
+            .map(|id| json!({ "type": "pane.agent_status_changed", "pane_id": id })),
     );
     rpc::subscribe(socket, subs).await
 }
@@ -51,9 +72,17 @@ enum Handled {
 }
 
 /// Apply a status event to `snap`; send `View` if anything changed, then `Status` if the status did.
-fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &UnboundedSender<WatchEvent>) -> Handled {
+fn handle_status(
+    name: &str,
+    snap: &mut Snapshot,
+    ev: &EventFrame,
+    tx: &UnboundedSender<WatchEvent>,
+) -> Handled {
     let Ok(change) = serde_json::from_value::<AgentStatusChanged>(ev.data.clone()) else {
-        tracing::warn!("malformed pane_agent_status_changed, refetching: {}", ev.data);
+        tracing::warn!(
+            "malformed pane_agent_status_changed, refetching: {}",
+            ev.data
+        );
         return Handled::Refetch;
     };
     if !snap.panes.iter().any(|p| p.pane_id == change.pane_id) {
@@ -68,7 +97,9 @@ fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounde
         return Handled::Gone;
     }
     // An agent-only change re-sends the view but is no status transition (no notification).
-    let Some(previous) = applied.previous else { return Handled::Done };
+    let Some(previous) = applied.previous else {
+        return Handled::Done;
+    };
     let title = view
         .workspaces
         .iter()
@@ -77,12 +108,28 @@ fn handle_status(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounde
         .find(|p| p.pane_id == change.pane_id)
         .map(|p| p.title.clone())
         .unwrap_or_else(|| change.pane_id.clone());
-    let sent = tx.send(WatchEvent::Status { pane_id: change.pane_id, status: change.agent_status, previous, title }).is_ok();
-    if sent { Handled::Done } else { Handled::Gone }
+    let sent = tx
+        .send(WatchEvent::Status {
+            pane_id: change.pane_id,
+            status: change.agent_status,
+            previous,
+            title,
+        })
+        .is_ok();
+    if sent {
+        Handled::Done
+    } else {
+        Handled::Gone
+    }
 }
 
 /// Handle any event; `Refetch` for everything but a clean status patch.
-fn handle_event(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &UnboundedSender<WatchEvent>) -> Handled {
+fn handle_event(
+    name: &str,
+    snap: &mut Snapshot,
+    ev: &EventFrame,
+    tx: &UnboundedSender<WatchEvent>,
+) -> Handled {
     if ev.event == "pane_agent_status_changed" {
         handle_status(name, snap, ev, tx)
     } else {
@@ -93,12 +140,20 @@ fn handle_event(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounded
 /// Runs until the stream ends, a call fails, or the receiver is dropped (`None`).
 /// `refetch` asks for a fresh snapshot (e.g. after a rename, which herdr reports only as
 /// `pane.updated`, a type we do not subscribe to).
-async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>, refetch: &Notify) -> Option<AppError> {
+async fn run(
+    name: &str,
+    socket: &Path,
+    tx: &UnboundedSender<WatchEvent>,
+    refetch: &Notify,
+) -> Option<AppError> {
     let mut snap = match rpc::snapshot(socket).await {
         Ok(s) => s,
         Err(e) => return Some(e),
     };
-    if tx.send(WatchEvent::View(session_view(name, &snap))).is_err() {
+    if tx
+        .send(WatchEvent::View(session_view(name, &snap)))
+        .is_err()
+    {
         return None;
     }
     let mut sub = match subscribe_all(socket, &snap).await {
@@ -138,7 +193,10 @@ async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>, refetc
             Ok(s) => s,
             Err(e) => return Some(e),
         };
-        if tx.send(WatchEvent::View(session_view(name, &fresh))).is_err() {
+        if tx
+            .send(WatchEvent::View(session_view(name, &fresh)))
+            .is_err()
+        {
             return None;
         }
         let changed = pane_ids(&fresh) != pane_ids(&snap);
@@ -163,7 +221,12 @@ async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>, refetc
 }
 
 /// Watch one session. Ends after sending `Closed`; the Machine manager owns retries.
-pub fn spawn_watcher(name: String, socket: PathBuf, tx: UnboundedSender<WatchEvent>, refetch: Arc<Notify>) -> JoinHandle<()> {
+pub fn spawn_watcher(
+    name: String,
+    socket: PathBuf,
+    tx: UnboundedSender<WatchEvent>,
+    refetch: Arc<Notify>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         if let Some(err) = run(&name, &socket, &tx, &refetch).await {
             let _ = tx.send(WatchEvent::Closed(err));
@@ -177,79 +240,162 @@ mod tests {
     use crate::herdr::{fake::FakeHerdr, types::AgentStatus};
     use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
-    use tokio::{sync::mpsc, time::{timeout, Duration}};
+    use tokio::{
+        sync::mpsc,
+        time::{timeout, Duration},
+    };
 
     fn fake_with(snap: Arc<Mutex<Value>>) -> FakeHerdr {
         FakeHerdr::start(Arc::new(move |m, _| match m {
-            "session.snapshot" => Ok(json!({"type":"session_snapshot","snapshot": snap.lock().unwrap().clone()})),
+            "session.snapshot" => {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.lock().unwrap().clone()}))
+            }
             _ => Err(("unknown".into(), m.to_string())),
         }))
     }
-    async fn next(rx: &mut mpsc::UnboundedReceiver<WatchEvent>) -> WatchEvent { timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap() }
+    async fn next(rx: &mut mpsc::UnboundedReceiver<WatchEvent>) -> WatchEvent {
+        timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
 
     async fn wait_snapshots(f: &FakeHerdr, n: usize) -> bool {
         let end = tokio::time::Instant::now() + Duration::from_secs(3);
         while tokio::time::Instant::now() < end {
-            if f.calls_of("session.snapshot") >= n { return true; }
+            if f.calls_of("session.snapshot") >= n {
+                return true;
+            }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         false
     }
-    async fn started(snap: Arc<Mutex<Value>>) -> (FakeHerdr, mpsc::UnboundedReceiver<WatchEvent>, tokio::task::JoinHandle<()>) {
+    async fn started(
+        snap: Arc<Mutex<Value>>,
+    ) -> (
+        FakeHerdr,
+        mpsc::UnboundedReceiver<WatchEvent>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let f = fake_with(snap);
         let (tx, mut rx) = mpsc::unbounded_channel();
         let h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         next(&mut rx).await;
         let end = tokio::time::Instant::now() + Duration::from_secs(3);
-        while f.calls_of("events.subscribe") < 1 && tokio::time::Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await; }
+        while f.calls_of("events.subscribe") < 1 && tokio::time::Instant::now() < end {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         (f, rx, h)
     }
     #[tokio::test]
     async fn malformed_status_event_triggers_refetch() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let (f, mut rx, _h) = started(snap).await;
         f.emit("pane_agent_status_changed", json!({"pane_id": 5}));
-        assert!(wait_snapshots(&f, 2).await, "malformed status should refetch");
+        assert!(
+            wait_snapshots(&f, 2).await,
+            "malformed status should refetch"
+        );
         assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
     }
     #[tokio::test]
     async fn unknown_pane_status_event_triggers_refetch() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let (f, mut rx, _h) = started(snap).await;
-        f.emit("pane_agent_status_changed", json!({"pane_id":"w9:p9","agent_status":"done"}));
-        assert!(wait_snapshots(&f, 2).await, "unknown pane status should refetch");
+        f.emit(
+            "pane_agent_status_changed",
+            json!({"pane_id":"w9:p9","agent_status":"done"}),
+        );
+        assert!(
+            wait_snapshots(&f, 2).await,
+            "unknown pane status should refetch"
+        );
         assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
     }
     #[tokio::test]
     async fn emits_view_then_status_changes() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let f = fake_with(snap.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let _h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces.len() == 2));
         tokio::time::sleep(Duration::from_millis(100)).await; // let subscribe land
-        let subs = f.calls.lock().unwrap().iter().find(|(m, _)| m == "events.subscribe").unwrap().1.clone();
-        assert!(subs["subscriptions"].as_array().unwrap().contains(&json!({"type":"pane.agent_status_changed","pane_id":"w2:p1"})));
-        f.emit("pane_agent_status_changed", json!({"pane_id":"w2:p1","workspace_id":"w2","agent_status":"done"}));
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].status == AgentStatus::Done));
+        let subs = f
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(m, _)| m == "events.subscribe")
+            .unwrap()
+            .1
+            .clone();
+        assert!(subs["subscriptions"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"type":"pane.agent_status_changed","pane_id":"w2:p1"})));
+        f.emit(
+            "pane_agent_status_changed",
+            json!({"pane_id":"w2:p1","workspace_id":"w2","agent_status":"done"}),
+        );
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].status == AgentStatus::Done)
+        );
         match next(&mut rx).await {
-            WatchEvent::Status { pane_id, status, previous, .. } => assert_eq!((pane_id.as_str(), status, previous), ("w2:p1", AgentStatus::Done, AgentStatus::Idle)),
+            WatchEvent::Status {
+                pane_id,
+                status,
+                previous,
+                ..
+            } => assert_eq!(
+                (pane_id.as_str(), status, previous),
+                ("w2:p1", AgentStatus::Done, AgentStatus::Idle)
+            ),
             other => panic!("{other:?}"),
         }
     }
     #[tokio::test]
     async fn agent_only_change_sends_a_view_but_no_status() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let (f, mut rx, _h) = started(snap).await;
-        f.emit("pane_agent_status_changed", json!({"pane_id":"w2:p1","agent_status":"idle","agent":"pi"}));
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes[0].agent.as_deref() == Some("pi")));
-        f.emit("pane_agent_status_changed", json!({"pane_id":"w2:p1","agent_status":"done","agent":"pi"}));
+        f.emit(
+            "pane_agent_status_changed",
+            json!({"pane_id":"w2:p1","agent_status":"idle","agent":"pi"}),
+        );
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes[0].agent.as_deref() == Some("pi"))
+        );
+        f.emit(
+            "pane_agent_status_changed",
+            json!({"pane_id":"w2:p1","agent_status":"done","agent":"pi"}),
+        );
         assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
-        assert!(matches!(next(&mut rx).await, WatchEvent::Status { status: AgentStatus::Done, previous: AgentStatus::Idle, .. }));
+        assert!(matches!(
+            next(&mut rx).await,
+            WatchEvent::Status {
+                status: AgentStatus::Done,
+                previous: AgentStatus::Idle,
+                ..
+            }
+        ));
     }
     #[tokio::test]
     async fn structural_events_refetch_once_and_resubscribe() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let f = fake_with(snap.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let _h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
@@ -258,14 +404,27 @@ mod tests {
         snap.lock().unwrap()["panes"].as_array_mut().unwrap().push(json!({"pane_id":"w2:p3","tab_id":"w2:t1","workspace_id":"w2","terminal_id":"term_e","agent_status":"idle"}));
         f.emit("pane_created", json!({"pane_id":"w2:p3"}));
         f.emit("layout_updated", json!({}));
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes.len() == 2));
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes.len() == 2)
+        );
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(f.calls_of("session.snapshot"), 2, "two events within 150 ms → one refetch");
-        assert_eq!(f.calls_of("events.subscribe"), 2, "pane set changed → resubscribe");
+        assert_eq!(
+            f.calls_of("session.snapshot"),
+            2,
+            "two events within 150 ms → one refetch"
+        );
+        assert_eq!(
+            f.calls_of("events.subscribe"),
+            2,
+            "pane set changed → resubscribe"
+        );
     }
     #[tokio::test]
     async fn refetch_signal_fetches_a_fresh_snapshot() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let f = fake_with(snap.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
         let refetch: Arc<tokio::sync::Notify> = Arc::default();
@@ -274,12 +433,17 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         snap.lock().unwrap()["panes"][0]["label"] = json!("renamed");
         refetch.notify_one();
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "renamed"));
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "renamed")
+        );
         assert_eq!(f.calls_of("session.snapshot"), 2);
     }
     #[tokio::test]
     async fn watcher_reports_closed_when_socket_closes() {
-        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
         let f = fake_with(snap);
         let (tx, mut rx) = mpsc::unbounded_channel();
         let h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());

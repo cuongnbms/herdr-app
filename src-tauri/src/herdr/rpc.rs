@@ -28,7 +28,10 @@ const CLOSED_EARLY: &str = "connection closed before response to";
 /// True when `e` says the peer closed or reset the connection before any response
 /// (as a forwarded socket does when sshd refuses the forward), as opposed to a connect failure.
 pub fn closed_early(e: &AppError) -> bool {
-    e.code == "io" && (e.message.starts_with(CLOSED_EARLY) || e.message.contains("Connection reset") || e.message.contains("Broken pipe"))
+    e.code == "io"
+        && (e.message.starts_with(CLOSED_EARLY)
+            || e.message.contains("Connection reset")
+            || e.message.contains("Broken pipe"))
 }
 
 fn timeout_err(method: &str) -> AppError {
@@ -40,11 +43,16 @@ async fn open(
     socket: &Path,
     method: &str,
     params: &Value,
-) -> AppResult<(tokio::io::Lines<BufReader<OwnedReadHalf>>, String, tokio::net::unix::OwnedWriteHalf)> {
+) -> AppResult<(
+    tokio::io::Lines<BufReader<OwnedReadHalf>>,
+    String,
+    tokio::net::unix::OwnedWriteHalf,
+)> {
     let stream = UnixStream::connect(socket).await?;
     let (r, mut w) = stream.into_split();
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string();
-    w.write_all(encode_request(&id, method, params).as_bytes()).await?;
+    w.write_all(encode_request(&id, method, params).as_bytes())
+        .await?;
     Ok((BufReader::new(r).lines(), id, w))
 }
 
@@ -60,9 +68,9 @@ async fn read_response(
         };
         match decode_frame(&line)? {
             Frame::Result { id: rid, result } if rid == id => return Ok(result),
-            Frame::Error { id: rid, message, .. } if rid == id => {
-                return Err(AppError::new("herdr_error", message))
-            }
+            Frame::Error {
+                id: rid, message, ..
+            } if rid == id => return Err(AppError::new("herdr_error", message)),
             _ => {}
         }
     }
@@ -74,7 +82,9 @@ pub async fn call(socket: &Path, method: &str, params: Value) -> AppResult<Value
         let (mut lines, id, _w) = open(socket, method, &params).await?;
         read_response(&mut lines, &id, method).await
     };
-    timeout(RPC_TIMEOUT, fut).await.map_err(|_| timeout_err(method))?
+    timeout(RPC_TIMEOUT, fut)
+        .await
+        .map_err(|_| timeout_err(method))?
 }
 
 pub async fn snapshot(socket: &Path) -> AppResult<Snapshot> {
@@ -83,7 +93,8 @@ pub async fn snapshot(socket: &Path) -> AppResult<Snapshot> {
         .get("snapshot")
         .cloned()
         .ok_or_else(|| AppError::new("protocol", "session.snapshot result has no snapshot"))?;
-    serde_json::from_value(snap).map_err(|e| AppError::new("protocol", format!("invalid snapshot: {e}")))
+    serde_json::from_value(snap)
+        .map_err(|e| AppError::new("protocol", format!("invalid snapshot: {e}")))
 }
 
 /// Live event stream. Dropping it aborts the reader task; `rx` yields `None` when the socket closes.
@@ -106,7 +117,9 @@ pub async fn subscribe(socket: &Path, subscriptions: Vec<Value>) -> AppResult<Su
         read_response(&mut lines, &id, method).await?;
         Ok::<_, AppError>((lines, w))
     };
-    let (mut lines, w) = timeout(RPC_TIMEOUT, fut).await.map_err(|_| timeout_err(method))??;
+    let (mut lines, w) = timeout(RPC_TIMEOUT, fut)
+        .await
+        .map_err(|_| timeout_err(method))??;
     let (tx, rx) = mpsc::channel(256);
     let task = tokio::spawn(async move {
         let _w = w; // keep the write half open for the life of the stream
@@ -121,7 +134,10 @@ pub async fn subscribe(socket: &Path, subscriptions: Vec<Value>) -> AppResult<Su
                 Err(e) => {
                     // We cannot tell what we missed: the watcher refetches on any unknown event.
                     tracing::warn!("undecodable herdr frame, asking for a refetch: {e}");
-                    let ev = EventFrame { event: UNDECODABLE.into(), data: Value::Null };
+                    let ev = EventFrame {
+                        event: UNDECODABLE.into(),
+                        data: Value::Null,
+                    };
                     if tx.send(ev).await.is_err() {
                         return;
                     }
@@ -141,63 +157,126 @@ mod tests {
 
     #[tokio::test]
     async fn call_returns_result() {
-        let f = FakeHerdr::start(Arc::new(|m, p| { assert_eq!(m, "agent.get"); Ok(json!({"type":"agent_info","agent":{"pane_id": p["target"]}})) }));
-        let r = call(&f.path, "agent.get", json!({"target":"w1:p1"})).await.unwrap();
+        let f = FakeHerdr::start(Arc::new(|m, p| {
+            assert_eq!(m, "agent.get");
+            Ok(json!({"type":"agent_info","agent":{"pane_id": p["target"]}}))
+        }));
+        let r = call(&f.path, "agent.get", json!({"target":"w1:p1"}))
+            .await
+            .unwrap();
         assert_eq!(r["agent"]["pane_id"], "w1:p1");
     }
     #[tokio::test]
     async fn call_maps_herdr_errors() {
         let f = FakeHerdr::start(Arc::new(|_, _| Err(("not_found".into(), "no pane".into()))));
-        let e = call(&f.path, "pane.close", json!({"pane_id":"x"})).await.unwrap_err();
-        assert_eq!((e.code.as_str(), e.message.as_str()), ("herdr_error", "no pane"));
+        let e = call(&f.path, "pane.close", json!({"pane_id":"x"}))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("herdr_error", "no pane")
+        );
     }
     #[tokio::test]
     async fn eof_before_response_is_closed_early_but_connect_failure_is_not() {
-        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let d = tempfile::Builder::new()
+            .prefix("hr")
+            .tempdir_in("/tmp")
+            .unwrap();
         let sock = d.path().join("c.sock");
         let l = tokio::net::UnixListener::bind(&sock).unwrap();
-        tokio::spawn(async move { while let Ok((s, _)) = l.accept().await { drop(s); } });
-        assert!(closed_early(&call(&sock, "session.snapshot", json!({})).await.unwrap_err()));
-        let missing = call(std::path::Path::new("/tmp/definitely-not-here.sock"), "x", json!({})).await.unwrap_err();
+        tokio::spawn(async move {
+            while let Ok((s, _)) = l.accept().await {
+                drop(s);
+            }
+        });
+        assert!(closed_early(
+            &call(&sock, "session.snapshot", json!({}))
+                .await
+                .unwrap_err()
+        ));
+        let missing = call(
+            std::path::Path::new("/tmp/definitely-not-here.sock"),
+            "x",
+            json!({}),
+        )
+        .await
+        .unwrap_err();
         assert!(!closed_early(&missing));
     }
     #[tokio::test]
     async fn undecodable_subscription_frame_is_forwarded_as_a_synthetic_event() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let d = tempfile::Builder::new()
+            .prefix("hr")
+            .tempdir_in("/tmp")
+            .unwrap();
         let sock = d.path().join("u.sock");
         let l = tokio::net::UnixListener::bind(&sock).unwrap();
         tokio::spawn(async move {
             let (s, _) = l.accept().await.unwrap();
             let (r, mut w) = s.into_split();
-            let line = BufReader::new(r).lines().next_line().await.unwrap().unwrap();
+            let line = BufReader::new(r)
+                .lines()
+                .next_line()
+                .await
+                .unwrap()
+                .unwrap();
             let id = serde_json::from_str::<Value>(&line).unwrap()["id"].clone();
             let started = json!({"id": id, "result": {"type": "subscription_started"}});
-            w.write_all(format!("{started}\nnot json at all\n{}\n", json!({"event":"pane_created","data":{}})).as_bytes()).await.unwrap();
+            w.write_all(
+                format!(
+                    "{started}\nnot json at all\n{}\n",
+                    json!({"event":"pane_created","data":{}})
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         });
-        let mut sub = subscribe(&sock, vec![json!({"type":"pane.created"})]).await.unwrap();
+        let mut sub = subscribe(&sock, vec![json!({"type":"pane.created"})])
+            .await
+            .unwrap();
         assert_eq!(sub.rx.recv().await.unwrap().event, UNDECODABLE);
-        assert_eq!(sub.rx.recv().await.unwrap().event, "pane_created", "later frames still arrive");
+        assert_eq!(
+            sub.rx.recv().await.unwrap().event,
+            "pane_created",
+            "later frames still arrive"
+        );
     }
     #[tokio::test]
     async fn missing_socket_is_io_error() {
-        let e = call(std::path::Path::new("/tmp/definitely-not-here.sock"), "x", json!({})).await.unwrap_err();
+        let e = call(
+            std::path::Path::new("/tmp/definitely-not-here.sock"),
+            "x",
+            json!({}),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(e.code, "io");
     }
     #[tokio::test]
     async fn snapshot_unwraps_payload() {
-        let snap: Value = serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |_, _| Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))));
+        let snap: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |_, _| {
+            Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+        }));
         assert_eq!(snapshot(&f.path).await.unwrap().panes.len(), 4);
     }
     #[tokio::test]
     async fn subscription_streams_events_then_ends() {
         let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({}))));
-        let mut sub = subscribe(&f.path, vec![json!({"type":"pane.created"})]).await.unwrap();
+        let mut sub = subscribe(&f.path, vec![json!({"type":"pane.created"})])
+            .await
+            .unwrap();
         f.emit("pane_created", json!({"pane_id":"w1:p3"}));
         let e = sub.rx.recv().await.unwrap();
-        assert_eq!((e.event.as_str(), e.data["pane_id"].as_str()), ("pane_created", Some("w1:p3")));
+        assert_eq!(
+            (e.event.as_str(), e.data["pane_id"].as_str()),
+            ("pane_created", Some("w1:p3"))
+        );
         f.close_subscriptions();
         assert!(sub.rx.recv().await.is_none());
     }

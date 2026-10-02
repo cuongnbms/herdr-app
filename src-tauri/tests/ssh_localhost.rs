@@ -11,7 +11,11 @@ const HERDR: &str = "/opt/homebrew/bin/herdr";
 const SESSION: &str = "herdrapp-test-ssh";
 
 fn herdr(args: &[&str]) -> std::process::Output {
-    Command::new(HERDR).args(args).stdin(Stdio::null()).output().unwrap()
+    Command::new(HERDR)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
 }
 
 /// Stops and deletes the test session, even when the test fails.
@@ -33,7 +37,11 @@ async fn ssh_localhost_master_exec_and_forward() {
     let ssh = SshTransport::new("sshtest", "localhost").unwrap();
     let _ = std::fs::remove_file(&ssh.ctl);
     let argv = master_argv(&ssh.ctl, &ssh.target, true);
-    let st = Command::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).status().unwrap();
+    let st = Command::new(&argv[0])
+        .args(&argv[1..])
+        .stdin(Stdio::null())
+        .status()
+        .unwrap();
     assert!(st.success(), "ssh master failed to start");
     assert!(master_alive(&ssh.ctl, &ssh.target).await);
 
@@ -55,7 +63,14 @@ async fn ssh_localhost_master_exec_and_forward() {
             .into_iter()
             .find(|s| s.name == SESSION);
         if let Some(e) = found {
-            if rpc::call(std::path::Path::new(&e.socket), "session.snapshot", json!({})).await.is_ok() {
+            if rpc::call(
+                std::path::Path::new(&e.socket),
+                "session.snapshot",
+                json!({}),
+            )
+            .await
+            .is_ok()
+            {
                 entry = Some(e);
                 break;
             }

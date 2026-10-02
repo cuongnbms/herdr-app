@@ -55,7 +55,10 @@ struct State {
 
 impl State {
     fn reset_event(items: &[ChatItem]) -> ChatEvent {
-        ChatEvent::Reset { items: items[items.len().saturating_sub(RESET_ITEMS)..].to_vec(), total: items.len() }
+        ChatEvent::Reset {
+            items: items[items.len().saturating_sub(RESET_ITEMS)..].to_vec(),
+            total: items.len(),
+        }
     }
 
     fn line(&mut self, line: &str) {
@@ -67,7 +70,9 @@ impl State {
             }
             ParserOutput::Reset(v) => {
                 if !self.appended.is_empty() {
-                    self.events.push(ChatEvent::Append { items: std::mem::take(&mut self.appended) });
+                    self.events.push(ChatEvent::Append {
+                        items: std::mem::take(&mut self.appended),
+                    });
                 }
                 let mut items = self.items.lock().unwrap();
                 *items = v;
@@ -93,7 +98,9 @@ impl State {
             return;
         }
         if !self.appended.is_empty() {
-            self.events.push(ChatEvent::Append { items: std::mem::take(&mut self.appended) });
+            self.events.push(ChatEvent::Append {
+                items: std::mem::take(&mut self.appended),
+            });
         }
         for ev in self.events.drain(..) {
             (self.sink)(ev);
@@ -101,9 +108,24 @@ impl State {
     }
 }
 
-pub fn spawn_tail(t: Arc<dyn Transport>, path: String, parser: Box<dyn Parser>, sink: Sink) -> TailHandle {
+pub fn spawn_tail(
+    t: Arc<dyn Transport>,
+    path: String,
+    parser: Box<dyn Parser>,
+    sink: Sink,
+) -> TailHandle {
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
-    let state = State { items: items.clone(), parser, sink, events: Vec::new(), appended: Vec::new(), sent_first: false, got_bytes: false, ever_got_bytes: false, started: Instant::now() };
+    let state = State {
+        items: items.clone(),
+        parser,
+        sink,
+        events: Vec::new(),
+        appended: Vec::new(),
+        sent_first: false,
+        got_bytes: false,
+        ever_got_bytes: false,
+        started: Instant::now(),
+    };
     let task = tokio::spawn(run(t, path, state));
     TailHandle { items, task }
 }
@@ -112,7 +134,10 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
     // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
     let script = r#"tail -n +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
-    let argv = t.wrap(&["sh".into(), "-c".into(), script.into(), "sh".into(), path], false);
+    let argv = t.wrap(
+        &["sh".into(), "-c".into(), script.into(), "sh".into(), path],
+        false,
+    );
     let spawned = Command::new(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::piped())
@@ -163,7 +188,9 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
         }
     }
     st.flush();
-    (st.sink)(ChatEvent::Error { error: AppError::new("io", "transcript tail exited") });
+    (st.sink)(ChatEvent::Error {
+        error: AppError::new("io", "transcript tail exited"),
+    });
 }
 
 #[cfg(test)]
@@ -173,8 +200,13 @@ mod tests {
     struct Lines;
     impl Parser for Lines {
         fn push_line(&mut self, line: &str) -> ParserOutput {
-            if line == "RESET" { ParserOutput::Reset(vec![ChatItem::System { text: "reset".into() }]) }
-            else { ParserOutput::Append(vec![ChatItem::User { text: line.into() }]) }
+            if line == "RESET" {
+                ParserOutput::Reset(vec![ChatItem::System {
+                    text: "reset".into(),
+                }])
+            } else {
+                ParserOutput::Append(vec![ChatItem::User { text: line.into() }])
+            }
         }
     }
     #[tokio::test]
@@ -184,7 +216,12 @@ mod tests {
         std::fs::write(&p, "a\nb\n").unwrap();
         let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
         let g = got.clone();
-        let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(Lines),
+            Arc::new(move |e| g.lock().unwrap().push(e)),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
@@ -204,25 +241,46 @@ mod tests {
         std::fs::write(&p, b"a\n\xff\xfe\xfd\nb\n").unwrap();
         let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
         let g = got.clone();
-        let _h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+        let _h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(Lines),
+            Arc::new(move |e| g.lock().unwrap().push(e)),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { text: "a".into() } && items[2] == ChatItem::User { text: "b".into() }));
+        assert!(
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { text: "a".into() } && items[2] == ChatItem::User { text: "b".into() })
+        );
     }
     #[tokio::test]
     async fn empty_and_missing_files_still_reset() {
         let d = tempfile::tempdir().unwrap();
         for name in ["empty.jsonl", "missing.jsonl"] {
             let p = d.path().join(name);
-            if name == "empty.jsonl" { std::fs::write(&p, "").unwrap(); }
+            if name == "empty.jsonl" {
+                std::fs::write(&p, "").unwrap();
+            }
             let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
             let g = got.clone();
-            let _h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+            let _h = spawn_tail(
+                Arc::new(crate::transport::local::LocalTransport),
+                p.to_string_lossy().into(),
+                Box::new(Lines),
+                Arc::new(move |e| g.lock().unwrap().push(e)),
+            );
             tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-            assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 0 } if items.is_empty()), "{name}");
+            assert!(
+                matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 0 } if items.is_empty()),
+                "{name}"
+            );
         }
     }
     fn tail_running(path: &str) -> bool {
-        std::process::Command::new("pgrep").args(["-f", "--", &format!("-F {path}")]).output().map(|o| o.status.success()).unwrap_or(false)
+        std::process::Command::new("pgrep")
+            .args(["-f", "--", &format!("-F {path}")])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
     #[tokio::test]
     async fn dropping_the_handle_ends_tail() {
@@ -230,12 +288,19 @@ mod tests {
         let p = d.path().join("drop-me.jsonl");
         std::fs::write(&p, "a\n").unwrap();
         let path: String = p.to_string_lossy().into();
-        let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), path.clone(), Box::new(Lines), Arc::new(|_| {}));
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            path.clone(),
+            Box::new(Lines),
+            Arc::new(|_| {}),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(tail_running(&path), "tail should be running");
         drop(h);
         for _ in 0..40 {
-            if !tail_running(&path) { return; }
+            if !tail_running(&path) {
+                return;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         panic!("tail still running after drop");
@@ -247,9 +312,16 @@ mod tests {
         std::fs::write(&p, (0..700).map(|i| format!("m{i}\n")).collect::<String>()).unwrap();
         let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
         let g = got.clone();
-        let h = spawn_tail(Arc::new(crate::transport::local::LocalTransport), p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(Lines),
+            Arc::new(move |e| g.lock().unwrap().push(e)),
+        );
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { text: "m200".into() }));
+        assert!(
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { text: "m200".into() })
+        );
         let older = h.page(200, 200);
         assert_eq!(older.len(), 200);
         assert_eq!(older[0], ChatItem::User { text: "m0".into() });

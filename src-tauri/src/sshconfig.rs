@@ -7,7 +7,10 @@ pub fn hosts(config_text: &str) -> Vec<String> {
     for line in config_text.lines() {
         let line = line.trim();
         let (keyword, rest) = match line.find(|c: char| c.is_whitespace() || c == '=') {
-            Some(i) => (&line[..i], line[i..].trim_start_matches(|c: char| c.is_whitespace() || c == '=')),
+            Some(i) => (
+                &line[..i],
+                line[i..].trim_start_matches(|c: char| c.is_whitespace() || c == '='),
+            ),
             None => (line, ""),
         };
         if !keyword.eq_ignore_ascii_case("host") {
@@ -28,7 +31,9 @@ pub fn hosts(config_text: &str) -> Vec<String> {
 
 /// Hosts from `~/.ssh/config`; a missing or unreadable file gives an empty list (`Include` is not followed).
 pub fn read_hosts() -> Vec<String> {
-    let Some(home) = std::env::var_os("HOME") else { return Vec::new() };
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
     match std::fs::read_to_string(std::path::Path::new(&home).join(".ssh/config")) {
         Ok(text) => hosts(&text),
         Err(_) => Vec::new(),

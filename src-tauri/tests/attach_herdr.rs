@@ -18,7 +18,12 @@ struct SessionGuard;
 impl Drop for SessionGuard {
     fn drop(&mut self) {
         let run = |args: &[&str]| {
-            let _ = Command::new(HERDR).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = Command::new(HERDR)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
         };
         run(&["--session", SESSION, "server", "stop"]);
         run(&["session", "delete", SESSION]);
@@ -50,7 +55,10 @@ async fn wait_for(what: &str, cond: impl Fn() -> bool) {
 }
 
 fn session_socket() -> Option<PathBuf> {
-    let out = Command::new(HERDR).args(["session", "list"]).output().ok()?;
+    let out = Command::new(HERDR)
+        .args(["session", "list"])
+        .output()
+        .ok()?;
     parse_session_list(&String::from_utf8_lossy(&out.stdout))
         .into_iter()
         .find(|s| s.name == SESSION)
@@ -81,26 +89,48 @@ async fn attaches_echoes_and_reports_held() {
     }
     let socket = socket.expect("session socket never became ready");
 
-    rpc::call(&socket, "workspace.create", json!({"cwd": "/tmp"})).await.expect("workspace.create");
+    rpc::call(&socket, "workspace.create", json!({"cwd": "/tmp"}))
+        .await
+        .expect("workspace.create");
     let snap = rpc::snapshot(&socket).await.unwrap();
     let terminal_id = snap.panes.first().expect("a pane").terminal_id.clone();
 
-    let info = MachineInfo { home: "/tmp".into(), herdr: HERDR.into(), pi_dir: "/tmp".into(), version: "0.9.3".into(), protocol: 22 };
+    let info = MachineInfo {
+        home: "/tmp".into(),
+        herdr: HERDR.into(),
+        pi_dir: "/tmp".into(),
+        version: "0.9.3".into(),
+        protocol: 22,
+    };
     let argv = LocalTransport.wrap(&attach_argv(&info, SESSION, &terminal_id, false), true);
-    let key = |name: &str| AttachKey { machine_id: "local".into(), session: SESSION.into(), terminal_id: format!("{terminal_id}{name}") };
+    let key = |name: &str| AttachKey {
+        machine_id: "local".into(),
+        session: SESSION.into(),
+        terminal_id: format!("{terminal_id}{name}"),
+    };
 
     let m = AttachManager::new(Duration::from_secs(15));
     let rec = Arc::new(Rec::default());
     let k1 = key("");
-    m.open(k1.clone(), argv.clone(), 80, 24, rec.clone()).unwrap();
-    wait_for("Attached", || rec.events.lock().unwrap().contains(&AttachEvent::Attached)).await;
+    m.open(k1.clone(), argv.clone(), 80, 24, rec.clone())
+        .unwrap();
+    wait_for("Attached", || {
+        rec.events.lock().unwrap().contains(&AttachEvent::Attached)
+    })
+    .await;
     m.write(&k1, b"echo hi-from-test\r").unwrap();
-    wait_for("echo output", || String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("hi-from-test")).await;
+    wait_for("echo output", || {
+        String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("hi-from-test")
+    })
+    .await;
 
     // A second attach on the same terminal (different manager key) is refused.
     let rec2 = Arc::new(Rec::default());
     m.open(key("-second"), argv, 80, 24, rec2.clone()).unwrap();
-    wait_for("Held", || rec2.events.lock().unwrap().contains(&AttachEvent::Held)).await;
+    wait_for("Held", || {
+        rec2.events.lock().unwrap().contains(&AttachEvent::Held)
+    })
+    .await;
     assert!(!rec2.events.lock().unwrap().contains(&AttachEvent::Attached));
 
     m.close(&k1);

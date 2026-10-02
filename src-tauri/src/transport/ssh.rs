@@ -1,5 +1,7 @@
 use super::local::LocalTransport;
-use super::{exec, runtime_dir, secure_runtime_dir, sh_quote, socket_name, SessionEntry, Transport};
+use super::{
+    exec, runtime_dir, secure_runtime_dir, sh_quote, socket_name, SessionEntry, Transport,
+};
 use crate::error::{AppError, AppResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -18,8 +20,14 @@ pub struct SshTransport {
 }
 
 /// The cached local path if it still forwards `remote` and the socket file exists.
-fn reusable(cached: Option<&(String, PathBuf)>, remote: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
-    cached.filter(|(r, p)| r == remote && exists(p)).map(|(_, p)| p.clone())
+fn reusable(
+    cached: Option<&(String, PathBuf)>,
+    remote: &str,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    cached
+        .filter(|(r, p)| r == remote && exists(p))
+        .map(|(_, p)| p.clone())
 }
 
 impl SshTransport {
@@ -70,7 +78,12 @@ pub fn ssh_wrap(ctl: &Path, target: &str, argv: &[String], tty: bool) -> Vec<Str
         v.push("-tt".into());
     }
     v.push(target.into());
-    v.push(argv.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" "));
+    v.push(
+        argv.iter()
+            .map(|a| sh_quote(a))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     v
 }
 
@@ -82,24 +95,39 @@ impl Transport for SshTransport {
 
     async fn local_socket(&self, session: &SessionEntry) -> AppResult<PathBuf> {
         let _gate = self.gate.lock().await;
-        let hit = reusable(self.forwards.lock().unwrap().get(&session.name), &session.socket, |p| p.exists());
+        let hit = reusable(
+            self.forwards.lock().unwrap().get(&session.name),
+            &session.socket,
+            |p| p.exists(),
+        );
         if let Some(p) = hit {
             return Ok(p);
         }
         let local = secure_runtime_dir()?.join(socket_name(&self.machine_id, &session.name));
         // The master may still hold an identical forward (inherited from a crashed run or
         // after our cache was dropped); it would ack a re-forward without re-binding the socket.
-        let _ = exec(&LocalTransport, &self.forward_argv("cancel", &local, session)).await;
+        let _ = exec(
+            &LocalTransport,
+            &self.forward_argv("cancel", &local, session),
+        )
+        .await;
         match std::fs::remove_file(&local) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        let out = exec(&LocalTransport, &self.forward_argv("forward", &local, session)).await?;
+        let out = exec(
+            &LocalTransport,
+            &self.forward_argv("forward", &local, session),
+        )
+        .await?;
         if out.status != 0 {
             return Err(classify_ssh_error(&out.stderr));
         }
-        self.forwards.lock().unwrap().insert(session.name.clone(), (session.socket.clone(), local.clone()));
+        self.forwards.lock().unwrap().insert(
+            session.name.clone(),
+            (session.socket.clone(), local.clone()),
+        );
         Ok(local)
     }
 
@@ -107,7 +135,11 @@ impl Transport for SshTransport {
         let _gate = self.gate.lock().await;
         self.forwards.lock().unwrap().remove(&session.name);
         let local = runtime_dir().join(socket_name(&self.machine_id, &session.name));
-        let out = exec(&LocalTransport, &self.forward_argv("cancel", &local, session)).await;
+        let out = exec(
+            &LocalTransport,
+            &self.forward_argv("cancel", &local, session),
+        )
+        .await;
         // The socket file must not outlive the release, whatever ssh said.
         let _ = std::fs::remove_file(&local);
         let out = out?;
@@ -176,7 +208,9 @@ pub async fn clear_stale_ctl(ctl: &Path, target: &str) {
 /// stdin and stdout are null and stderr goes to `errfile`, never a pipe we would read to EOF.
 /// Waits (30 s) for the foreground process only, then classifies a failure from `errfile`.
 pub async fn run_detached(argv: &[String], errfile: &Path) -> AppResult<()> {
-    let program = argv.first().ok_or_else(|| AppError::new("invalid", "empty command"))?;
+    let program = argv
+        .first()
+        .ok_or_else(|| AppError::new("invalid", "empty command"))?;
     let err = std::fs::File::create(errfile)?;
     let mut child = tokio::process::Command::new(program)
         .args(&argv[1..])
@@ -189,12 +223,19 @@ pub async fn run_detached(argv: &[String], errfile: &Path) -> AppResult<()> {
     let text = std::fs::read_to_string(errfile).unwrap_or_default();
     let _ = std::fs::remove_file(errfile);
     match waited {
-        Err(_) => Err(AppError::new("timeout", format!("{program} took longer than 30s"))),
+        Err(_) => Err(AppError::new(
+            "timeout",
+            format!("{program} took longer than 30s"),
+        )),
         Ok(Err(e)) => Err(e.into()),
         Ok(Ok(st)) if st.success() => Ok(()),
         Ok(Ok(st)) => {
             let e = classify_ssh_error(&text);
-            Err(if text.trim().is_empty() { AppError::new("io", format!("ssh exited with {st}")) } else { e })
+            Err(if text.trim().is_empty() {
+                AppError::new("io", format!("ssh exited with {st}"))
+            } else {
+                e
+            })
         }
     }
 }
@@ -206,13 +247,23 @@ pub async fn start_master(machine_id: &str, ctl: &Path, target: &str) -> AppResu
 }
 
 pub fn classify_ssh_error(stderr: &str) -> AppError {
-    if stderr.contains("Permission denied") || stderr.contains("Host key verification failed") || stderr.contains("passphrase") {
+    if stderr.contains("Permission denied")
+        || stderr.contains("Host key verification failed")
+        || stderr.contains("passphrase")
+    {
         return AppError::new("ssh_auth", stderr.trim());
     }
     if stderr.contains("administratively prohibited") || stderr.contains("open failed") {
-        return AppError::new("ssh_forward_denied", "the remote sshd refuses Unix socket forwarding (AllowStreamLocalForwarding)");
+        return AppError::new(
+            "ssh_forward_denied",
+            "the remote sshd refuses Unix socket forwarding (AllowStreamLocalForwarding)",
+        );
     }
-    let last = stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("ssh failed");
+    let last = stderr
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or("ssh failed");
     AppError::new("io", last)
 }
 
@@ -222,25 +273,91 @@ mod tests {
     use std::path::Path;
     #[test]
     fn wraps_with_quoting() {
-        let argv: Vec<String> = ["tail", "-n", "+1", "-F", "/home/u/.claude/projects/-x/it's a file.jsonl"].iter().map(|s| s.to_string()).collect();
-        let w = ssh_wrap(Path::new("/tmp/herdr-app-501/devtuf.ctl"), "devtuf", &argv, false);
-        assert_eq!(w[..6], ["ssh", "-S", "/tmp/herdr-app-501/devtuf.ctl", "-o", "BatchMode=yes", "devtuf"]);
+        let argv: Vec<String> = [
+            "tail",
+            "-n",
+            "+1",
+            "-F",
+            "/home/u/.claude/projects/-x/it's a file.jsonl",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let w = ssh_wrap(
+            Path::new("/tmp/herdr-app-501/devtuf.ctl"),
+            "devtuf",
+            &argv,
+            false,
+        );
+        assert_eq!(
+            w[..6],
+            [
+                "ssh",
+                "-S",
+                "/tmp/herdr-app-501/devtuf.ctl",
+                "-o",
+                "BatchMode=yes",
+                "devtuf"
+            ]
+        );
         assert_eq!(w.len(), 7);
-        assert_eq!(w[6], "'tail' '-n' '+1' '-F' '/home/u/.claude/projects/-x/it'\\''s a file.jsonl'");
+        assert_eq!(
+            w[6],
+            "'tail' '-n' '+1' '-F' '/home/u/.claude/projects/-x/it'\\''s a file.jsonl'"
+        );
         let t = ssh_wrap(Path::new("/c"), "u@h", &["herdr".into()], true);
         assert!(t.contains(&"-tt".to_string()));
     }
     #[test]
     fn master_argv_batch_and_interactive() {
         let b = master_argv(Path::new("/c"), "devtuf", true);
-        assert_eq!(b, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "BatchMode=yes", "-f", "-N", "devtuf"]);
+        assert_eq!(
+            b,
+            [
+                "ssh",
+                "-M",
+                "-S",
+                "/c",
+                "-o",
+                "ControlPersist=yes",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-o",
+                "BatchMode=yes",
+                "-f",
+                "-N",
+                "devtuf"
+            ]
+        );
         let i = master_argv(Path::new("/c"), "devtuf", false);
-        assert_eq!(i, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-f", "-N", "devtuf"]);
+        assert_eq!(
+            i,
+            [
+                "ssh",
+                "-M",
+                "-S",
+                "/c",
+                "-o",
+                "ControlPersist=yes",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-f",
+                "-N",
+                "devtuf"
+            ]
+        );
     }
     #[test]
     fn reuses_cached_forward_only_when_valid() {
         let c = ("/r/herdr.sock".to_string(), PathBuf::from("/l/a.sock"));
-        assert_eq!(reusable(Some(&c), "/r/herdr.sock", |_| true), Some(PathBuf::from("/l/a.sock")));
+        assert_eq!(
+            reusable(Some(&c), "/r/herdr.sock", |_| true),
+            Some(PathBuf::from("/l/a.sock"))
+        );
         assert_eq!(reusable(Some(&c), "/r/other.sock", |_| true), None);
         assert_eq!(reusable(Some(&c), "/r/herdr.sock", |_| false), None);
         assert_eq!(reusable(None, "/r/herdr.sock", |_| true), None);
@@ -248,7 +365,10 @@ mod tests {
     #[test]
     fn control_commands_use_batch_mode() {
         let a = control_argv(Path::new("/c"), "h", "check");
-        assert_eq!(a, ["ssh", "-S", "/c", "-o", "BatchMode=yes", "-O", "check", "h"]);
+        assert_eq!(
+            a,
+            ["ssh", "-S", "/c", "-o", "BatchMode=yes", "-O", "check", "h"]
+        );
     }
     fn sh(script: &str) -> Vec<String> {
         vec!["sh".into(), "-c".into(), script.into()]
@@ -258,25 +378,48 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let t = std::time::Instant::now();
         // The background child inherits stderr and outlives the parent, like `ssh -f`.
-        run_detached(&sh("(sleep 4) & exit 0"), &d.path().join("e")).await.unwrap();
-        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+        run_detached(&sh("(sleep 4) & exit 0"), &d.path().join("e"))
+            .await
+            .unwrap();
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            t.elapsed()
+        );
     }
     #[tokio::test]
     async fn detached_failure_is_classified_from_stderr() {
         let d = tempfile::tempdir().unwrap();
-        let e = run_detached(&sh("echo 'u@h: Permission denied (publickey).' >&2; exit 255"), &d.path().join("e")).await.unwrap_err();
+        let e = run_detached(
+            &sh("echo 'u@h: Permission denied (publickey).' >&2; exit 255"),
+            &d.path().join("e"),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(e.code, "ssh_auth");
         assert!(!d.path().join("e").exists());
-        let e = run_detached(&sh("exit 3"), &d.path().join("e")).await.unwrap_err();
+        let e = run_detached(&sh("exit 3"), &d.path().join("e"))
+            .await
+            .unwrap_err();
         assert_eq!(e.code, "io");
     }
     #[test]
     fn classifies_errors() {
-        assert_eq!(classify_ssh_error("u@h: Permission denied (publickey).").code, "ssh_auth");
-        assert_eq!(classify_ssh_error("Host key verification failed.").code, "ssh_auth");
-        let f = classify_ssh_error("channel 2: open failed: administratively prohibited: open failed");
+        assert_eq!(
+            classify_ssh_error("u@h: Permission denied (publickey).").code,
+            "ssh_auth"
+        );
+        assert_eq!(
+            classify_ssh_error("Host key verification failed.").code,
+            "ssh_auth"
+        );
+        let f =
+            classify_ssh_error("channel 2: open failed: administratively prohibited: open failed");
         assert_eq!(f.code, "ssh_forward_denied");
         assert!(f.message.contains("AllowStreamLocalForwarding"));
-        assert_eq!(classify_ssh_error("boom\nssh: connect to host x port 22: Connection refused").message, "ssh: connect to host x port 22: Connection refused");
+        assert_eq!(
+            classify_ssh_error("boom\nssh: connect to host x port 22: Connection refused").message,
+            "ssh: connect to host x port 22: Connection refused"
+        );
     }
 }

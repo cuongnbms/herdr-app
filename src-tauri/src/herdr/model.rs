@@ -7,8 +7,11 @@ use crate::view::{PaneView, SessionView, TabView, WorkspaceView};
 /// `number`, panes keep snapshot order, and every level's status is the rollup of
 /// its children. Panes whose tab is missing are dropped.
 pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
-    let agents: HashMap<&str, &AgentInfo> =
-        snap.agents.iter().map(|a| (a.pane_id.as_str(), a)).collect();
+    let agents: HashMap<&str, &AgentInfo> = snap
+        .agents
+        .iter()
+        .map(|a| (a.pane_id.as_str(), a))
+        .collect();
 
     let mut workspaces: Vec<WorkspaceView> = snap
         .workspaces
@@ -28,7 +31,8 @@ pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
                         .iter()
                         .filter(|p| p.tab_id == t.tab_id)
                         .map(|p| {
-                            let agent = agents.get(p.pane_id.as_str()).and_then(|a| a.agent.clone());
+                            let agent =
+                                agents.get(p.pane_id.as_str()).and_then(|a| a.agent.clone());
                             let title = [&p.label, &p.terminal_title_stripped]
                                 .into_iter()
                                 .find_map(|s| s.clone().filter(|s| !s.is_empty()))
@@ -84,7 +88,9 @@ pub struct Applied {
 
 /// Apply a `pane_agent_status_changed` event. Nothing changes for an unknown pane.
 pub fn apply_status(snap: &mut Snapshot, ev: &AgentStatusChanged) -> Applied {
-    let Some(pane) = snap.panes.iter_mut().find(|p| p.pane_id == ev.pane_id) else { return Applied::default() };
+    let Some(pane) = snap.panes.iter_mut().find(|p| p.pane_id == ev.pane_id) else {
+        return Applied::default();
+    };
     let previous = pane.agent_status;
     pane.agent_status = ev.agent_status;
 
@@ -98,14 +104,21 @@ pub fn apply_status(snap: &mut Snapshot, ev: &AgentStatusChanged) -> Applied {
             }
         }
         None if ev.agent.is_some() => {
-            snap.agents.push(AgentInfo { pane_id: ev.pane_id.clone(), agent: ev.agent.clone(), agent_status: ev.agent_status });
+            snap.agents.push(AgentInfo {
+                pane_id: ev.pane_id.clone(),
+                agent: ev.agent.clone(),
+                agent_status: ev.agent_status,
+            });
             agent_changed = true;
         }
         None => {}
     }
 
     let previous = (previous != ev.agent_status).then_some(previous);
-    Applied { changed: agent_changed || previous.is_some(), previous }
+    Applied {
+        changed: agent_changed || previous.is_some(),
+        previous,
+    }
 }
 
 /// All pane ids in the snapshot, sorted.
@@ -119,7 +132,9 @@ pub fn pane_ids(snap: &Snapshot) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::herdr::types::*;
-    fn fixture() -> Snapshot { serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap() }
+    fn fixture() -> Snapshot {
+        serde_json::from_str(include_str!("../../tests/fixtures/snapshot.json")).unwrap()
+    }
 
     #[test]
     fn builds_tree_with_rollups() {
@@ -127,14 +142,23 @@ mod tests {
         assert_eq!(v.name, "default");
         assert!(v.running);
         assert_eq!(v.status, AgentStatus::Blocked);
-        assert_eq!(v.workspaces.iter().map(|w| w.label.as_str()).collect::<Vec<_>>(), ["herdr-app", "api"]);
+        assert_eq!(
+            v.workspaces
+                .iter()
+                .map(|w| w.label.as_str())
+                .collect::<Vec<_>>(),
+            ["herdr-app", "api"]
+        );
         let w1 = &v.workspaces[0];
         assert_eq!(w1.status, AgentStatus::Blocked);
         assert_eq!(w1.tabs[0].panes[0].title, "Rewrite");
         assert_eq!(w1.tabs[0].panes[0].agent.as_deref(), Some("claude"));
         assert_eq!(w1.tabs[0].panes[1].title, "pi");
         let w2 = &v.workspaces[1];
-        assert_eq!(w2.tabs.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["1", "logs"]);
+        assert_eq!(
+            w2.tabs.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
+            ["1", "logs"]
+        );
         assert_eq!(w2.tabs[1].panes[0].title, "w2:p2");
         assert_eq!(w2.status, AgentStatus::Idle);
     }
@@ -145,26 +169,56 @@ mod tests {
         s.panes[1].label = Some(String::new());
         let v = session_view("default", &s);
         assert_eq!(v.workspaces[0].tabs[0].panes[0].title, "my pane");
-        assert_eq!(v.workspaces[0].tabs[0].panes[1].title, "pi", "an empty label falls back");
+        assert_eq!(
+            v.workspaces[0].tabs[0].panes[1].title, "pi",
+            "an empty label falls back"
+        );
     }
     #[test]
     fn applies_status_changes() {
         let mut s = fixture();
-        let ev = AgentStatusChanged { pane_id: "w2:p1".into(), agent_status: AgentStatus::Working, agent: Some("claude".into()) };
-        assert_eq!(apply_status(&mut s, &ev), Applied { changed: true, previous: Some(AgentStatus::Idle) });
+        let ev = AgentStatusChanged {
+            pane_id: "w2:p1".into(),
+            agent_status: AgentStatus::Working,
+            agent: Some("claude".into()),
+        };
+        assert_eq!(
+            apply_status(&mut s, &ev),
+            Applied {
+                changed: true,
+                previous: Some(AgentStatus::Idle)
+            }
+        );
         assert_eq!(apply_status(&mut s, &ev), Applied::default());
         let v = session_view("default", &s);
-        assert_eq!(v.workspaces[1].tabs[0].panes[0].agent.as_deref(), Some("claude"));
+        assert_eq!(
+            v.workspaces[1].tabs[0].panes[0].agent.as_deref(),
+            Some("claude")
+        );
         assert_eq!(v.workspaces[1].status, AgentStatus::Working);
-        let unknown = AgentStatusChanged { pane_id: "w9:p9".into(), agent_status: AgentStatus::Done, agent: None };
+        let unknown = AgentStatusChanged {
+            pane_id: "w9:p9".into(),
+            agent_status: AgentStatus::Done,
+            agent: None,
+        };
         assert_eq!(apply_status(&mut s, &unknown), Applied::default());
     }
     #[test]
     fn agent_only_change_is_a_change_without_a_status_transition() {
         let mut s = fixture();
         // w2:p1 is idle with no agent in the fixture.
-        let ev = AgentStatusChanged { pane_id: "w2:p1".into(), agent_status: AgentStatus::Idle, agent: Some("pi".into()) };
-        assert_eq!(apply_status(&mut s, &ev), Applied { changed: true, previous: None });
+        let ev = AgentStatusChanged {
+            pane_id: "w2:p1".into(),
+            agent_status: AgentStatus::Idle,
+            agent: Some("pi".into()),
+        };
+        assert_eq!(
+            apply_status(&mut s, &ev),
+            Applied {
+                changed: true,
+                previous: None
+            }
+        );
         assert_eq!(apply_status(&mut s, &ev), Applied::default());
     }
 }

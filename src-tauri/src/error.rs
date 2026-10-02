@@ -35,8 +35,14 @@ mod tests {
     #[test]
     fn displays_code_and_message() {
         let e = AppError::new("timeout", "session.snapshot took longer than 10s");
-        assert_eq!(e.to_string(), "timeout: session.snapshot took longer than 10s");
-        assert_eq!(serde_json::to_value(&e).unwrap(), serde_json::json!({"code":"timeout","message":"session.snapshot took longer than 10s"}));
+        assert_eq!(
+            e.to_string(),
+            "timeout: session.snapshot took longer than 10s"
+        );
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({"code":"timeout","message":"session.snapshot took longer than 10s"})
+        );
     }
     #[test]
     fn io_errors_map_to_io() {

@@ -1,5 +1,5 @@
-pub mod ssh;
 pub mod local;
+pub mod ssh;
 
 use crate::error::{AppError, AppResult};
 use crate::herdr::REQUIRED_PROTOCOL;
@@ -127,7 +127,10 @@ pub fn parse_probe(stdout: &str) -> AppResult<MachineInfo> {
     };
     let herdr = field("HERDR");
     if herdr.is_empty() {
-        return Err(AppError::new("herdr_not_found", "herdr was not found on this machine"));
+        return Err(AppError::new(
+            "herdr_not_found",
+            "herdr was not found on this machine",
+        ));
     }
     let version = field("VERSION");
     let protocol = field("PROTOCOL").parse::<u32>().ok();
@@ -157,7 +160,9 @@ pub fn parse_probe(stdout: &str) -> AppResult<MachineInfo> {
 pub fn parse_session_list(stdout: &str) -> Vec<SessionEntry> {
     let mut lines = stdout.lines();
     let socket_col = lines.next().and_then(|h| h.find("socket"));
-    lines.filter_map(|l| parse_session_row(l, socket_col)).collect()
+    lines
+        .filter_map(|l| parse_session_row(l, socket_col))
+        .collect()
 }
 
 /// The first whitespace-separated token of `s` and the rest after it.
@@ -177,7 +182,11 @@ fn parse_session_row(line: &str, socket_col: Option<usize>) -> Option<SessionEnt
     let socket = socket_under_directory(rest)
         .or_else(|| socket_at_column(line, socket_col?))
         .or_else(|| rest.split_whitespace().last())?;
-    Some(SessionEntry { name: name.to_string(), running: status == "running", socket: socket.to_string() })
+    Some(SessionEntry {
+        name: name.to_string(),
+        running: status == "running",
+        socket: socket.to_string(),
+    })
 }
 
 fn socket_under_directory(rest: &str) -> Option<&str> {
@@ -200,7 +209,8 @@ fn socket_at_column(line: &str, col: usize) -> Option<&str> {
         return None;
     }
     let (before, at) = line.split_at(col);
-    let starts_field = before.ends_with(char::is_whitespace) && !at.starts_with(char::is_whitespace);
+    let starts_field =
+        before.ends_with(char::is_whitespace) && !at.starts_with(char::is_whitespace);
     starts_field.then(|| at.trim_end())
 }
 
@@ -214,7 +224,10 @@ fn verify_private_dir(dir: &std::path::Path) -> AppResult<()> {
     let fail = |why: String| {
         AppError::new(
             "io",
-            format!("{} is not a private directory owned by this user: {why}", dir.display()),
+            format!(
+                "{} is not a private directory owned by this user: {why}",
+                dir.display()
+            ),
         )
     };
     let md = std::fs::symlink_metadata(dir)?;
@@ -255,7 +268,9 @@ pub fn runtime_dir() -> PathBuf {
 }
 
 fn fnv1a32(s: &str) -> u32 {
-    s.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
+    s.bytes().fold(0x811c_9dc5u32, |h, b| {
+        (h ^ b as u32).wrapping_mul(0x0100_0193)
+    })
 }
 
 pub fn socket_name(machine_id: &str, session: &str) -> String {
@@ -265,7 +280,15 @@ pub fn socket_name(machine_id: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn info() -> MachineInfo { MachineInfo { home: "/home/u".into(), herdr: "/home/u/.local/bin/herdr".into(), pi_dir: "/home/u/.pi/agent/sessions".into(), version: "0.9.3".into(), protocol: 22 } }
+    fn info() -> MachineInfo {
+        MachineInfo {
+            home: "/home/u".into(),
+            herdr: "/home/u/.local/bin/herdr".into(),
+            pi_dir: "/home/u/.pi/agent/sessions".into(),
+            version: "0.9.3".into(),
+            protocol: 22,
+        }
+    }
 
     #[test]
     fn quotes_for_posix_shells() {
@@ -276,8 +299,19 @@ mod tests {
     }
     #[test]
     fn herdr_argv_omits_default_session() {
-        assert_eq!(herdr_argv(&info(), "default", &["api", "schema"]), vec!["/home/u/.local/bin/herdr", "api", "schema"]);
-        assert_eq!(herdr_argv(&info(), "ai-radar", &["server"]), vec!["/home/u/.local/bin/herdr", "--session", "ai-radar", "server"]);
+        assert_eq!(
+            herdr_argv(&info(), "default", &["api", "schema"]),
+            vec!["/home/u/.local/bin/herdr", "api", "schema"]
+        );
+        assert_eq!(
+            herdr_argv(&info(), "ai-radar", &["server"]),
+            vec![
+                "/home/u/.local/bin/herdr",
+                "--session",
+                "ai-radar",
+                "server"
+            ]
+        );
     }
     #[test]
     fn parses_probe_output() {
@@ -286,8 +320,14 @@ mod tests {
     }
     #[test]
     fn probe_errors() {
-        assert_eq!(parse_probe("HOME=/h\nHERDR=\nPI_DIR=/h/.pi/agent/sessions\n").unwrap_err().code, "herdr_not_found");
-        let e = parse_probe("HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.8.0\nPROTOCOL=19\n").unwrap_err();
+        assert_eq!(
+            parse_probe("HOME=/h\nHERDR=\nPI_DIR=/h/.pi/agent/sessions\n")
+                .unwrap_err()
+                .code,
+            "herdr_not_found"
+        );
+        let e = parse_probe("HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.8.0\nPROTOCOL=19\n")
+            .unwrap_err();
         assert_eq!(e.code, "incompatible");
         assert_eq!(e.message, "herdr 0.8.0, protocol 19; need protocol 22");
     }
@@ -296,10 +336,21 @@ mod tests {
         let out = "name                 status   directory                                        socket\n\
 default              running  /Users/me/.config/herdr                     /Users/me/.config/herdr/herdr.sock\n\
 agent-workspace      stopped  /Users/me/.config/herdr/sessions/agent-workspace /Users/me/.config/herdr/sessions/agent-workspace/herdr.sock\n";
-        assert_eq!(parse_session_list(out), vec![
-            SessionEntry { name: "default".into(), running: true, socket: "/Users/me/.config/herdr/herdr.sock".into() },
-            SessionEntry { name: "agent-workspace".into(), running: false, socket: "/Users/me/.config/herdr/sessions/agent-workspace/herdr.sock".into() },
-        ]);
+        assert_eq!(
+            parse_session_list(out),
+            vec![
+                SessionEntry {
+                    name: "default".into(),
+                    running: true,
+                    socket: "/Users/me/.config/herdr/herdr.sock".into()
+                },
+                SessionEntry {
+                    name: "agent-workspace".into(),
+                    running: false,
+                    socket: "/Users/me/.config/herdr/sessions/agent-workspace/herdr.sock".into()
+                },
+            ]
+        );
     }
     #[test]
     fn parses_session_list_with_spaces_in_paths() {
@@ -309,14 +360,33 @@ long                 stopped  /Users/me/My Projects/herdr/sessions/a long name /
 moved                running  /srv/a b                                         /run/x y/herdr.sock\n\
 odd                  stopped  /a b /c/d.sock\n\
 broken               running  /only-one-path\n";
-        assert_eq!(parse_session_list(out), vec![
-            SessionEntry { name: "work".into(), running: true, socket: "/Users/me/My Projects/herdr/herdr.sock".into() },
-            SessionEntry { name: "long".into(), running: false, socket: "/Users/me/My Projects/herdr/sessions/a long name/herdr.sock".into() },
-            // Socket outside the directory: located by the header's socket column.
-            SessionEntry { name: "moved".into(), running: true, socket: "/run/x y/herdr.sock".into() },
-            // Neither rule applies: the last token.
-            SessionEntry { name: "odd".into(), running: false, socket: "/c/d.sock".into() },
-        ]);
+        assert_eq!(
+            parse_session_list(out),
+            vec![
+                SessionEntry {
+                    name: "work".into(),
+                    running: true,
+                    socket: "/Users/me/My Projects/herdr/herdr.sock".into()
+                },
+                SessionEntry {
+                    name: "long".into(),
+                    running: false,
+                    socket: "/Users/me/My Projects/herdr/sessions/a long name/herdr.sock".into()
+                },
+                // Socket outside the directory: located by the header's socket column.
+                SessionEntry {
+                    name: "moved".into(),
+                    running: true,
+                    socket: "/run/x y/herdr.sock".into()
+                },
+                // Neither rule applies: the last token.
+                SessionEntry {
+                    name: "odd".into(),
+                    running: false,
+                    socket: "/c/d.sock".into()
+                },
+            ]
+        );
     }
     #[test]
     fn socket_name_is_short() {
@@ -340,7 +410,9 @@ broken               running  /only-one-path\n";
     }
     #[tokio::test]
     async fn local_exec_runs_probe() {
-        let out = exec(&local::LocalTransport, &probe_argv(None)).await.unwrap();
+        let out = exec(&local::LocalTransport, &probe_argv(None))
+            .await
+            .unwrap();
         assert_eq!(out.status, 0);
         assert!(out.stdout.contains("HOME="), "{}", out.stdout);
     }

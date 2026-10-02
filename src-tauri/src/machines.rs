@@ -2,15 +2,20 @@
 use crate::{
     attach::AttachManager,
     error::{AppError, AppResult},
-    transcript::ChatManager,
     herdr::{
         rpc,
         types::AgentStatus,
         watcher::{spawn_watcher, WatchEvent},
     },
+    transcript::ChatManager,
     transport::{
-        exec, herdr_argv, local::LocalTransport, parse_probe, parse_session_list, probe_argv,
-        ssh::{classify_ssh_error, clear_stale_ctl, master_alive, master_exit, start_master, SshTransport},
+        exec, herdr_argv,
+        local::LocalTransport,
+        parse_probe, parse_session_list, probe_argv,
+        ssh::{
+            classify_ssh_error, clear_stale_ctl, master_alive, master_exit, start_master,
+            SshTransport,
+        },
         MachineInfo, SessionEntry, Transport,
     },
     view::{MachineState, MachineView, PaneRef, PaneStatusEvent, SessionView},
@@ -26,10 +31,21 @@ use std::{
 use tokio::{sync::mpsc, task::JoinHandle};
 
 pub const ALLOWED_METHODS: &[&str] = &[
-    "pane.split", "pane.close", "pane.rename", "pane.read", "pane.scroll",
-    "tab.create", "tab.close", "tab.rename",
-    "workspace.create", "workspace.close", "workspace.rename",
-    "agent.start", "agent.prompt", "agent.send_keys", "agent.get",
+    "pane.split",
+    "pane.close",
+    "pane.rename",
+    "pane.read",
+    "pane.scroll",
+    "tab.create",
+    "tab.close",
+    "tab.rename",
+    "workspace.create",
+    "workspace.close",
+    "workspace.rename",
+    "agent.start",
+    "agent.prompt",
+    "agent.send_keys",
+    "agent.get",
 ];
 
 const EMIT_THROTTLE: Duration = Duration::from_millis(100);
@@ -67,7 +83,8 @@ pub fn load_registry(path: &Path) -> Vec<MachineConfig> {
 
 /// Write to a temp file next to `path`, then rename over it.
 pub fn save_registry(path: &Path, list: &[MachineConfig]) -> AppResult<()> {
-    let json = serde_json::to_string_pretty(list).map_err(|e| AppError::new("io", e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(list).map_err(|e| AppError::new("io", e.to_string()))?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
@@ -84,7 +101,13 @@ pub fn slug(label: &str, taken: &[String]) -> String {
         }
         base.push(c);
     }
-    let trim = |s: &str, n: usize| s.chars().take(n).collect::<String>().trim_end_matches('-').to_string();
+    let trim = |s: &str, n: usize| {
+        s.chars()
+            .take(n)
+            .collect::<String>()
+            .trim_end_matches('-')
+            .to_string()
+    };
     let base = match trim(&base, 16) {
         b if b.is_empty() => "machine".to_string(),
         b => b,
@@ -104,11 +127,15 @@ pub fn slug(label: &str, taken: &[String]) -> String {
 
 /// Remove any forwarded-socket files (`<id>-<8 hex>.sock`) left in the runtime dir.
 fn sweep_sockets(id: &str) {
-    let Ok(rd) = std::fs::read_dir(crate::transport::runtime_dir()) else { return };
+    let Ok(rd) = std::fs::read_dir(crate::transport::runtime_dir()) else {
+        return;
+    };
     let prefix = format!("{id}-");
     for f in rd.flatten() {
         let name = f.file_name().to_string_lossy().into_owned();
-        let hex = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".sock"));
+        let hex = name
+            .strip_prefix(&prefix)
+            .and_then(|r| r.strip_suffix(".sock"));
         if hex.is_some_and(|h| h.len() == 8 && h.chars().all(|c| c.is_ascii_hexdigit())) {
             let _ = std::fs::remove_file(f.path());
         }
@@ -126,11 +153,17 @@ pub enum UiEvent {
 }
 pub type Emit = Arc<dyn Fn(UiEvent) + Send + Sync>;
 /// Test seam: replaces starting the batch ssh master.
-type MasterStart = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>> + Send + Sync>;
+type MasterStart = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>>
+        + Send
+        + Sync,
+>;
 /// Test seam: replaces asking the ssh master to exit.
 type MasterExit = Arc<dyn Fn() + Send + Sync>;
 /// Test seam: replaces the health task's `master_alive` check.
-type AliveCheck = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>> + Send + Sync>;
+type AliveCheck = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>> + Send + Sync,
+>;
 type Factory = Arc<dyn Fn(&MachineConfig) -> Arc<dyn Transport> + Send + Sync>;
 
 struct Sess {
@@ -278,7 +311,12 @@ impl MachineManager {
             herdr_path: None,
             enabled: true,
         })];
-        machines.extend(load_registry(&registry_path).into_iter().filter(|c| c.id != LOCAL).map(Machine::new));
+        machines.extend(
+            load_registry(&registry_path)
+                .into_iter()
+                .filter(|c| c.id != LOCAL)
+                .map(Machine::new),
+        );
         Arc::new_cyclic(|me| MachineManager {
             me: me.clone(),
             registry: registry_path,
@@ -349,7 +387,10 @@ impl MachineManager {
     /// factory supplies the transport.
     fn ssh_for(&self, cfg: &MachineConfig) -> AppResult<Arc<SshTransport>> {
         let mut ms = self.machines.lock().unwrap();
-        let m = ms.iter_mut().find(|m| m.cfg.id == cfg.id).ok_or_else(|| not_found(format!("unknown machine {}", cfg.id)))?;
+        let m = ms
+            .iter_mut()
+            .find(|m| m.cfg.id == cfg.id)
+            .ok_or_else(|| not_found(format!("unknown machine {}", cfg.id)))?;
         if m.ssh.is_none() {
             m.ssh = Some(Arc::new(SshTransport::new(&cfg.id, &cfg.ssh_target)?));
         }
@@ -363,7 +404,10 @@ impl MachineManager {
     /// Control socket path and target for an ssh Machine (for the interactive master).
     pub fn ssh_master(&self, id: &str) -> AppResult<(PathBuf, String)> {
         if id == LOCAL {
-            return Err(AppError::new("invalid", "the local machine has no ssh connection"));
+            return Err(AppError::new(
+                "invalid",
+                "the local machine has no ssh connection",
+            ));
         }
         let cfg = self.with_machine(id, |m| m.cfg.clone())?;
         let s = self.ssh_for(&cfg)?;
@@ -382,20 +426,34 @@ impl MachineManager {
     }
 
     fn persist(&self) -> AppResult<()> {
-        let list: Vec<MachineConfig> =
-            self.machines.lock().unwrap().iter().filter(|m| m.cfg.id != LOCAL).map(|m| m.cfg.clone()).collect();
+        let list: Vec<MachineConfig> = self
+            .machines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.cfg.id != LOCAL)
+            .map(|m| m.cfg.clone())
+            .collect();
         save_registry(&self.registry, &list)
     }
 
     fn with_machine<R>(&self, id: &str, f: impl FnOnce(&mut Machine) -> R) -> AppResult<R> {
         let mut ms = self.machines.lock().unwrap();
-        ms.iter_mut().find(|m| m.cfg.id == id).map(f).ok_or_else(|| not_found(format!("unknown machine {id}")))
+        ms.iter_mut()
+            .find(|m| m.cfg.id == id)
+            .map(f)
+            .ok_or_else(|| not_found(format!("unknown machine {id}")))
     }
 
     // ---- queries -------------------------------------------------------
 
     pub fn views(&self) -> Vec<MachineView> {
-        self.machines.lock().unwrap().iter().map(Machine::view).collect()
+        self.machines
+            .lock()
+            .unwrap()
+            .iter()
+            .map(Machine::view)
+            .collect()
     }
 
     pub fn transport(&self, id: &str) -> AppResult<Arc<dyn Transport>> {
@@ -404,18 +462,30 @@ impl MachineManager {
     }
 
     pub fn info(&self, id: &str) -> AppResult<MachineInfo> {
-        self.with_machine(id, |m| m.info.clone())?.ok_or_else(|| not_found(format!("no herdr info for machine {id}")))
+        self.with_machine(id, |m| m.info.clone())?
+            .ok_or_else(|| not_found(format!("no herdr info for machine {id}")))
     }
 
     pub fn session(&self, id: &str, name: &str) -> AppResult<SessionEntry> {
-        self.with_machine(id, |m| m.sessions.iter().find(|s| s.entry.name == name).map(|s| s.entry.clone()))?
-            .ok_or_else(|| not_found(format!("unknown session {id}/{name}")))
+        self.with_machine(id, |m| {
+            m.sessions
+                .iter()
+                .find(|s| s.entry.name == name)
+                .map(|s| s.entry.clone())
+        })?
+        .ok_or_else(|| not_found(format!("unknown session {id}/{name}")))
     }
 
     // ---- events --------------------------------------------------------
 
     fn emit_now(&self, id: &str) {
-        let view = self.machines.lock().unwrap().iter().find(|m| m.cfg.id == id && !m.removing).map(Machine::view);
+        let view = self
+            .machines
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|m| m.cfg.id == id && !m.removing)
+            .map(Machine::view);
         if let Some(v) = view {
             (self.emit)(UiEvent::Machine(v));
         }
@@ -475,7 +545,13 @@ impl MachineManager {
     }
 
     /// `set_state`, but only while the Machine is still at `epoch`. False when stale.
-    fn set_state_at(&self, id: &str, epoch: u64, state: MachineState, error: Option<AppError>) -> bool {
+    fn set_state_at(
+        &self,
+        id: &str,
+        epoch: u64,
+        state: MachineState,
+        error: Option<AppError>,
+    ) -> bool {
         let r = self
             .with_machine(id, |m| {
                 if m.epoch != epoch {
@@ -510,7 +586,11 @@ impl MachineManager {
     }
 
     fn current(&self, id: &str, epoch: u64) -> Result<(), Fail> {
-        if self.is_current(id, epoch) { Ok(()) } else { Err(Fail::Stale) }
+        if self.is_current(id, epoch) {
+            Ok(())
+        } else {
+            Err(Fail::Stale)
+        }
     }
 
     // ---- connection ----------------------------------------------------
@@ -526,7 +606,10 @@ impl MachineManager {
     pub async fn connect(&self, id: &str) -> AppResult<()> {
         let cfg = self.with_machine(id, |m| m.cfg.clone())?;
         if !cfg.enabled {
-            return Err(AppError::new("invalid", format!("machine {id} is disabled")));
+            return Err(AppError::new(
+                "invalid",
+                format!("machine {id} is disabled"),
+            ));
         }
         self.cancel_reconnect(id);
         // Captured before waiting: a disconnect while we wait cancels this connect.
@@ -545,14 +628,22 @@ impl MachineManager {
     /// the Machine's state is left alone and the result is `Ok`.
     async fn connect_core(&self, cfg: &MachineConfig, epoch: u64) -> AppResult<()> {
         let id = cfg.id.as_str();
-        let ssh = if id != LOCAL && self.factory.lock().unwrap().is_none() { Some(self.ssh_for(cfg)?) } else { None };
+        let ssh = if id != LOCAL && self.factory.lock().unwrap().is_none() {
+            Some(self.ssh_for(cfg)?)
+        } else {
+            None
+        };
         match self.connect_inner(cfg, ssh.as_deref(), epoch).await {
             Ok(()) if self.set_state_at(id, epoch, MachineState::Connected, None) => {
                 self.start_health(id);
                 Ok(())
             }
             Err(Fail::Err(e)) => {
-                let state = if e.code == "incompatible" { MachineState::Incompatible } else { MachineState::Error };
+                let state = if e.code == "incompatible" {
+                    MachineState::Incompatible
+                } else {
+                    MachineState::Error
+                };
                 if self.set_state_at(id, epoch, state, Some(e.clone())) {
                     return Err(e);
                 }
@@ -581,7 +672,12 @@ impl MachineManager {
         self.notify(id);
     }
 
-    async fn connect_inner(&self, cfg: &MachineConfig, ssh: Option<&SshTransport>, epoch: u64) -> Result<(), Fail> {
+    async fn connect_inner(
+        &self,
+        cfg: &MachineConfig,
+        ssh: Option<&SshTransport>,
+        epoch: u64,
+    ) -> Result<(), Fail> {
         let id = cfg.id.as_str();
         let transport: Arc<dyn Transport> = match ssh {
             Some(_) => self.ssh_for(cfg)?,
@@ -742,8 +838,14 @@ impl MachineManager {
 
     /// Disconnect every ssh Machine (app exit).
     pub async fn disconnect_all_ssh(&self) {
-        let ids: Vec<String> =
-            self.machines.lock().unwrap().iter().filter(|m| m.cfg.id != LOCAL).map(|m| m.cfg.id.clone()).collect();
+        let ids: Vec<String> = self
+            .machines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.cfg.id != LOCAL)
+            .map(|m| m.cfg.id.clone())
+            .collect();
         for id in ids {
             self.disconnect(&id).await;
         }
@@ -754,7 +856,9 @@ impl MachineManager {
     pub(crate) async fn on_master_lost(&self, id: &str) {
         let go = self
             .with_machine(id, |m| {
-                if m.state == MachineState::Disconnected || m.reconnect.as_ref().is_some_and(|h| !h.is_finished()) {
+                if m.state == MachineState::Disconnected
+                    || m.reconnect.as_ref().is_some_and(|h| !h.is_finished())
+                {
                     return false;
                 }
                 m.state = MachineState::Disconnected;
@@ -780,11 +884,22 @@ impl MachineManager {
         loop {
             tokio::time::sleep(backoff(attempt)).await;
             attempt = attempt.saturating_add(1);
-            let Ok((cfg, gate, epoch)) = self.with_machine(&id, |m| (m.cfg.clone(), m.gate.clone(), m.epoch)) else { return };
+            let Ok((cfg, gate, epoch)) =
+                self.with_machine(&id, |m| (m.cfg.clone(), m.gate.clone(), m.epoch))
+            else {
+                return;
+            };
             let _g = gate.lock().await;
             match self.connect_core(&cfg, epoch).await {
                 Ok(()) => return,
-                Err(e) if matches!(e.code.as_str(), "ssh_auth" | "incompatible" | "herdr_not_found") => return,
+                Err(e)
+                    if matches!(
+                        e.code.as_str(),
+                        "ssh_auth" | "incompatible" | "herdr_not_found"
+                    ) =>
+                {
+                    return
+                }
                 Err(e) => self.set_state(&id, MachineState::Disconnected, Some(e)),
             }
         }
@@ -792,18 +907,40 @@ impl MachineManager {
 
     // ---- registry ------------------------------------------------------
 
-    pub async fn add(&self, ssh_target: String, label: Option<String>, herdr_path: Option<String>) -> AppResult<MachineView> {
+    pub async fn add(
+        &self,
+        ssh_target: String,
+        label: Option<String>,
+        herdr_path: Option<String>,
+    ) -> AppResult<MachineView> {
         let target = ssh_target.trim().to_string();
-        if target.is_empty() || target.starts_with('-') || target.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            return Err(AppError::new("invalid", format!("invalid ssh target {ssh_target:?}")));
+        if target.is_empty()
+            || target.starts_with('-')
+            || target.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(AppError::new(
+                "invalid",
+                format!("invalid ssh target {ssh_target:?}"),
+            ));
         }
-        let label = label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).unwrap_or_else(|| target.clone());
-        let herdr_path = herdr_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        let label = label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| target.clone());
+        let herdr_path = herdr_path
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
         let id = {
             let mut ms = self.machines.lock().unwrap();
             let taken: Vec<String> = ms.iter().map(|m| m.cfg.id.clone()).collect();
             let id = slug(&label, &taken);
-            ms.push(Machine::new(MachineConfig { id: id.clone(), label, ssh_target: target, herdr_path, enabled: true }));
+            ms.push(Machine::new(MachineConfig {
+                id: id.clone(),
+                label,
+                ssh_target: target,
+                herdr_path,
+                enabled: true,
+            }));
             id
         };
         if let Err(e) = self.persist() {
@@ -816,7 +953,10 @@ impl MachineManager {
 
     pub async fn remove(&self, id: &str) -> AppResult<()> {
         if id == LOCAL {
-            return Err(AppError::new("invalid", "the local machine cannot be removed"));
+            return Err(AppError::new(
+                "invalid",
+                "the local machine cannot be removed",
+            ));
         }
         // From here on nothing about this Machine reaches the UI (no ghost row).
         self.with_machine(id, |m| m.removing = true)?;
@@ -833,9 +973,14 @@ impl MachineManager {
     /// Set the herdr path override, persist it and reconnect.
     pub async fn update(&self, id: &str, herdr_path: Option<String>) -> AppResult<MachineView> {
         if id == LOCAL {
-            return Err(AppError::new("invalid", "the local machine has no settings to update"));
+            return Err(AppError::new(
+                "invalid",
+                "the local machine has no settings to update",
+            ));
         }
-        let herdr_path = herdr_path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+        let herdr_path = herdr_path
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
         self.with_machine(id, |m| m.cfg.herdr_path = herdr_path)?;
         self.persist()?;
         // A failed connect is reported through the Machine's state and error.
@@ -847,9 +992,16 @@ impl MachineManager {
 
     async fn list_sessions(&self, id: &str) -> AppResult<Vec<SessionEntry>> {
         let (info, t) = (self.info(id)?, self.transport(id)?);
-        let out = exec(t.as_ref(), &herdr_argv(&info, "default", &["session", "list"])).await?;
+        let out = exec(
+            t.as_ref(),
+            &herdr_argv(&info, "default", &["session", "list"]),
+        )
+        .await?;
         if out.status != 0 {
-            return Err(AppError::new("herdr_error", format!("session list failed: {}", out.stderr.trim())));
+            return Err(AppError::new(
+                "herdr_error",
+                format!("session list failed: {}", out.stderr.trim()),
+            ));
         }
         Ok(parse_session_list(&out.stdout))
     }
@@ -857,20 +1009,33 @@ impl MachineManager {
     /// Reconcile the Machine's sessions with `list`; start watchers for newly running ones.
     fn apply_list(&self, id: &str, list: Vec<SessionEntry>) -> AppResult<()> {
         self.with_machine(id, |m| {
-            let Some(transport) = m.transport.clone() else { return };
+            let Some(transport) = m.transport.clone() else {
+                return;
+            };
             let mut old: Vec<Sess> = std::mem::take(&mut m.sessions);
             let mut next = Vec::new();
             for entry in list {
                 let mut s = match old.iter().position(|s| s.entry.name == entry.name) {
                     Some(i) => old.remove(i),
-                    None => Sess { entry: entry.clone(), view: None, error: None, supervisor: None, refetch: Arc::default() },
+                    None => Sess {
+                        entry: entry.clone(),
+                        view: None,
+                        error: None,
+                        supervisor: None,
+                        refetch: Arc::default(),
+                    },
                 };
                 s.entry = entry;
                 if s.entry.running {
                     if s.supervisor.is_none() {
                         if let Some(me) = self.me.upgrade() {
                             let (id, name) = (m.cfg.id.clone(), s.entry.name.clone());
-                            s.supervisor = Some(tokio::spawn(me.supervise(id, name, transport.clone(), s.refetch.clone())));
+                            s.supervisor = Some(tokio::spawn(me.supervise(
+                                id,
+                                name,
+                                transport.clone(),
+                                s.refetch.clone(),
+                            )));
                         }
                     }
                 } else {
@@ -901,20 +1066,30 @@ impl MachineManager {
     fn valid_session_name(name: &str) -> bool {
         !name.is_empty()
             && !name.starts_with('-')
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
     }
 
     pub async fn start_session(&self, id: &str, name: &str) -> AppResult<()> {
         if !Self::valid_session_name(name) {
-            return Err(AppError::new("invalid", format!("invalid session name {name:?}")));
+            return Err(AppError::new(
+                "invalid",
+                format!("invalid session name {name:?}"),
+            ));
         }
         let (info, t) = (self.info(id)?, self.transport(id)?);
-        let mut argv: Vec<String> =
-            ["sh", "-c", r#"nohup "$@" >/dev/null 2>&1 &"#, "herdr-start"].iter().map(|s| s.to_string()).collect();
+        let mut argv: Vec<String> = ["sh", "-c", r#"nohup "$@" >/dev/null 2>&1 &"#, "herdr-start"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         argv.extend(herdr_argv(&info, name, &["server"]));
         let out = exec(t.as_ref(), &argv).await?;
         if out.status != 0 {
-            return Err(AppError::new("herdr_error", format!("could not start {name}: {}", out.stderr.trim())));
+            return Err(AppError::new(
+                "herdr_error",
+                format!("could not start {name}: {}", out.stderr.trim()),
+            ));
         }
         let deadline = tokio::time::Instant::now() + START_WAIT;
         // Transient errors (an ssh hiccup, a socket not yet there) never end the wait early.
@@ -926,8 +1101,15 @@ impl MachineManager {
                 Err(e) => last_err = Some(e),
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(last_err
-                    .unwrap_or_else(|| AppError::new("timeout", format!("session {name} did not start within {}s", START_WAIT.as_secs()))));
+                return Err(last_err.unwrap_or_else(|| {
+                    AppError::new(
+                        "timeout",
+                        format!(
+                            "session {name} did not start within {}s",
+                            START_WAIT.as_secs()
+                        ),
+                    )
+                }));
             }
             tokio::time::sleep(START_POLL).await;
         }
@@ -936,7 +1118,12 @@ impl MachineManager {
 
     /// One poll of `start_session`: is `name` listed running and answering a snapshot?
     async fn probe_started(&self, id: &str, name: &str, t: &dyn Transport) -> AppResult<bool> {
-        let Some(entry) = self.list_sessions(id).await?.into_iter().find(|e| e.name == name && e.running) else {
+        let Some(entry) = self
+            .list_sessions(id)
+            .await?
+            .into_iter()
+            .find(|e| e.name == name && e.running)
+        else {
             return Ok(false);
         };
         let socket = t.local_socket(&entry).await?;
@@ -976,9 +1163,18 @@ impl MachineManager {
         self.refresh_sessions(id).await
     }
 
-    pub async fn call(&self, pane_machine: &str, session: &str, method: &str, params: Value) -> AppResult<Value> {
+    pub async fn call(
+        &self,
+        pane_machine: &str,
+        session: &str,
+        method: &str,
+        params: Value,
+    ) -> AppResult<Value> {
         if !ALLOWED_METHODS.contains(&method) {
-            return Err(AppError::new("invalid", format!("method {method} is not allowed")));
+            return Err(AppError::new(
+                "invalid",
+                format!("method {method} is not allowed"),
+            ));
         }
         let entry = self.session(pane_machine, session)?;
         let socket = self.transport(pane_machine)?.local_socket(&entry).await?;
@@ -1010,16 +1206,25 @@ impl MachineManager {
     }
 
     /// Keep a watcher alive for one running session; reconnect (fresh snapshot) with backoff.
-    async fn supervise(self: Arc<Self>, id: String, name: String, transport: Arc<dyn Transport>, refetch: Arc<tokio::sync::Notify>) {
+    async fn supervise(
+        self: Arc<Self>,
+        id: String,
+        name: String,
+        transport: Arc<dyn Transport>,
+        refetch: Arc<tokio::sync::Notify>,
+    ) {
         let mut attempt = 0u32;
         loop {
-            let Ok(entry) = self.session(&id, &name) else { return };
+            let Ok(entry) = self.session(&id, &name) else {
+                return;
+            };
             let mut got_view = false;
             let err = match transport.local_socket(&entry).await {
                 Err(e) => e,
                 Ok(socket) => {
                     let (tx, mut rx) = mpsc::unbounded_channel();
-                    let _guard = AbortOnDrop(spawn_watcher(name.clone(), socket, tx, refetch.clone()));
+                    let _guard =
+                        AbortOnDrop(spawn_watcher(name.clone(), socket, tx, refetch.clone()));
                     let mut closed = None;
                     while let Some(ev) = rx.recv().await {
                         match ev {
@@ -1031,9 +1236,18 @@ impl MachineManager {
                                     s.error = None;
                                 });
                             }
-                            WatchEvent::Status { pane_id, status, previous, title } => {
+                            WatchEvent::Status {
+                                pane_id,
+                                status,
+                                previous,
+                                title,
+                            } => {
                                 (self.emit)(UiEvent::PaneStatus(PaneStatusEvent {
-                                    pane: PaneRef { machine_id: id.clone(), session: name.clone(), pane_id },
+                                    pane: PaneRef {
+                                        machine_id: id.clone(),
+                                        session: name.clone(),
+                                        pane_id,
+                                    },
                                     status,
                                     previous,
                                     title,
@@ -1049,7 +1263,11 @@ impl MachineManager {
                 }
             };
             // The first snapshot over a freshly forwarded socket ending in EOF: sshd refused it.
-            let err = if !got_view { self.forward_refusal(&id, err) } else { err };
+            let err = if !got_view {
+                self.forward_refusal(&id, err)
+            } else {
+                err
+            };
             self.update_session(&id, &name, |s| s.error = Some(err));
             if let Some(ssh) = self.ssh_of(&id) {
                 if !master_alive(&ssh.ctl, &ssh.target).await {
@@ -1073,7 +1291,10 @@ impl MachineManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{herdr::fake::FakeHerdr, transport::{local::LocalTransport, Transport}};
+    use crate::{
+        herdr::fake::FakeHerdr,
+        transport::{local::LocalTransport, Transport},
+    };
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -1082,7 +1303,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("machines.json");
         assert!(load_registry(&p).is_empty());
-        let list = vec![MachineConfig { id: "devtuf".into(), label: "devtuf".into(), ssh_target: "devtuf".into(), herdr_path: None, enabled: true }];
+        let list = vec![MachineConfig {
+            id: "devtuf".into(),
+            label: "devtuf".into(),
+            ssh_target: "devtuf".into(),
+            herdr_path: None,
+            enabled: true,
+        }];
         save_registry(&p, &list).unwrap();
         assert_eq!(load_registry(&p), list);
         std::fs::write(&p, "{oops").unwrap();
@@ -1097,7 +1324,9 @@ mod tests {
     }
 
     /// Fake transport: probe/session-list answered by a script, socket = FakeHerdr.
-    struct FakeT { sock: String }
+    struct FakeT {
+        sock: String,
+    }
     #[async_trait::async_trait]
     impl Transport for FakeT {
         fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
@@ -1109,41 +1338,85 @@ mod tests {
             };
             vec!["printf".into(), "%s".into(), out]
         }
-        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { Ok(s.socket.clone().into()) }
-        async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> { Ok(()) }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            Ok(s.socket.clone().into())
+        }
+        async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
     async fn connects_local_and_emits_views() {
-        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
         let events: Arc<Mutex<Vec<MachineView>>> = Arc::default();
         let ev = events.clone();
         let d = tempfile::tempdir().unwrap();
-        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(move |e| if let UiEvent::Machine(v) = e { ev.lock().unwrap().push(v) }));
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    ev.lock().unwrap().push(v)
+                }
+            }),
+        );
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         mgr.connect("local").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         let v = mgr.views().into_iter().find(|v| v.id == "local").unwrap();
         assert_eq!(v.state, MachineState::Connected);
         assert_eq!(v.version.as_deref(), Some("0.9.3"));
-        assert_eq!(v.sessions.iter().map(|s| (s.name.as_str(), s.running)).collect::<Vec<_>>(), [("default", true), ("old", false)]);
+        assert_eq!(
+            v.sessions
+                .iter()
+                .map(|s| (s.name.as_str(), s.running))
+                .collect::<Vec<_>>(),
+            [("default", true), ("old", false)]
+        );
         assert_eq!(v.sessions[0].workspaces.len(), 2);
         assert_eq!(v.status, crate::herdr::types::AgentStatus::Blocked);
         assert!(!events.lock().unwrap().is_empty());
-        assert_eq!(mgr.call("local", "default", "server.stop", json!({})).await.unwrap_err().code, "invalid");
-        mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"})).await.unwrap();
+        assert_eq!(
+            mgr.call("local", "default", "server.stop", json!({}))
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"}))
+            .await
+            .unwrap();
         assert_eq!(f.calls_of("pane.close"), 1);
         let _ = LocalTransport; // default factory type exists
     }
 
-    struct RecT { inner: FakeT, released: Arc<Mutex<Vec<String>>> }
+    struct RecT {
+        inner: FakeT,
+        released: Arc<Mutex<Vec<String>>>,
+    }
     #[async_trait::async_trait]
     impl Transport for RecT {
-        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> { self.inner.wrap(argv, tty) }
-        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { self.inner.local_socket(s).await }
-        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> { self.released.lock().unwrap().push(s.name.clone()); Ok(()) }
+        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
+            self.inner.wrap(argv, tty)
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            self.inner.local_socket(s).await
+        }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> {
+            self.released.lock().unwrap().push(s.name.clone());
+            Ok(())
+        }
     }
 
     #[test]
@@ -1156,8 +1429,14 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("m.json");
         let mgr = MachineManager::new(p.clone(), Arc::new(|_| {}));
-        let v = mgr.add("cuong@devtuf.lan".into(), Some("Dev Tuf".into()), None).await.unwrap();
-        assert_eq!((v.id.as_str(), v.kind.as_str(), v.state.clone()), ("dev-tuf", "ssh", MachineState::Disconnected));
+        let v = mgr
+            .add("cuong@devtuf.lan".into(), Some("Dev Tuf".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            (v.id.as_str(), v.kind.as_str(), v.state.clone()),
+            ("dev-tuf", "ssh", MachineState::Disconnected)
+        );
         assert_eq!(load_registry(&p)[0].ssh_target, "cuong@devtuf.lan");
         mgr.remove("dev-tuf").await.unwrap();
         assert!(load_registry(&p).is_empty());
@@ -1167,13 +1446,24 @@ mod tests {
     async fn add_rejects_option_like_targets() {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
-        assert_eq!(mgr.add("-oProxyCommand=x".into(), None, None).await.unwrap_err().code, "invalid");
-        assert_eq!(mgr.add("  ".into(), None, None).await.unwrap_err().code, "invalid");
+        assert_eq!(
+            mgr.add("-oProxyCommand=x".into(), None, None)
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert_eq!(
+            mgr.add("  ".into(), None, None).await.unwrap_err().code,
+            "invalid"
+        );
     }
 
     async fn wait_for(mut cond: impl FnMut() -> bool) -> bool {
         for _ in 0..100 {
-            if cond() { return true; }
+            if cond() {
+                return true;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         false
@@ -1182,17 +1472,34 @@ mod tests {
     #[tokio::test]
     async fn forward_refusal_marks_the_session() {
         // sshd refuses the forward: the local socket accepts, then closes with no frame.
-        let d = tempfile::Builder::new().prefix("hr").tempdir_in("/tmp").unwrap();
+        let d = tempfile::Builder::new()
+            .prefix("hr")
+            .tempdir_in("/tmp")
+            .unwrap();
         let sock = d.path().join("x.sock");
         let l = tokio::net::UnixListener::bind(&sock).unwrap();
-        tokio::spawn(async move { while let Ok((s, _)) = l.accept().await { drop(s); } });
+        tokio::spawn(async move {
+            while let Ok((s, _)) = l.accept().await {
+                drop(s);
+            }
+        });
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let s = sock.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: s.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: s.clone() }) as Arc<dyn Transport>
+        }));
         mgr.add("box".into(), None, None).await.unwrap();
         mgr.connect("box").await.unwrap();
         let m = mgr.clone();
-        assert!(wait_for(move || m.views().iter().find(|v| v.id == "box").unwrap().sessions[0].error.as_ref().is_some_and(|e| e.code == "ssh_forward_denied")).await);
+        assert!(
+            wait_for(
+                move || m.views().iter().find(|v| v.id == "box").unwrap().sessions[0]
+                    .error
+                    .as_ref()
+                    .is_some_and(|e| e.code == "ssh_forward_denied")
+            )
+            .await
+        );
         mgr.disconnect("box").await;
     }
 
@@ -1202,36 +1509,77 @@ mod tests {
         struct Rec(Arc<Mutex<Vec<AttachEvent>>>);
         impl Sink for Rec {
             fn data(&self, _: Vec<u8>) {}
-            fn event(&self, e: AttachEvent) { self.0.lock().unwrap().push(e); }
+            fn event(&self, e: AttachEvent) {
+                self.0.lock().unwrap().push(e);
+            }
         }
-        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         let att = AttachManager::new(std::time::Duration::from_secs(15));
         mgr.set_attach_manager(att.clone());
         mgr.add("box".into(), None, None).await.unwrap();
         mgr.connect("box").await.unwrap();
         let m = mgr.clone();
-        assert!(wait_for(move || !m.views().iter().find(|v| v.id == "box").unwrap().sessions[0].workspaces.is_empty()).await);
+        assert!(
+            wait_for(
+                move || !m.views().iter().find(|v| v.id == "box").unwrap().sessions[0]
+                    .workspaces
+                    .is_empty()
+            )
+            .await
+        );
         let events = Arc::new(Mutex::new(Vec::new()));
-        att.open(AttachKey { machine_id: "box".into(), session: "default".into(), terminal_id: "t".into() }, vec!["cat".into()], 80, 24, Arc::new(Rec(events.clone()))).unwrap();
+        att.open(
+            AttachKey {
+                machine_id: "box".into(),
+                session: "default".into(),
+                terminal_id: "t".into(),
+            },
+            vec!["cat".into()],
+            80,
+            24,
+            Arc::new(Rec(events.clone())),
+        )
+        .unwrap();
 
         mgr.on_master_lost("box").await;
         let v = mgr.views().into_iter().find(|v| v.id == "box").unwrap();
         assert_eq!(v.state, MachineState::Disconnected);
         assert_eq!(v.sessions.len(), 2);
-        assert!(!v.sessions[0].workspaces.is_empty(), "last snapshot is kept");
+        assert!(
+            !v.sessions[0].workspaces.is_empty(),
+            "last snapshot is kept"
+        );
         assert!(wait_for(|| events.lock().unwrap().contains(&AttachEvent::Detached)).await);
         // An explicit disconnect clears it.
         mgr.disconnect("box").await;
-        assert!(mgr.views().into_iter().find(|v| v.id == "box").unwrap().sessions.is_empty());
+        assert!(mgr
+            .views()
+            .into_iter()
+            .find(|v| v.id == "box")
+            .unwrap()
+            .sessions
+            .is_empty());
     }
 
     /// `session list` fails on calls 1..=3 (call 0 is the connect); start_session must keep polling.
-    struct FlakyT { inner: FakeT, lists: std::sync::atomic::AtomicU32 }
+    struct FlakyT {
+        inner: FakeT,
+        lists: std::sync::atomic::AtomicU32,
+    }
     #[async_trait::async_trait]
     impl Transport for FlakyT {
         fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
@@ -1243,18 +1591,34 @@ mod tests {
             }
             self.inner.wrap(argv, tty)
         }
-        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> { self.inner.local_socket(s).await }
-        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> { self.inner.release_socket(s).await }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            self.inner.local_socket(s).await
+        }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> {
+            self.inner.release_socket(s).await
+        }
     }
 
     #[tokio::test]
     async fn start_session_polls_through_transient_errors() {
-        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FlakyT { inner: FakeT { sock: sock.clone() }, lists: Default::default() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FlakyT {
+                inner: FakeT { sock: sock.clone() },
+                lists: Default::default(),
+            }) as Arc<dyn Transport>
+        }));
         // Initial connect would hit the failing list; the first call (count 0) passes.
         mgr.connect("local").await.unwrap();
         mgr.start_session("local", "default").await.unwrap();
@@ -1267,10 +1631,19 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let (sock, rel) = (f.path.to_string_lossy().to_string(), released.clone());
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(RecT { inner: FakeT { sock: sock.clone() }, released: rel.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(RecT {
+                inner: FakeT { sock: sock.clone() },
+                released: rel.clone(),
+            }) as Arc<dyn Transport>
+        }));
         mgr.connect("local").await.unwrap(); // lists `old` as stopped
         mgr.disconnect("local").await;
-        assert!(released.lock().unwrap().contains(&"old".to_string()), "{:?}", released.lock().unwrap());
+        assert!(
+            released.lock().unwrap().contains(&"old".to_string()),
+            "{:?}",
+            released.lock().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -1279,20 +1652,45 @@ mod tests {
         struct Rec(Arc<Mutex<Vec<AttachEvent>>>);
         impl Sink for Rec {
             fn data(&self, _: Vec<u8>) {}
-            fn event(&self, e: AttachEvent) { self.0.lock().unwrap().push(e); }
+            fn event(&self, e: AttachEvent) {
+                self.0.lock().unwrap().push(e);
+            }
         }
         let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         let att = AttachManager::new(std::time::Duration::from_secs(15));
         mgr.set_attach_manager(att.clone());
         mgr.add("box".into(), None, None).await.unwrap();
-        let (master_ev, term_ev) = (Arc::new(Mutex::new(Vec::new())), Arc::new(Mutex::new(Vec::new())));
-        let mk = |session: &str, terminal: &str| AttachKey { machine_id: "box".into(), session: session.into(), terminal_id: terminal.into() };
-        att.open(mk("", "ssh-master"), vec!["sh".into(), "-c".into(), "sleep 5".into()], 80, 24, Arc::new(Rec(master_ev.clone()))).unwrap();
-        att.open(mk("default", "t"), vec!["cat".into()], 80, 24, Arc::new(Rec(term_ev.clone()))).unwrap();
+        let (master_ev, term_ev) = (
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let mk = |session: &str, terminal: &str| AttachKey {
+            machine_id: "box".into(),
+            session: session.into(),
+            terminal_id: terminal.into(),
+        };
+        att.open(
+            mk("", "ssh-master"),
+            vec!["sh".into(), "-c".into(), "sleep 5".into()],
+            80,
+            24,
+            Arc::new(Rec(master_ev.clone())),
+        )
+        .unwrap();
+        att.open(
+            mk("default", "t"),
+            vec!["cat".into()],
+            80,
+            24,
+            Arc::new(Rec(term_ev.clone())),
+        )
+        .unwrap();
         mgr.connect("box").await.unwrap();
         assert!(wait_for(|| term_ev.lock().unwrap().contains(&AttachEvent::Detached)).await);
         assert!(!master_ev.lock().unwrap().contains(&AttachEvent::Detached));
@@ -1301,7 +1699,10 @@ mod tests {
         assert!(wait_for(|| master_ev.lock().unwrap().contains(&AttachEvent::Detached)).await);
     }
 
-    fn counting_master(calls: Arc<std::sync::atomic::AtomicU32>, code: &'static str) -> MasterStart {
+    fn counting_master(
+        calls: Arc<std::sync::atomic::AtomicU32>,
+        code: &'static str,
+    ) -> MasterStart {
         Arc::new(move || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move { Err(AppError::new(code, "boom")) })
@@ -1315,13 +1716,23 @@ mod tests {
         let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         mgr.with_master_start(counting_master(calls.clone(), "ssh_auth"));
         mgr.add("retry-auth".into(), None, None).await.unwrap();
-        assert_eq!(mgr.connect("retry-auth").await.unwrap_err().code, "ssh_auth");
+        assert_eq!(
+            mgr.connect("retry-auth").await.unwrap_err().code,
+            "ssh_auth"
+        );
         mgr.on_master_lost("retry-auth").await;
         tokio::time::sleep(std::time::Duration::from_millis(3500)).await;
         // connect + exactly one retry (after 1 s); the 2 s retry never happens.
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
-        let v = mgr.views().into_iter().find(|v| v.id == "retry-auth").unwrap();
-        assert_eq!((v.state, v.error.map(|e| e.code)), (MachineState::Error, Some("ssh_auth".to_string())));
+        let v = mgr
+            .views()
+            .into_iter()
+            .find(|v| v.id == "retry-auth")
+            .unwrap();
+        assert_eq!(
+            (v.state, v.error.map(|e| e.code)),
+            (MachineState::Error, Some("ssh_auth".to_string()))
+        );
         mgr.remove("retry-auth").await.unwrap();
     }
 
@@ -1335,7 +1746,11 @@ mod tests {
         assert!(mgr.connect("retry-cancel").await.is_err());
         mgr.on_master_lost("retry-cancel").await;
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2, "an io failure keeps retrying");
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "an io failure keeps retrying"
+        );
         mgr.cancel_reconnect("retry-cancel");
         tokio::time::sleep(std::time::Duration::from_millis(2600)).await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
@@ -1355,26 +1770,46 @@ mod tests {
     }
 
     /// Records, per master-exit call, whether the slow master start had finished by then.
-    fn recording_exit(started: Arc<std::sync::atomic::AtomicBool>, log: Arc<Mutex<Vec<bool>>>) -> MasterExit {
-        Arc::new(move || log.lock().unwrap().push(started.load(std::sync::atomic::Ordering::SeqCst)))
+    fn recording_exit(
+        started: Arc<std::sync::atomic::AtomicBool>,
+        log: Arc<Mutex<Vec<bool>>>,
+    ) -> MasterExit {
+        Arc::new(move || {
+            log.lock()
+                .unwrap()
+                .push(started.load(std::sync::atomic::Ordering::SeqCst))
+        })
     }
 
     #[tokio::test]
     async fn disconnect_during_connect_ends_the_new_master() {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
-        let (started, exits) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(Mutex::new(Vec::new())));
+        let (started, exits) = (
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::new(Mutex::new(Vec::new())),
+        );
         mgr.with_master_start(slow_master(400, started.clone()));
         mgr.with_master_exit(recording_exit(started.clone(), exits.clone()));
         mgr.add("i1-disc".into(), None, None).await.unwrap();
         let m = mgr.clone();
         let connect = tokio::spawn(async move { m.connect("i1-disc").await });
         let m = mgr.clone();
-        assert!(wait_for(move || m.views().iter().any(|v| v.id == "i1-disc" && v.state == MachineState::Authenticating)).await);
+        assert!(
+            wait_for(move || m
+                .views()
+                .iter()
+                .any(|v| v.id == "i1-disc" && v.state == MachineState::Authenticating))
+            .await
+        );
         mgr.disconnect("i1-disc").await;
         connect.await.unwrap().unwrap();
         assert!(started.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(exits.lock().unwrap().contains(&true), "the master started after the disconnect is ended: {:?}", exits.lock().unwrap());
+        assert!(
+            exits.lock().unwrap().contains(&true),
+            "the master started after the disconnect is ended: {:?}",
+            exits.lock().unwrap()
+        );
         let v = mgr.views().into_iter().find(|v| v.id == "i1-disc").unwrap();
         assert_eq!((v.state, v.error), (MachineState::Disconnected, None));
         assert!(mgr.transport("i1-disc").is_err());
@@ -1385,17 +1820,30 @@ mod tests {
     async fn remove_during_connect_ends_the_new_master() {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
-        let (started, exits) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(Mutex::new(Vec::new())));
+        let (started, exits) = (
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Arc::new(Mutex::new(Vec::new())),
+        );
         mgr.with_master_start(slow_master(400, started.clone()));
         mgr.with_master_exit(recording_exit(started.clone(), exits.clone()));
         mgr.add("i1-remove".into(), None, None).await.unwrap();
         let m = mgr.clone();
         let connect = tokio::spawn(async move { m.connect("i1-remove").await });
         let m = mgr.clone();
-        assert!(wait_for(move || m.views().iter().any(|v| v.id == "i1-remove" && v.state == MachineState::Authenticating)).await);
+        assert!(
+            wait_for(move || m
+                .views()
+                .iter()
+                .any(|v| v.id == "i1-remove" && v.state == MachineState::Authenticating))
+            .await
+        );
         mgr.remove("i1-remove").await.unwrap();
         connect.await.unwrap().unwrap();
-        assert!(exits.lock().unwrap().contains(&true), "{:?}", exits.lock().unwrap());
+        assert!(
+            exits.lock().unwrap().contains(&true),
+            "{:?}",
+            exits.lock().unwrap()
+        );
         assert!(mgr.views().iter().all(|v| v.id != "i1-remove"));
     }
 
@@ -1412,13 +1860,24 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
-        mgr.with_health_check(std::time::Duration::from_millis(50), alive_seam(false, calls.clone()));
+        mgr.with_health_check(
+            std::time::Duration::from_millis(50),
+            alive_seam(false, calls.clone()),
+        );
         mgr.add("health-dead".into(), None, None).await.unwrap();
         mgr.connect("health-dead").await.unwrap();
         let m = mgr.clone();
-        assert!(wait_for(move || m.views().iter().any(|v| v.id == "health-dead" && v.state == MachineState::Disconnected)).await);
+        assert!(
+            wait_for(move || m
+                .views()
+                .iter()
+                .any(|v| v.id == "health-dead" && v.state == MachineState::Disconnected))
+            .await
+        );
         mgr.disconnect("health-dead").await;
     }
 
@@ -1428,14 +1887,26 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
-        mgr.with_health_check(std::time::Duration::from_millis(50), alive_seam(true, calls.clone()));
+        mgr.with_health_check(
+            std::time::Duration::from_millis(50),
+            alive_seam(true, calls.clone()),
+        );
         mgr.add("health-ok".into(), None, None).await.unwrap();
         mgr.connect("health-ok").await.unwrap();
         let c = calls.clone();
         assert!(wait_for(move || c.load(std::sync::atomic::Ordering::SeqCst) >= 2).await);
-        assert_eq!(mgr.views().into_iter().find(|v| v.id == "health-ok").unwrap().state, MachineState::Connected);
+        assert_eq!(
+            mgr.views()
+                .into_iter()
+                .find(|v| v.id == "health-ok")
+                .unwrap()
+                .state,
+            MachineState::Connected
+        );
         mgr.disconnect("health-ok").await;
         let n = calls.load(std::sync::atomic::Ordering::SeqCst);
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -1451,11 +1922,25 @@ mod tests {
         let states: Arc<Mutex<Vec<MachineState>>> = Arc::default();
         let st = states.clone();
         let d = tempfile::tempdir().unwrap();
-        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(move |e| if let UiEvent::Machine(v) = e { st.lock().unwrap().push(v.state) }));
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    st.lock().unwrap().push(v.state)
+                }
+            }),
+        );
         mgr.set_state("local", MachineState::Authenticating, None);
         mgr.set_state("local", MachineState::Probing, None);
         mgr.set_state("local", MachineState::Connected, None);
-        assert_eq!(*states.lock().unwrap(), [MachineState::Authenticating, MachineState::Probing, MachineState::Connected]);
+        assert_eq!(
+            *states.lock().unwrap(),
+            [
+                MachineState::Authenticating,
+                MachineState::Probing,
+                MachineState::Connected
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1463,47 +1948,102 @@ mod tests {
         let ids: Arc<Mutex<Vec<String>>> = Arc::default();
         let rec = ids.clone();
         let d = tempfile::tempdir().unwrap();
-        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(move |e| if let UiEvent::Machine(v) = e { rec.lock().unwrap().push(v.id) }));
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    rec.lock().unwrap().push(v.id)
+                }
+            }),
+        );
         mgr.add("ghost".into(), None, None).await.unwrap();
         ids.lock().unwrap().clear();
         mgr.remove("ghost").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(250)).await; // past any trailing emit
-        assert!(!ids.lock().unwrap().contains(&"ghost".to_string()), "{:?}", ids.lock().unwrap());
+        assert!(
+            !ids.lock().unwrap().contains(&"ghost".to_string()),
+            "{:?}",
+            ids.lock().unwrap()
+        );
     }
 
     #[tokio::test]
     async fn startup_connects_every_enabled_ssh_machine() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("m.json");
-        let cfg = |id: &str, enabled| MachineConfig { id: id.into(), label: id.into(), ssh_target: id.into(), herdr_path: None, enabled };
-        save_registry(&p, &[cfg("i9-a", true), cfg("i9-b", true), cfg("i9-off", false)]).unwrap();
+        let cfg = |id: &str, enabled| MachineConfig {
+            id: id.into(),
+            label: id.into(),
+            ssh_target: id.into(),
+            herdr_path: None,
+            enabled,
+        };
+        save_registry(
+            &p,
+            &[cfg("i9-a", true), cfg("i9-b", true), cfg("i9-off", false)],
+        )
+        .unwrap();
         let mgr = MachineManager::new(p, Arc::new(|_| {}));
         let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         mgr.with_master_start(counting_master(calls.clone(), "ssh_auth"));
         mgr.connect_enabled_ssh().await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
         let views = mgr.views();
-        let state = |id: &str| views.iter().find(|v| v.id == id).map(|v| (v.state, v.error.as_ref().map(|e| e.code.clone())));
-        assert_eq!(state("i9-a"), Some((MachineState::Error, Some("ssh_auth".into()))));
+        let state = |id: &str| {
+            views
+                .iter()
+                .find(|v| v.id == id)
+                .map(|v| (v.state, v.error.as_ref().map(|e| e.code.clone())))
+        };
+        assert_eq!(
+            state("i9-a"),
+            Some((MachineState::Error, Some("ssh_auth".into())))
+        );
         assert_eq!(state("i9-off"), Some((MachineState::Disconnected, None)));
-        assert_eq!(state("local"), Some((MachineState::Disconnected, None)), "local is connected separately");
+        assert_eq!(
+            state("local"),
+            Some((MachineState::Disconnected, None)),
+            "local is connected separately"
+        );
     }
 
     #[tokio::test]
     async fn pane_rename_refetches_the_session() {
-        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let sock = f.path.to_string_lossy().to_string();
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
         mgr.connect("local").await.unwrap();
         assert!(wait_for(|| f.calls_of("events.subscribe") >= 1).await);
         let before = f.calls_of("session.snapshot");
-        mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"})).await.unwrap();
+        mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"}))
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert_eq!(f.calls_of("session.snapshot"), before, "other calls do not refetch");
-        mgr.call("local", "default", "pane.rename", json!({"pane_id":"w1:p1","label":"x"})).await.unwrap();
+        assert_eq!(
+            f.calls_of("session.snapshot"),
+            before,
+            "other calls do not refetch"
+        );
+        mgr.call(
+            "local",
+            "default",
+            "pane.rename",
+            json!({"pane_id":"w1:p1","label":"x"}),
+        )
+        .await
+        .unwrap();
         assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
     }
 
@@ -1515,9 +2055,21 @@ mod tests {
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let chats = Arc::new(ChatManager::default());
         mgr.set_chat_manager(chats.clone());
-        let pane = PaneRef { machine_id: "local".into(), session: "default".into(), pane_id: "w1:p1".into() };
+        let pane = PaneRef {
+            machine_id: "local".into(),
+            session: "default".into(),
+            pane_id: "w1:p1".into(),
+        };
         let parser = crate::transcript::parser_for("claude").unwrap();
-        chats.insert(pane.clone(), crate::transcript::spawn_tail(Arc::new(LocalTransport), p.to_string_lossy().into(), parser, Arc::new(|_| {})));
+        chats.insert(
+            pane.clone(),
+            crate::transcript::spawn_tail(
+                Arc::new(LocalTransport),
+                p.to_string_lossy().into(),
+                parser,
+                Arc::new(|_| {}),
+            ),
+        );
         assert!(chats.page(&pane, 0, 1).is_some());
         mgr.disconnect("local").await;
         assert!(chats.page(&pane, 0, 1).is_none());
@@ -1525,17 +2077,33 @@ mod tests {
 
     #[tokio::test]
     async fn reconnect_releases_old_sockets() {
-        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
-        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
         let released: Arc<Mutex<Vec<String>>> = Arc::default();
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
         let (sock, rel) = (f.path.to_string_lossy().to_string(), released.clone());
-        mgr.with_transport_factory(Arc::new(move |_| Arc::new(RecT { inner: FakeT { sock: sock.clone() }, released: rel.clone() }) as Arc<dyn Transport>));
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(RecT {
+                inner: FakeT { sock: sock.clone() },
+                released: rel.clone(),
+            }) as Arc<dyn Transport>
+        }));
         mgr.connect("local").await.unwrap();
         assert!(released.lock().unwrap().is_empty());
         mgr.connect("local").await.unwrap();
-        assert!(released.lock().unwrap().contains(&"default".to_string()), "{:?}", released.lock().unwrap());
+        assert!(
+            released.lock().unwrap().contains(&"default".to_string()),
+            "{:?}",
+            released.lock().unwrap()
+        );
         assert_eq!(mgr.views()[0].state, MachineState::Connected);
     }
 }
