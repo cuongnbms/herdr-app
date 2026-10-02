@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), Channel: class {} }));
@@ -19,6 +19,18 @@ describe("App shell", () => {
       sessions: [{ name: "default", running: false, status: "unknown", error: null, workspaces: [] }] }]);
     render(<App />);
     expect(await screen.findByRole("button", { name: "Start default session" })).toBeTruthy();
+  });
+
+  it("shows a toast when starting the default session fails", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as any).mockResolvedValueOnce([{ id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "unknown",
+      sessions: [{ name: "default", running: false, status: "unknown", error: null, workspaces: [] }] }]);
+    render(<App />);
+    const start = await screen.findByRole("button", { name: "Start default session" });
+    (invoke as any).mockImplementation((cmd: string) => (cmd === "session_start" ? Promise.reject({ code: "timeout", message: "did not start" }) : Promise.resolve([])));
+    fireEvent.click(start);
+    expect(await screen.findByText("Could not start the default session: did not start")).toBeTruthy();
+    (invoke as any).mockImplementation(() => Promise.resolve([]));
   });
 
   it("explains when herdr is missing", async () => {

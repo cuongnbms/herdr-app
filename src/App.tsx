@@ -9,7 +9,7 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { selectedPane, useApp } from "./store/app";
-import { Toasts } from "./ui/Toast";
+import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
 
@@ -39,7 +39,11 @@ function EmptyMain() {
         <p>No running sessions</p>
         <button
           type="button"
-          onClick={() => void sessionStart("local", "default").catch((err) => console.error("session_start failed", err))}
+          onClick={() =>
+            void sessionStart("local", "default").catch((err: unknown) =>
+              showToast(`Could not start the default session: ${(err as { message?: string } | null)?.message ?? String(err)}`),
+            )
+          }
         >
           Start default session
         </button>

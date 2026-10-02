@@ -1,6 +1,15 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-import { herdrCall, machineConnect, machineDisconnect, machineRemove, machineUpdate, sessionStart, sessionStop } from "../lib/ipc";
+import {
+  herdrCall,
+  machineConnect,
+  machineDisconnect,
+  machineRemove,
+  machineUpdate,
+  sessionsRefresh,
+  sessionStart,
+  sessionStop,
+} from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneView, SessionView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
@@ -186,7 +195,7 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
           <button
             className="start"
             aria-label={`Start ${session.name}`}
-            onClick={() => void sessionStart(machineId, session.name)}
+            onClick={() => a?.guard(() => sessionStart(machineId, session.name))}
           >
             Start
           </button>
@@ -252,24 +261,29 @@ function MachineNode({ machine }: { machine: MachineView }) {
   const ok = machine.state === "connected";
   // A dropped ssh Machine stays visible (greyed, controls disabled) with its last snapshot.
   const showSessions = ok || machine.sessions.length > 0;
-  const needsConnect = ssh && (machine.state === "disconnected" || (machine.state === "error" && machine.error?.code === "ssh_auth"));
+  // Any error can be retried (e.g. after installing herdr); ssh goes batch first, then the dialog.
+  const needsConnect = (ssh && machine.state === "disconnected") || machine.state === "error";
   const notFound = ssh && machine.error?.code === "herdr_not_found";
   let message = machine.error?.message ?? machine.state;
   if (machine.state === "incompatible") message = incompatibleText(machine);
   else if (notFound) message = "herdr not found — set its path";
-  const items: MenuItem[] =
-    a && ssh
-      ? [
-          ...(machine.state !== "disconnected" ? [{ label: "Disconnect", onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
-          {
-            label: "Remove machine…",
-            onSelect: () =>
-              a.confirm("Remove machine", `Remove "${machine.label}"? Its sessions keep running on the machine.`, "Remove", () =>
-                machineRemove(machine.id).then(() => useApp.getState().removeMachine(machine.id)),
-              ),
-          },
-        ]
-      : [];
+  const items: MenuItem[] = a
+    ? [
+        ...(ok ? [{ label: "Refresh sessions", onSelect: () => a.guard(() => sessionsRefresh(machine.id)) }] : []),
+        ...(ssh
+          ? [
+              ...(machine.state !== "disconnected" ? [{ label: "Disconnect", onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
+              {
+                label: "Remove machine…",
+                onSelect: () =>
+                  a.confirm("Remove machine", `Remove "${machine.label}"? Its sessions keep running on the machine.`, "Remove", () =>
+                    machineRemove(machine.id).then(() => useApp.getState().removeMachine(machine.id)),
+                  ),
+              },
+            ]
+          : []),
+      ]
+    : [];
   return (
     <li className={"machine" + (ok ? "" : " offline")}>
       <button
@@ -286,7 +300,7 @@ function MachineNode({ machine }: { machine: MachineView }) {
       {notFound && <HerdrPathEdit machineId={machine.id} />}
       {needsConnect && (
         <div className="machine-actions">
-          <button onClick={() => a?.connect(machine)}>Connect…</button>
+          <button onClick={() => a?.connect(machine)}>{ssh ? "Connect…" : "Retry"}</button>
         </div>
       )}
       {open && showSessions && (
