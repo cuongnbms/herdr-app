@@ -43,6 +43,22 @@ export function setFolder(ref: WorkspaceRef, path: string): void {
   notify();
 }
 
+/** Drop every stored folder of a Session that no longer exists. */
+export function forgetSessionFolders(machineId: string, session: string): void {
+  const prefix = PREFIX + encodeURIComponent(machineId) + "/" + encodeURIComponent(session) + "/";
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) doomed.push(key);
+    }
+    doomed.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* ignore */
+  }
+  notify();
+}
+
 export function suggestFolder(ws: WorkspaceView): string {
   for (const tab of ws.tabs) {
     for (const pane of tab.panes) {

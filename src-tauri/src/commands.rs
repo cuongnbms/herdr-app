@@ -81,6 +81,15 @@ pub async fn session_start(
 }
 
 #[tauri::command]
+pub async fn session_delete(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+) -> Result<(), AppError> {
+    mgr.delete_session(&machine_id, &session).await
+}
+
+#[tauri::command]
 pub async fn session_stop(
     mgr: Mgr<'_>,
     machine_id: String,

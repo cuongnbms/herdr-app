@@ -29,6 +29,8 @@ export const sessionStart = (machineId: string, session: string) =>
   invoke<void>("session_start", { machineId, session });
 export const sessionStop = (machineId: string, session: string) =>
   invoke<void>("session_stop", { machineId, session });
+export const sessionDelete = (machineId: string, session: string) =>
+  invoke<void>("session_delete", { machineId, session });
 export const herdrCall = <T>(machineId: string, session: string, method: string, params: unknown) =>
   invoke<T>("herdr_call", { machineId, session, method, params }).catch((e: unknown) => {
     if ((e as { code?: string } | null)?.code === "timeout") showToast(`${method} timed out`);

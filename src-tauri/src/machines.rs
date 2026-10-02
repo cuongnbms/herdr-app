@@ -1167,6 +1167,30 @@ impl MachineManager {
         self.refresh_sessions(id).await
     }
 
+    /// Delete a stopped Session with `herdr session delete`; herdr refuses running ones, so do we.
+    pub async fn delete_session(&self, id: &str, name: &str) -> AppResult<()> {
+        let entry = self.session(id, name)?;
+        if entry.running {
+            return Err(AppError::new(
+                "invalid",
+                format!("stop session {name} before deleting it"),
+            ));
+        }
+        let (info, t) = (self.info(id)?, self.transport(id)?);
+        let out = exec(
+            t.as_ref(),
+            &herdr_argv(&info, "default", &["session", "delete", "--", name]),
+        )
+        .await?;
+        if out.status != 0 {
+            return Err(AppError::new(
+                "herdr_error",
+                format!("could not delete {name}: {}", out.stderr.trim()),
+            ));
+        }
+        self.refresh_sessions(id).await
+    }
+
     pub async fn call(
         &self,
         pane_machine: &str,
@@ -1626,6 +1650,81 @@ mod tests {
         // Initial connect would hit the failing list; the first call (count 0) passes.
         mgr.connect("local").await.unwrap();
         mgr.start_session("local", "default").await.unwrap();
+    }
+
+    /// Records `session delete` argv; answers it with `fail` as stderr and exit 1 when set.
+    struct DelT {
+        inner: FakeT,
+        deletes: Arc<Mutex<Vec<String>>>,
+        fail: Option<&'static str>,
+    }
+    #[async_trait::async_trait]
+    impl Transport for DelT {
+        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
+            let joined = argv.join(" ");
+            if joined.contains("session delete") {
+                self.deletes.lock().unwrap().push(joined);
+                return match self.fail {
+                    Some(msg) => vec!["sh".into(), "-c".into(), format!("echo {msg} >&2; exit 1")],
+                    None => vec!["true".into()],
+                };
+            }
+            self.inner.wrap(argv, tty)
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            self.inner.local_socket(s).await
+        }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> {
+            self.inner.release_socket(s).await
+        }
+    }
+
+    async fn delete_mgr(
+        fail: Option<&'static str>,
+    ) -> (Arc<MachineManager>, Arc<Mutex<Vec<String>>>, FakeHerdr) {
+        let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
+        let deletes: Arc<Mutex<Vec<String>>> = Arc::default();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (sock, del) = (f.path.to_string_lossy().to_string(), deletes.clone());
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(DelT {
+                inner: FakeT { sock: sock.clone() },
+                deletes: del.clone(),
+                fail,
+            }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        (mgr, deletes, f)
+    }
+
+    #[tokio::test]
+    async fn delete_session_runs_herdr_session_delete_for_a_stopped_session() {
+        let (mgr, deletes, _f) = delete_mgr(None).await;
+        mgr.delete_session("local", "old").await.unwrap();
+        assert_eq!(*deletes.lock().unwrap(), ["/h/herdr session delete -- old"]);
+    }
+
+    #[tokio::test]
+    async fn delete_session_refuses_a_running_or_unknown_session() {
+        let (mgr, deletes, _f) = delete_mgr(None).await;
+        assert_eq!(
+            mgr.delete_session("local", "default")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert!(mgr.delete_session("local", "nope").await.is_err());
+        assert!(deletes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_session_reports_herdr_failure() {
+        let (mgr, _deletes, _f) = delete_mgr(Some("locked")).await;
+        let e = mgr.delete_session("local", "old").await.unwrap_err();
+        assert_eq!(e.code, "herdr_error");
+        assert!(e.message.contains("locked"), "{}", e.message);
     }
 
     #[tokio::test]

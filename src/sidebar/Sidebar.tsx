@@ -4,6 +4,7 @@ import {
   machineDisconnect,
   machineRemove,
   machineUpdate,
+  sessionDelete,
   sessionsRefresh,
   sessionStart,
   sessionStop,
@@ -13,6 +14,7 @@ import { useApp } from "../store/app";
 import { StatusDot } from "./StatusDot";
 import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
+import { forgetSessionFolders } from "../workspaces/folder";
 import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon } from "../ui/icons";
 
 const hl = (status: string) => (status === "blocked" ? " blocked" : "");
@@ -33,7 +35,16 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
             { label: "New workspace…", onSelect: () => a.newWorkspace(machineId, session.name) },
             { label: "Stop session", onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },
           ]
-        : [{ label: "Start session", onSelect: () => a.guard(() => sessionStart(machineId, session.name)) }],
+        : [
+            { label: "Start session", onSelect: () => a.guard(() => sessionStart(machineId, session.name)) },
+            {
+              label: "Delete session…",
+              onSelect: () =>
+                a.confirm("Delete session", `Delete session "${session.name}"? This can't be undone.`, "Delete", () =>
+                  sessionDelete(machineId, session.name).then(() => forgetSessionFolders(machineId, session.name)),
+                ),
+            },
+          ],
     );
   if (!session.running) {
     return (

@@ -37,6 +37,7 @@ pub fn run() {
             commands::sessions_refresh,
             commands::session_start,
             commands::session_stop,
+            commands::session_delete,
             commands::herdr_call,
             commands::term_open,
             commands::term_write,
