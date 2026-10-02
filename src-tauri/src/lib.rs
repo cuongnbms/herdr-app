@@ -1,9 +1,14 @@
+pub mod commands;
 pub mod error;
 pub mod herdr;
+pub mod machines;
 pub mod transport;
 pub mod view;
 
-use tauri::Manager;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
+
+use machines::{MachineManager, UiEvent};
 use tracing_appender::rolling::{Builder, Rotation};
 use tracing_subscriber::EnvFilter;
 
@@ -11,9 +16,39 @@ use tracing_subscriber::EnvFilter;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::machines_list,
+            commands::machine_connect,
+            commands::machine_disconnect,
+            commands::sessions_refresh,
+            commands::session_start,
+            commands::session_stop,
+            commands::herdr_call,
+        ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
             tracing::info!("herdr-app starting");
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let handle = app.handle().clone();
+            let mgr = MachineManager::new(
+                dir.join("machines.json"),
+                Arc::new(move |e| {
+                    let res = match e {
+                        UiEvent::Machine(v) => handle.emit("sidebar://machine", v),
+                        UiEvent::PaneStatus(p) => handle.emit("pane://status", p),
+                    };
+                    if let Err(err) = res {
+                        tracing::warn!("emit failed: {err}");
+                    }
+                }),
+            );
+            app.manage(mgr.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = mgr.connect("local").await {
+                    tracing::error!("connect local: {e}");
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
