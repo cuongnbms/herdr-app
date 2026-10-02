@@ -1,3 +1,4 @@
+pub mod attach;
 pub mod commands;
 pub mod error;
 pub mod herdr;
@@ -8,6 +9,7 @@ pub mod view;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
+use attach::AttachManager;
 use machines::{MachineManager, UiEvent};
 use tracing_appender::rolling::{Builder, Rotation};
 use tracing_subscriber::EnvFilter;
@@ -24,6 +26,12 @@ pub fn run() {
             commands::session_start,
             commands::session_stop,
             commands::herdr_call,
+            commands::term_open,
+            commands::term_write,
+            commands::term_resize,
+            commands::term_ack,
+            commands::term_release,
+            commands::term_close,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
@@ -44,6 +52,7 @@ pub fn run() {
                 }),
             );
             app.manage(mgr.clone());
+            app.manage(AttachManager::new(std::time::Duration::from_secs(15)));
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mgr.connect("local").await {
                     tracing::error!("connect local: {e}");
