@@ -212,6 +212,15 @@ impl AttachManager {
         Ok(())
     }
 
+    /// `write` on a blocking thread: a PTY write can block (a full buffer behind a wedged
+    /// ssh connection) and must not stall a tokio worker.
+    pub async fn write_async(self: &Arc<Self>, key: AttachKey, data: Vec<u8>) -> AppResult<()> {
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || me.write(&key, &data))
+            .await
+            .map_err(|e| AppError::new("io", format!("terminal write task failed: {e}")))?
+    }
+
     pub fn resize(&self, key: &AttachKey, cols: u16, rows: u16) -> AppResult<()> {
         let e = self.get(key)?;
         let master = e.master.lock().unwrap();
@@ -379,6 +388,15 @@ mod tests {
         assert!(String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:hello"));
         assert!(rec.events.lock().unwrap().contains(&AttachEvent::Attached));
         assert!(rec.events.lock().unwrap().contains(&AttachEvent::Exited { code: Some(3) }));
+    }
+    #[tokio::test]
+    async fn write_async_delivers_input() {
+        let m = AttachManager::new(Duration::from_millis(200));
+        let rec = Arc::new(Rec::default());
+        m.open(key("w"), sh("read l; echo got:$l"), 80, 24, rec.clone()).unwrap();
+        m.write_async(key("w"), b"async\n".to_vec()).await.unwrap();
+        wait_for(|| String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:async")).await;
+        assert_eq!(m.write_async(key("nope"), b"x".to_vec()).await.unwrap_err().code, "not_found");
     }
     #[tokio::test]
     async fn detects_held_attach() {

@@ -118,7 +118,9 @@ impl Transport for SshTransport {
     }
 }
 
-/// `ssh -M -S ctl -o ControlPersist=yes [-o BatchMode=yes] -f -N target`.
+/// `ssh -M -S ctl -o ControlPersist=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+/// [-o BatchMode=yes] -f -N target`. Keepalives make a wedged connection end the master
+/// (about 45 s) instead of leaving the Machine "connected" with frozen terminals.
 pub fn master_argv(ctl: &Path, target: &str, batch: bool) -> Vec<String> {
     let mut v: Vec<String> = vec![
         "ssh".into(),
@@ -127,6 +129,10 @@ pub fn master_argv(ctl: &Path, target: &str, batch: bool) -> Vec<String> {
         ctl.to_string_lossy().into_owned(),
         "-o".into(),
         "ControlPersist=yes".into(),
+        "-o".into(),
+        "ServerAliveInterval=15".into(),
+        "-o".into(),
+        "ServerAliveCountMax=3".into(),
     ];
     if batch {
         v.push("-o".into());
@@ -227,8 +233,9 @@ mod tests {
     #[test]
     fn master_argv_batch_and_interactive() {
         let b = master_argv(Path::new("/c"), "devtuf", true);
-        assert_eq!(b, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "BatchMode=yes", "-f", "-N", "devtuf"]);
-        assert!(!master_argv(Path::new("/c"), "devtuf", false).contains(&"BatchMode=yes".to_string()));
+        assert_eq!(b, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-o", "BatchMode=yes", "-f", "-N", "devtuf"]);
+        let i = master_argv(Path::new("/c"), "devtuf", false);
+        assert_eq!(i, ["ssh", "-M", "-S", "/c", "-o", "ControlPersist=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-f", "-N", "devtuf"]);
     }
     #[test]
     fn reuses_cached_forward_only_when_valid() {

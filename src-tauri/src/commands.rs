@@ -158,7 +158,7 @@ fn master_key(machine_id: String) -> AttachKey {
 
 #[tauri::command]
 pub async fn connect_write(att: Att<'_>, machine_id: String, data: String) -> Result<(), AppError> {
-    att.write(&master_key(machine_id), data.as_bytes())
+    att.inner().write_async(master_key(machine_id), data.into_bytes()).await
 }
 
 #[tauri::command]
@@ -196,7 +196,7 @@ pub async fn term_open(
 
 #[tauri::command]
 pub async fn term_write(att: Att<'_>, key: AttachKey, data: String) -> Result<(), AppError> {
-    att.write(&key, data.as_bytes())
+    att.inner().write_async(key, data.into_bytes()).await
 }
 
 #[tauri::command]
