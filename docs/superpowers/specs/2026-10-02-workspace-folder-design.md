@@ -36,7 +36,7 @@ New module `src/workspaces/folder.ts`:
 interface WorkspaceRef { machine_id: string; session: string; workspace_id: string }
 getFolder(ref: WorkspaceRef): string | null
 setFolder(ref: WorkspaceRef, path: string): void          // trims; empty string removes
-suggestFolder(ws: WorkspaceView): string                  // cwd of tabs[0].panes[0], else ""
+suggestFolder(ws: WorkspaceView): string                  // cwd of the first Pane (Tab order) that has one, else ""
 pruneFolders(machineId: string, session: SessionView): void
 ```
 
@@ -94,7 +94,7 @@ The dialog closes on submit, as `NewWorkspaceDialog` does. `select` happens righ
 
 ## Testing (Vitest + Testing Library, as existing tests)
 
-- `folder.test.ts`: set/get round trip; empty string removes; `suggestFolder` picks the first Pane's cwd and returns `""` when there is none; `pruneFolders` removes absent ids, keeps present ones, ignores other Sessions, and does nothing for a stopped Session.
+- `folder.test.ts`: set/get round trip; empty string removes; `suggestFolder` picks the first Pane cwd in Tab order, skipping Panes without one, and returns `""` when there is none; `pruneFolders` removes absent ids, keeps present ones, ignores other Sessions, and does nothing for a stopped Session.
 - `AgentList.test.tsx`: groups cards under Workspace headers in order; empty Workspace shows a header; header shows folder basename or `no folder`.
 - `NewAgentDialog.test.tsx` with `herdrCall` mocked: no stored folder → field shown, prefilled, saved on submit; stored folder → field hidden; calls `tab.create` with that cwd, then `agent.start` with the returned `root_pane.pane_id`; selects the new Pane; `agent.start` rejection shows the error.
 - `NewWorkspaceDialog`: stores the Directory as the folder of the created Workspace.
