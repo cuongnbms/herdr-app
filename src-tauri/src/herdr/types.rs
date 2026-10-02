@@ -70,6 +70,8 @@ pub struct PaneInfo {
     pub tab_id: String,
     pub workspace_id: String,
     pub terminal_id: String,
+    /// The user-set pane name (`pane.rename`).
+    pub label: Option<String>,
     pub cwd: Option<String>,
     pub foreground_cwd: Option<String>,
     pub terminal_title_stripped: Option<String>,

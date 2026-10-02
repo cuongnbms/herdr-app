@@ -29,10 +29,9 @@ pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
                         .filter(|p| p.tab_id == t.tab_id)
                         .map(|p| {
                             let agent = agents.get(p.pane_id.as_str()).and_then(|a| a.agent.clone());
-                            let title = p
-                                .terminal_title_stripped
-                                .clone()
-                                .filter(|s| !s.is_empty())
+                            let title = [&p.label, &p.terminal_title_stripped]
+                                .into_iter()
+                                .find_map(|s| s.clone().filter(|s| !s.is_empty()))
                                 .or_else(|| agent.clone())
                                 .unwrap_or_else(|| p.pane_id.clone());
                             PaneView {
@@ -128,6 +127,15 @@ mod tests {
         assert_eq!(w2.tabs.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["1", "logs"]);
         assert_eq!(w2.tabs[1].panes[0].title, "w2:p2");
         assert_eq!(w2.status, AgentStatus::Idle);
+    }
+    #[test]
+    fn pane_label_wins_over_terminal_title() {
+        let mut s = fixture();
+        s.panes[0].label = Some("my pane".into());
+        s.panes[1].label = Some(String::new());
+        let v = session_view("default", &s);
+        assert_eq!(v.workspaces[0].tabs[0].panes[0].title, "my pane");
+        assert_eq!(v.workspaces[0].tabs[0].panes[1].title, "pi", "an empty label falls back");
     }
     #[test]
     fn applies_status_changes() {

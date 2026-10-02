@@ -137,6 +137,8 @@ struct Sess {
     view: Option<SessionView>,
     error: Option<AppError>,
     supervisor: Option<JoinHandle<()>>,
+    /// Asks this Session's watcher for a fresh snapshot.
+    refetch: Arc<tokio::sync::Notify>,
 }
 
 struct Machine {
@@ -850,14 +852,14 @@ impl MachineManager {
             for entry in list {
                 let mut s = match old.iter().position(|s| s.entry.name == entry.name) {
                     Some(i) => old.remove(i),
-                    None => Sess { entry: entry.clone(), view: None, error: None, supervisor: None },
+                    None => Sess { entry: entry.clone(), view: None, error: None, supervisor: None, refetch: Arc::default() },
                 };
                 s.entry = entry;
                 if s.entry.running {
                     if s.supervisor.is_none() {
                         if let Some(me) = self.me.upgrade() {
                             let (id, name) = (m.cfg.id.clone(), s.entry.name.clone());
-                            s.supervisor = Some(tokio::spawn(me.supervise(id, name, transport.clone())));
+                            s.supervisor = Some(tokio::spawn(me.supervise(id, name, transport.clone(), s.refetch.clone())));
                         }
                     }
                 } else {
@@ -969,7 +971,16 @@ impl MachineManager {
         }
         let entry = self.session(pane_machine, session)?;
         let socket = self.transport(pane_machine)?.local_socket(&entry).await?;
-        rpc::call(&socket, method, params).await
+        let result = rpc::call(&socket, method, params).await?;
+        if method == "pane.rename" {
+            // herdr reports a rename only as `pane.updated`, which the watcher does not subscribe to.
+            let _ = self.with_machine(pane_machine, |m| {
+                if let Some(s) = m.sessions.iter().find(|s| s.entry.name == session) {
+                    s.refetch.notify_one();
+                }
+            });
+        }
+        Ok(result)
     }
 
     // ---- per-session supervisor ---------------------------------------
@@ -988,7 +999,7 @@ impl MachineManager {
     }
 
     /// Keep a watcher alive for one running session; reconnect (fresh snapshot) with backoff.
-    async fn supervise(self: Arc<Self>, id: String, name: String, transport: Arc<dyn Transport>) {
+    async fn supervise(self: Arc<Self>, id: String, name: String, transport: Arc<dyn Transport>, refetch: Arc<tokio::sync::Notify>) {
         let mut attempt = 0u32;
         loop {
             let Ok(entry) = self.session(&id, &name) else { return };
@@ -997,7 +1008,7 @@ impl MachineManager {
                 Err(e) => e,
                 Ok(socket) => {
                     let (tx, mut rx) = mpsc::unbounded_channel();
-                    let _guard = AbortOnDrop(spawn_watcher(name.clone(), socket, tx));
+                    let _guard = AbortOnDrop(spawn_watcher(name.clone(), socket, tx, refetch.clone()));
                     let mut closed = None;
                     while let Some(ev) = rx.recv().await {
                         match ev {
@@ -1465,6 +1476,24 @@ mod tests {
         assert_eq!(state("i9-a"), Some((MachineState::Error, Some("ssh_auth".into()))));
         assert_eq!(state("i9-off"), Some((MachineState::Disconnected, None)));
         assert_eq!(state("local"), Some((MachineState::Disconnected, None)), "local is connected separately");
+    }
+
+    #[tokio::test]
+    async fn pane_rename_refetches_the_session() {
+        let snap: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| if m == "session.snapshot" { Ok(json!({"type":"session_snapshot","snapshot": snap.clone()})) } else { Ok(json!({"type":"ok"})) }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        mgr.connect("local").await.unwrap();
+        assert!(wait_for(|| f.calls_of("events.subscribe") >= 1).await);
+        let before = f.calls_of("session.snapshot");
+        mgr.call("local", "default", "pane.close", json!({"pane_id":"w1:p2"})).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(f.calls_of("session.snapshot"), before, "other calls do not refetch");
+        mgr.call("local", "default", "pane.rename", json!({"pane_id":"w1:p1","label":"x"})).await.unwrap();
+        assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
     }
 
     #[tokio::test]

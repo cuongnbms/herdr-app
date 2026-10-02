@@ -9,9 +9,9 @@ use crate::{
     view::SessionView,
 };
 use serde_json::{json, Value};
-use std::{path::{Path, PathBuf}, time::Duration};
+use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
 use tokio::{
-    sync::mpsc::UnboundedSender,
+    sync::{mpsc::UnboundedSender, Notify},
     task::JoinHandle,
     time::{timeout_at, Instant},
 };
@@ -86,7 +86,9 @@ fn handle_event(name: &str, snap: &mut Snapshot, ev: &EventFrame, tx: &Unbounded
 }
 
 /// Runs until the stream ends, a call fails, or the receiver is dropped (`None`).
-async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>) -> Option<AppError> {
+/// `refetch` asks for a fresh snapshot (e.g. after a rename, which herdr reports only as
+/// `pane.updated`, a type we do not subscribe to).
+async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>, refetch: &Notify) -> Option<AppError> {
     let mut snap = match rpc::snapshot(socket).await {
         Ok(s) => s,
         Err(e) => return Some(e),
@@ -101,11 +103,16 @@ async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>) -> Opt
     let mut need_refetch = false;
     loop {
         if !need_refetch {
-            let Some(ev) = sub.rx.recv().await else { return Some(closed()) };
-            match handle_event(name, &mut snap, &ev, tx) {
-                Handled::Done => continue,
-                Handled::Gone => return None,
-                Handled::Refetch => {}
+            tokio::select! {
+                ev = sub.rx.recv() => {
+                    let Some(ev) = ev else { return Some(closed()) };
+                    match handle_event(name, &mut snap, &ev, tx) {
+                        Handled::Done => continue,
+                        Handled::Gone => return None,
+                        Handled::Refetch => {}
+                    }
+                }
+                _ = refetch.notified() => {}
             }
         }
         need_refetch = false;
@@ -151,9 +158,9 @@ async fn run(name: &str, socket: &Path, tx: &UnboundedSender<WatchEvent>) -> Opt
 }
 
 /// Watch one session. Ends after sending `Closed`; the Machine manager owns retries.
-pub fn spawn_watcher(name: String, socket: PathBuf, tx: UnboundedSender<WatchEvent>) -> JoinHandle<()> {
+pub fn spawn_watcher(name: String, socket: PathBuf, tx: UnboundedSender<WatchEvent>, refetch: Arc<Notify>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        if let Some(err) = run(&name, &socket, &tx).await {
+        if let Some(err) = run(&name, &socket, &tx, &refetch).await {
             let _ = tx.send(WatchEvent::Closed(err));
         }
     })
@@ -186,7 +193,7 @@ mod tests {
     async fn started(snap: Arc<Mutex<Value>>) -> (FakeHerdr, mpsc::UnboundedReceiver<WatchEvent>, tokio::task::JoinHandle<()>) {
         let f = fake_with(snap);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let h = spawn_watcher("default".into(), f.path.clone(), tx);
+        let h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         next(&mut rx).await;
         let end = tokio::time::Instant::now() + Duration::from_secs(3);
         while f.calls_of("events.subscribe") < 1 && tokio::time::Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await; }
@@ -213,7 +220,7 @@ mod tests {
         let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
         let f = fake_with(snap.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let _h = spawn_watcher("default".into(), f.path.clone(), tx);
+        let _h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces.len() == 2));
         tokio::time::sleep(Duration::from_millis(100)).await; // let subscribe land
         let subs = f.calls.lock().unwrap().iter().find(|(m, _)| m == "events.subscribe").unwrap().1.clone();
@@ -230,7 +237,7 @@ mod tests {
         let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
         let f = fake_with(snap.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let _h = spawn_watcher("default".into(), f.path.clone(), tx);
+        let _h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         next(&mut rx).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         snap.lock().unwrap()["panes"].as_array_mut().unwrap().push(json!({"pane_id":"w2:p3","tab_id":"w2:t1","workspace_id":"w2","terminal_id":"term_e","agent_status":"idle"}));
@@ -242,11 +249,25 @@ mod tests {
         assert_eq!(f.calls_of("events.subscribe"), 2, "pane set changed → resubscribe");
     }
     #[tokio::test]
+    async fn refetch_signal_fetches_a_fresh_snapshot() {
+        let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
+        let f = fake_with(snap.clone());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let refetch: Arc<tokio::sync::Notify> = Arc::default();
+        let _h = spawn_watcher("default".into(), f.path.clone(), tx, refetch.clone());
+        next(&mut rx).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        snap.lock().unwrap()["panes"][0]["label"] = json!("renamed");
+        refetch.notify_one();
+        assert!(matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "renamed"));
+        assert_eq!(f.calls_of("session.snapshot"), 2);
+    }
+    #[tokio::test]
     async fn watcher_reports_closed_when_socket_closes() {
         let snap = Arc::new(Mutex::new(serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json")).unwrap()));
         let f = fake_with(snap);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let h = spawn_watcher("default".into(), f.path.clone(), tx);
+        let h = spawn_watcher("default".into(), f.path.clone(), tx, Arc::default());
         next(&mut rx).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         f.close_subscriptions();
