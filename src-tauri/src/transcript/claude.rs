@@ -1,27 +1,13 @@
 //! Claude Code transcript parser.
 use super::locate::input_summary;
-use super::{ChatItem, Parser, ParserOutput};
+use super::{truncate_result as truncate, ChatItem, Parser, ParserOutput};
 use serde_json::Value;
-
-const MAX_RESULT_BYTES: usize = 16 * 1024;
 
 #[derive(Default)]
 pub struct ClaudeParser;
 
 fn flag(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or(false)
-}
-
-/// Truncates to at most 16 KiB on a char boundary, marking the cut.
-fn truncate(s: String) -> String {
-    if s.len() <= MAX_RESULT_BYTES {
-        return s;
-    }
-    let mut end = MAX_RESULT_BYTES;
-    while !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n… (truncated)", &s[..end])
 }
 
 fn result_text(content: Option<&Value>) -> String {

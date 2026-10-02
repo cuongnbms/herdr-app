@@ -1,0 +1,6 @@
+{"type":"session","version":3,"cwd":"/w/app"}
+{"type":"message","id":"a","parentId":null,"message":{"role":"user","content":[{"type":"text","text":"hi"}]}}
+{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":[{"type":"thinking","thinking":"greet"},{"type":"text","text":"Hello!"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"pwd"}}]}}
+{"type":"message","id":"c","parentId":"b","message":{"role":"toolResult","toolCallId":"c1","content":[{"type":"text","text":"/w/app"}],"isError":false}}
+{"type":"model_change","id":"m","parentId":"c","model":"x"}
+{"type":"message","id":"d","parentId":"m","message":{"role":"assistant","display":false,"content":[{"type":"text","text":"hidden"}]}}

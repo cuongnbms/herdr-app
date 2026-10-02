@@ -2,6 +2,7 @@
 //! tail it into chat items.
 pub mod claude;
 pub mod locate;
+pub mod pi;
 pub mod tail;
 
 use crate::error::AppError;
@@ -33,6 +34,7 @@ pub enum ChatEvent {
     Error { error: AppError },
 }
 
+#[derive(Debug)]
 pub enum ParserOutput {
     None,
     Append(Vec<ChatItem>),
@@ -43,10 +45,25 @@ pub trait Parser: Send {
     fn push_line(&mut self, line: &str) -> ParserOutput;
 }
 
-/// The transcript parser for an agent; `claude` lands in Task 15, `pi` in Task 16.
+const MAX_RESULT_BYTES: usize = 16 * 1024;
+
+/// Truncates a tool result to at most 16 KiB on a char boundary, marking the cut.
+pub(crate) fn truncate_result(s: String) -> String {
+    if s.len() <= MAX_RESULT_BYTES {
+        return s;
+    }
+    let mut end = MAX_RESULT_BYTES;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n… (truncated)", &s[..end])
+}
+
+/// The transcript parser for an agent.
 pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
     match agent {
         "claude" => Some(Box::new(claude::ClaudeParser::default())),
+        "pi" => Some(Box::new(pi::PiParser::default())),
         _ => None,
     }
 }
