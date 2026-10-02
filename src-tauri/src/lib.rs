@@ -4,6 +4,7 @@ pub mod error;
 pub mod herdr;
 pub mod machines;
 pub mod sshconfig;
+pub mod transcript;
 pub mod transport;
 pub mod view;
 
@@ -42,6 +43,9 @@ pub fn run() {
             commands::term_ack,
             commands::term_release,
             commands::term_close,
+            commands::chat_open,
+            commands::chat_page,
+            commands::chat_close,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
@@ -65,6 +69,7 @@ pub fn run() {
             mgr.set_attach_manager(attach.clone());
             app.manage(mgr.clone());
             app.manage(attach);
+            app.manage(transcript::ChatManager::default());
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mgr.connect("local").await {
                     tracing::error!("connect local: {e}");

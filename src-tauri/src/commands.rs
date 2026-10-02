@@ -3,9 +3,11 @@ use crate::{
     attach::{attach_argv, AttachEvent, AttachKey, AttachManager, Sink},
     error::AppError,
     machines::MachineManager,
+    herdr::rpc,
     sshconfig,
+    transcript::{self, ChatEvent, ChatItem, ChatManager, Located},
     transport::ssh::master_argv,
-    view::MachineView,
+    view::{MachineView, PaneRef, PaneView},
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -217,5 +219,100 @@ pub async fn term_release(att: Att<'_>, key: AttachKey) -> Result<(), AppError> 
 #[tauri::command]
 pub async fn term_close(att: Att<'_>, key: AttachKey) -> Result<(), AppError> {
     att.close(&key);
+    Ok(())
+}
+
+type Chats<'a> = State<'a, ChatManager>;
+
+const CHAT_PAGE: usize = 200;
+
+/// The Pane and the number of panes in its Session running the same agent in the same cwd.
+fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<(PaneView, usize), AppError> {
+    let views = mgr.views();
+    let session = views
+        .iter()
+        .find(|m| m.id == r.machine_id)
+        .and_then(|m| m.sessions.iter().find(|s| s.name == r.session))
+        .ok_or_else(|| AppError::new("not_found", format!("unknown session {}/{}", r.machine_id, r.session)))?;
+    let panes: Vec<&PaneView> = session.workspaces.iter().flat_map(|w| &w.tabs).flat_map(|t| &t.panes).collect();
+    let pane = panes
+        .iter()
+        .find(|p| p.pane_id == r.pane_id)
+        .map(|p| (*p).clone())
+        .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))?;
+    let same = panes.iter().filter(|p| p.agent == pane.agent && p.cwd == pane.cwd).count();
+    Ok((pane, same))
+}
+
+#[tauri::command]
+pub async fn chat_open(
+    mgr: Mgr<'_>,
+    chats: Chats<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+    path: Option<String>,
+    events: Channel<ChatEvent>,
+) -> Result<Located, AppError> {
+    let pane_ref = PaneRef { machine_id: machine_id.clone(), session: session.clone(), pane_id: pane_id.clone() };
+    let (pane, same) = find_pane(&mgr, &pane_ref)?;
+    let transport = mgr.transport(&machine_id)?;
+    let agent_get = match mgr.call(&machine_id, &session, "agent.get", serde_json::json!({ "target": pane_id })).await {
+        Ok(v) => v,
+        Err(_) if path.is_some() => Value::Null,
+        Err(e) => return Err(e),
+    };
+    let located = match path {
+        Some(p) => Located {
+            agent: agent_get["agent"]["agent"].as_str().map(str::to_string).or_else(|| pane.agent.clone()).unwrap_or_default(),
+            path: p,
+            ambiguous: false,
+            candidates: Vec::new(),
+        },
+        None => {
+            let info = mgr.info(&machine_id)?;
+            match transcript::locate(&*transport, &info, &agent_get, &pane, same).await {
+                Err(e) if e.code == "not_found" => {
+                    // The agent may have been started from a different directory than the shell's.
+                    let socket = transport.local_socket(&mgr.session(&machine_id, &session)?).await?;
+                    let fg = rpc::snapshot(&socket)
+                        .await?
+                        .panes
+                        .into_iter()
+                        .find(|p| p.pane_id == pane.pane_id)
+                        .and_then(|p| p.foreground_cwd);
+                    match fg {
+                        Some(fg) if Some(&fg) != pane.cwd.as_ref() => {
+                            let retry = PaneView { cwd: Some(fg), ..pane.clone() };
+                            transcript::locate(&*transport, &info, &agent_get, &retry, same).await?
+                        }
+                        _ => return Err(e),
+                    }
+                }
+                other => other?,
+            }
+        }
+    };
+    let parser = transcript::parser_for(&located.agent)
+        .ok_or_else(|| AppError::new("not_found", format!("no transcript parser for agent '{}'", located.agent)))?;
+    let sink = Arc::new(move |e: ChatEvent| {
+        if let Err(err) = events.send(e) {
+            tracing::warn!("chat event send failed: {err}");
+        }
+    });
+    chats.insert(pane_ref, transcript::spawn_tail(transport, located.path.clone(), parser, sink));
+    Ok(located)
+}
+
+#[tauri::command]
+pub async fn chat_page(chats: Chats<'_>, machine_id: String, session: String, pane_id: String, before: usize) -> Result<Vec<ChatItem>, AppError> {
+    chats
+        .page(&PaneRef { machine_id, session, pane_id }, before, CHAT_PAGE)
+        .ok_or_else(|| AppError::new("not_found", "no open chat for this pane"))
+}
+
+#[tauri::command]
+pub async fn chat_close(chats: Chats<'_>, machine_id: String, session: String, pane_id: String) -> Result<(), AppError> {
+    chats.close(&PaneRef { machine_id, session, pane_id });
     Ok(())
 }
