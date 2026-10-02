@@ -4,6 +4,7 @@ import { chosenLens, selectedPane, useApp } from "../store/app";
 import type { Lens } from "../store/app";
 import { paneKey } from "../lib/types";
 import { defaultLens } from "../lens";
+import { ChatIcon, TerminalIcon } from "../ui/icons";
 
 export function Header() {
   const sel = useApp(useShallow(selectedPane));
@@ -14,22 +15,24 @@ export function Header() {
   const key = paneKey({ machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id });
   const crumbs = [sel.machine.label, sel.session.name, sel.workspace.label, sel.pane.title];
   return (
-    <header className="header">
+    <header className="header" data-tauri-drag-region>
       <nav className="crumbs" aria-label="Breadcrumb">
         {crumbs.map((c, i) => (
-          <span key={i}>
+          <span key={i} className={i === crumbs.length - 1 ? "crumb current" : "crumb"}>
             {i > 0 && <span className="sep"> › </span>}
             {c}
           </span>
         ))}
       </nav>
-      <div className="agent-status">
+      <div className={`agent-status status-${sel.pane.status}`}>
         <StatusDot status={sel.pane.status} />
         <span>{sel.pane.agent ?? "no agent"} · {sel.pane.status}</span>
       </div>
-      <div className="seg" role="group" aria-label="Lens">
+      <div className={"seg" + (lens === "chat" ? " seg-right" : "")} role="group" aria-label="Lens">
+        <span className="seg-thumb" aria-hidden="true" />
         {(["terminal", "chat"] as Lens[]).map((l) => (
           <button key={l} aria-pressed={lens === l} onClick={() => setLens(key, l)}>
+            {l === "terminal" ? <TerminalIcon /> : <ChatIcon />}
             {l === "terminal" ? "Terminal" : "Chat"}
           </button>
         ))}

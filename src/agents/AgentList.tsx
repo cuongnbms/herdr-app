@@ -82,11 +82,20 @@ export function AgentList() {
   const session = useApp((s) =>
     s.viewed ? s.machines[s.viewed.machine_id]?.sessions.find((x) => x.name === s.viewed!.session) : undefined,
   );
-  if (!viewed || !session) return <p className="agents-empty">Select a session</p>;
+  if (!viewed || !session)
+    return (
+      <>
+        <div className="agents-head" data-tauri-drag-region />
+        <p className="agents-empty">Select a session</p>
+      </>
+    );
   const entries = sessionPanes(session);
   return (
     <ActionsProvider>
-      <div className="agents-head">{session.name}</div>
+      <div className="agents-head" data-tauri-drag-region>
+        <span className="agents-title">{session.name}</span>
+        <span className="count">{entries.length}</span>
+      </div>
       {entries.length === 0 ? (
         <p className="agents-empty">{session.running ? "No panes" : "Session stopped"}</p>
       ) : (

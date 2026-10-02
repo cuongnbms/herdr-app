@@ -13,15 +13,27 @@ import { chosenLens, selectedPane, useApp } from "./store/app";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
+import { AlertIcon, LayersIcon, TerminalIcon } from "./ui/icons";
+
+function EmptyState({ icon, title, children }: { icon: React.ReactNode; title: string; children?: React.ReactNode }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon">{icon}</div>
+      <p className="empty-title">{title}</p>
+      {children}
+    </div>
+  );
+}
 
 function EmptyMain() {
   const local = useApp((s) => s.machines["local"]);
   if (local?.state === "error" && local.error?.code === "herdr_not_found") {
     return (
-      <div className="empty">
-        <p>herdr is not installed on this Mac</p>
+      <EmptyState icon={<AlertIcon />} title="herdr is not installed on this Mac">
+        <p className="empty-hint">The app talks to the herdr multiplexer running on each machine.</p>
         <p>
           <a
+            className="btn btn-primary"
             href="https://herdr.dev"
             onClick={(e) => {
               e.preventDefault();
@@ -31,15 +43,16 @@ function EmptyMain() {
             Install herdr
           </a>
         </p>
-      </div>
+      </EmptyState>
     );
   }
   if (local?.state === "connected" && !local.sessions.some((s) => s.running)) {
     return (
-      <div className="empty">
-        <p>No running sessions</p>
+      <EmptyState icon={<LayersIcon />} title="No running sessions">
+        <p className="empty-hint">Start a herdr session to see its workspaces and agents here.</p>
         <button
           type="button"
+          className="btn btn-primary"
           onClick={() =>
             void sessionStart("local", "default").catch((err: unknown) =>
               showToast(`Could not start the default session: ${(err as { message?: string } | null)?.message ?? String(err)}`),
@@ -48,10 +61,16 @@ function EmptyMain() {
         >
           Start default session
         </button>
-      </div>
+      </EmptyState>
     );
   }
-  return <p className="empty">Select a pane</p>;
+  return (
+    <EmptyState icon={<TerminalIcon />} title="Select a pane">
+      <p className="empty-hint">
+        Pick an agent from the list, or press <kbd>⌘</kbd> <kbd>K</kbd> to jump to any pane.
+      </p>
+    </EmptyState>
+  );
 }
 
 const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
@@ -114,6 +133,7 @@ export default function App() {
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Machines">
+        <div className="titlebar" data-tauri-drag-region />
         <div className="sidebar-scroll">
           <Sidebar />
         </div>
@@ -138,7 +158,12 @@ export default function App() {
             </Suspense>
           </>
         ) : (
-          <EmptyMain />
+          <>
+            <div className="titlebar" data-tauri-drag-region />
+            <div className="main-empty">
+              <EmptyMain />
+            </div>
+          </>
         )}
       </main>
       <Toasts />

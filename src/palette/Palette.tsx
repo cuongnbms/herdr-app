@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store/app";
 import { StatusDot } from "../sidebar/StatusDot";
 import { search } from "./search";
+import { SearchIcon } from "../ui/icons";
 
 export function Palette({ onClose }: { onClose: () => void }) {
   const machines = useApp((s) => s.machines);
@@ -25,31 +26,34 @@ export function Palette({ onClose }: { onClose: () => void }) {
   return (
     <div className="overlay" onMouseDown={onClose}>
       <div className="palette" role="dialog" aria-label="Command palette" onMouseDown={(e) => e.stopPropagation()}>
-        <input
-          ref={input}
-          value={query}
-          placeholder="Jump to pane…"
-          aria-label="Search panes"
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setIndex(0);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onClose();
-            } else if (e.key === "Enter") {
-              e.preventDefault();
-              choose(active);
-            } else if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setIndex(Math.min(active + 1, hits.length - 1));
-            } else if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setIndex(Math.max(active - 1, 0));
-            }
-          }}
-        />
+        <div className="palette-search">
+          <SearchIcon />
+          <input
+            ref={input}
+            value={query}
+            placeholder="Jump to pane…"
+            aria-label="Search panes"
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setIndex(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                choose(active);
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setIndex(Math.min(active + 1, hits.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setIndex(Math.max(active - 1, 0));
+              }
+            }}
+          />
+        </div>
         <ul role="listbox">
           {hits.map((h, i) => (
             <li key={`${h.ref.machine_id}/${h.ref.session}/${h.ref.pane_id}`} role="option" aria-selected={i === active}>
@@ -63,6 +67,11 @@ export function Palette({ onClose }: { onClose: () => void }) {
           ))}
           {hits.length === 0 && <li className="empty">No matching panes</li>}
         </ul>
+        <div className="palette-foot" aria-hidden="true">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> open</span>
+          <span><kbd>esc</kbd> close</span>
+        </div>
       </div>
     </div>
   );

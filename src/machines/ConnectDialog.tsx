@@ -13,6 +13,7 @@ import {
   machineMasterAlive,
 } from "../lib/ipc";
 import type { AttachEvent, MachineView } from "../lib/types";
+import { TERM_FONT, TERM_THEME } from "../terminal/theme";
 
 function toBytes(buf: unknown): Uint8Array | null {
   if (buf instanceof ArrayBuffer) return new Uint8Array(buf);
@@ -34,10 +35,10 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
     const el = host.current;
     if (!el) return;
     const term = new Terminal({
-      fontFamily: '"JetBrains Mono", Menlo, monospace',
+      fontFamily: TERM_FONT,
       fontSize: 13,
       cursorBlink: true,
-      theme: { background: "#16171a", foreground: "#e4e5e8" },
+      theme: TERM_THEME,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -105,7 +106,7 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
         {exitCode !== null && <p className="error dialog-error">ssh exited with code {exitCode}</p>}
         {error && <p className="error dialog-error" role="alert">{error}</p>}
         <div className="actions">
-          <button onClick={onClose}>{exitCode !== null ? "Close" : "Cancel"}</button>
+          <button className="btn" onClick={onClose}>{exitCode !== null ? "Close" : "Cancel"}</button>
         </div>
       </div>
     </div>

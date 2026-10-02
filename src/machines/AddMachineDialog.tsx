@@ -79,8 +79,8 @@ export function AddMachineDialog({ onClose, onNeedAuth }: { onClose: () => void;
       </details>
       {error && <p className="error dialog-error" role="alert">{error}</p>}
       <div className="actions">
-        <button onClick={onClose}>Cancel</button>
-        <button disabled={busy || !target.trim()} onClick={() => void add()}>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={busy || !target.trim()} onClick={() => void add()}>
           Add
         </button>
       </div>

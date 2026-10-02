@@ -9,6 +9,7 @@ import { BlockedPanel } from "./BlockedPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
 import { Composer } from "./Composer";
+import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
 type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
@@ -188,7 +189,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       </div>
       {unseen && (
         <button className="chat-new" onClick={jumpBottom}>
-          ↓ New messages
+          <ArrowDownIcon /> New messages
         </button>
       )}
       {view.status === "blocked" ? <BlockedPanel pane={pane} view={view} /> : <Composer pane={pane} />}

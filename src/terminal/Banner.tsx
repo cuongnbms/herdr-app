@@ -12,13 +12,13 @@ export function Banner({ kind, code, onTakeOver, onReattach }: Props) {
     return (
       <div className="term-banner" role="status">
         <span>This terminal is attached elsewhere.</span>
-        <button onClick={onTakeOver}>Take over</button>
+        <button className="btn btn-xs" onClick={onTakeOver}>Take over</button>
       </div>
     );
   }
   if (kind === "exited") {
     return (
-      <div className="term-banner" role="status">
+      <div className="term-banner neutral" role="status">
         <span>Process exited{code != null ? ` (code ${code})` : ""}</span>
       </div>
     );
@@ -26,7 +26,7 @@ export function Banner({ kind, code, onTakeOver, onReattach }: Props) {
   return (
     <div className="term-banner" role="status">
       <span>Disconnected. Waiting for the machine to reconnect…</span>
-      <button onClick={onReattach}>Reattach</button>
+      <button className="btn btn-xs" onClick={onReattach}>Reattach</button>
     </div>
   );
 }

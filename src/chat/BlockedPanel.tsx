@@ -6,6 +6,7 @@ import "../fonts/fonts.css";
 import { herdrCall } from "../lib/ipc";
 import { paneKey, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
+import { TERM_FONT, TERM_THEME } from "../terminal/theme";
 
 const QUICK: { label: string; key: string }[] = [
   { label: "1", key: "1" },
@@ -32,12 +33,12 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
     const host = hostRef.current;
     if (!host) return;
     const term = new Terminal({
-      fontFamily: '"JetBrains Mono", Menlo, monospace',
+      fontFamily: TERM_FONT,
       fontSize: 12,
       disableStdin: true,
       cursorBlink: false,
       scrollback: 200,
-      theme: { background: "#16171a", foreground: "#e4e5e8" },
+      theme: TERM_THEME,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -87,16 +88,19 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
 
   return (
     <div className="blocked-panel">
-      <div className="blocked-head">The agent is waiting for input</div>
+      <div className="blocked-head">
+        <span className="dot dot-blocked" aria-hidden="true" />
+        The agent is waiting for input
+      </div>
       <div className="blocked-screen" ref={hostRef} />
       {error && <div className="chat-error" role="alert">{error}</div>}
       <div className="blocked-keys">
         {QUICK.map((k) => (
-          <button key={k.key} onClick={() => sendKey(k.key)}>
+          <button key={k.key} className="keycap" onClick={() => sendKey(k.key)}>
             {k.label}
           </button>
         ))}
-        <button className="blocked-open" onClick={() => setLens(paneKey(pane), "terminal")}>
+        <button className="btn btn-xs blocked-open" onClick={() => setLens(paneKey(pane), "terminal")}>
           Open Terminal lens
         </button>
       </div>

@@ -65,9 +65,9 @@ export function ConfirmDialog({
     <Modal title={title} onClose={onClose}>
       <p>{message}</p>
       <div className="actions">
-        <button onClick={onClose}>Cancel</button>
+        <button className="btn" onClick={onClose}>Cancel</button>
         <button
-          className="danger"
+          className="btn btn-danger"
           autoFocus
           onClick={() => {
             onClose();
@@ -112,8 +112,8 @@ export function TextDialog({
         onKeyDown={(e) => e.key === "Enter" && submit()}
       />
       <div className="actions">
-        <button onClick={onClose}>Cancel</button>
-        <button onClick={submit}>{submitLabel}</button>
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={submit}>{submitLabel}</button>
       </div>
     </Modal>
   );

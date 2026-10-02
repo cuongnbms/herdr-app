@@ -13,11 +13,12 @@ import { useApp } from "../store/app";
 import { StatusDot } from "./StatusDot";
 import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
+import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon } from "../ui/icons";
 
 const hl = (status: string) => (status === "blocked" ? " blocked" : "");
 
 function Chevron({ open }: { open: boolean }) {
-  return <span className="chev" aria-hidden="true">{open ? "▾" : "▸"}</span>;
+  return <ChevronIcon className={"icon chev" + (open ? " open" : "")} />;
 }
 
 function SessionNode({ machineId, session }: { machineId: string; session: SessionView }) {
@@ -41,7 +42,7 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
           <StatusDot status={session.status} />
           <span className="label">{session.name}</span>
           <button
-            className="start"
+            className="btn btn-xs start"
             aria-label={`Start ${session.name}`}
             onClick={() => a?.guard(() => sessionStart(machineId, session.name))}
           >
@@ -86,7 +87,7 @@ function HerdrPathEdit({ machineId }: { machineId: string }) {
         onChange={(e) => setPath(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && save()}
       />
-      <button onClick={save}>Set</button>
+      <button className="btn btn-xs" onClick={save}>Set</button>
     </div>
   );
 }
@@ -132,14 +133,15 @@ function MachineNode({ machine }: { machine: MachineView }) {
         onContextMenu={(e) => items.length > 0 && a?.menu(e, items)}
       >
         <Chevron open={open} />
-        <StatusDot status={machine.status} />
+        {ssh ? <ServerIcon className="icon machine-icon" /> : <LaptopIcon className="icon machine-icon" />}
         <span className="label">{machine.label}</span>
+        <StatusDot status={machine.status} />
       </button>
       {!ok && <p className="error">{message}</p>}
       {notFound && <HerdrPathEdit machineId={machine.id} />}
       {needsConnect && (
         <div className="machine-actions">
-          <button onClick={() => a?.connect(machine)}>{ssh ? "Connect…" : "Retry"}</button>
+          <button className="btn btn-xs" onClick={() => a?.connect(machine)}>{ssh ? "Connect…" : "Retry"}</button>
         </div>
       )}
       {open && showSessions && (
@@ -157,7 +159,8 @@ function AddMachine() {
   const a = useActions();
   return (
     <button className="add-machine" onClick={() => a?.addMachine()}>
-      + Add machine
+      <PlusIcon />
+      Add machine
     </button>
   );
 }
@@ -167,6 +170,7 @@ export function Sidebar() {
   const order = useApp((s) => s.order);
   return (
     <ActionsProvider>
+      <div className="section-label">Machines</div>
       <ul className="tree">
         {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
       </ul>

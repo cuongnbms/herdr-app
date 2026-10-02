@@ -9,6 +9,7 @@ import { attachKeyString, termAck, termOpen, termRelease, termResize, termWrite 
 import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { Banner } from "./Banner";
+import { TERM_FONT, TERM_THEME } from "./theme";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 
@@ -19,12 +20,12 @@ interface Props {
 
 function createEntry() {
   const term = new Terminal({
-    fontFamily: '"JetBrains Mono", Menlo, monospace',
+    fontFamily: TERM_FONT,
     fontSize: 13,
     cursorBlink: true,
     scrollback: 5000,
     allowProposedApi: true,
-    theme: { background: "#16171a", foreground: "#e4e5e8" },
+    theme: TERM_THEME,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);

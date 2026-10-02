@@ -3,8 +3,26 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatItem } from "../lib/types";
+import { ChevronIcon } from "../ui/icons";
+
+/** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
+function codeLanguage(node: unknown): string | null {
+  const code = (node as { children?: { properties?: { className?: unknown } }[] } | undefined)?.children?.[0];
+  const cls = code?.properties?.className;
+  const list = Array.isArray(cls) ? cls : [];
+  const lang = list.find((c): c is string => typeof c === "string" && c.startsWith("language-"));
+  return lang ? lang.slice("language-".length) : null;
+}
 
 const mdComponents: Components = {
+  pre({ node, children }) {
+    return (
+      <div className="chat-code">
+        <div className="chat-code-head">{codeLanguage(node) ?? "code"}</div>
+        <pre>{children}</pre>
+      </div>
+    );
+  },
   a({ href, children }) {
     const external = !!href && /^https?:\/\//i.test(href);
     return (
@@ -63,7 +81,7 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
   return (
     <div className="chat-tool">
       <button className="chat-tool-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="chat-caret">{open ? "▾" : "▸"}</span>
+        <ChevronIcon className={"icon chev" + (open ? " open" : "")} />
         <span className="chat-tool-name">{item.name}</span>
         <span className="chat-tool-sep"> · </span>
         <span className="chat-tool-summary">{item.input_summary}</span>

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { AlertIcon } from "./icons";
 
 export interface ToastItem {
   id: number;
@@ -40,7 +41,8 @@ export function Toasts() {
     <div className="toasts" role="status" aria-live="polite">
       {list.map((t) => (
         <div key={t.id} className="toast">
-          {t.text}
+          <AlertIcon />
+          <span>{t.text}</span>
         </div>
       ))}
     </div>

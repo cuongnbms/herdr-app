@@ -73,8 +73,8 @@ export function NewWorkspaceDialog({
           </select>
         </label>
         <div className="actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="submit">Create</button>
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary">Create</button>
         </div>
       </form>
     </div>
