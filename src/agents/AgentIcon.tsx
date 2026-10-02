@@ -1,16 +1,19 @@
 import type { ReactNode } from "react";
 
-const rays = Array.from({ length: 12 }, (_, i) => i * 30);
+/** Claude's spark: tapered rays of uneven length and spacing, like the brand mark. */
+const SPARK: [angle: number, length: number][] = [
+  [0, 9.6], [31, 7.6], [66, 9.2], [99, 7.2], [131, 9.4], [163, 7.8],
+  [196, 9.6], [229, 7.4], [262, 9.0], [295, 7.8], [328, 8.8],
+];
 
 /** Glyphs for the agents herdr detects; anything else gets a monogram. */
 const GLYPHS: Record<string, { tile: string; glyph: ReactNode }> = {
   claude: {
     tile: "agent-tile-claude",
     glyph: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        {rays.map((r, i) => (
-          <line key={r} x1="12" y1="12" x2="12" y2={i % 2 ? 4.5 : 2.5} transform={`rotate(${r} 12 12)`}
-            stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinejoin="round">
+        {SPARK.map(([r, len]) => (
+          <path key={r} d={`M12 12.6 L11.15 10.6 L12 ${12.5 - len} L12.85 10.6 Z`} transform={`rotate(${r} 12 12)`} />
         ))}
       </svg>
     ),
