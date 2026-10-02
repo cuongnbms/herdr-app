@@ -167,13 +167,54 @@ pub fn parse_session_list(stdout: &str) -> Vec<SessionEntry> {
         .collect()
 }
 
-/// `/tmp/herdr-app-<uid>` (mode 0700), holding ssh control sockets and forwarded herdr sockets.
-pub fn runtime_dir() -> PathBuf {
+fn runtime_dir_path() -> PathBuf {
+    PathBuf::from(format!("/tmp/herdr-app-{}", unsafe { libc::getuid() }))
+}
+
+/// Confirm `dir` is a real directory (not a symlink), owned by us, with mode 0700.
+fn verify_private_dir(dir: &std::path::Path) -> AppResult<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let fail = |why: String| {
+        AppError::new(
+            "io",
+            format!("{} is not a private directory owned by this user: {why}", dir.display()),
+        )
+    };
+    let md = std::fs::symlink_metadata(dir)?;
+    if md.file_type().is_symlink() || !md.is_dir() {
+        return Err(fail("not a real directory".into()));
+    }
+    let uid = unsafe { libc::getuid() };
+    if md.uid() != uid {
+        return Err(fail(format!("owned by uid {}", md.uid())));
+    }
+    let mode = md.permissions().mode() & 0o777;
+    if mode != 0o700 {
+        return Err(fail(format!("mode is {mode:o}")));
+    }
+    Ok(())
+}
+
+/// Create (mode 0700) and verify `/tmp/herdr-app-<uid>`, holding ssh control sockets and
+/// forwarded herdr sockets. Call before creating sockets in it.
+pub fn secure_runtime_dir() -> AppResult<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
-    let dir = PathBuf::from(format!("/tmp/herdr-app-{}", unsafe { libc::getuid() }));
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-    dir
+    let dir = runtime_dir_path();
+    std::fs::create_dir_all(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    verify_private_dir(&dir)?;
+    Ok(dir)
+}
+
+/// The runtime dir path; logs (but does not fail) if it cannot be secured.
+pub fn runtime_dir() -> PathBuf {
+    match secure_runtime_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            tracing::error!("runtime dir is not secure: {e}");
+            runtime_dir_path()
+        }
+    }
 }
 
 fn fnv1a32(s: &str) -> u32 {
@@ -229,6 +270,19 @@ agent-workspace      stopped  /Users/me/.config/herdr/sessions/agent-workspace /
         let p = runtime_dir().join(socket_name("devtuf-machine-x", long));
         assert!(p.as_os_str().len() <= 104, "{}", p.display());
         assert_ne!(socket_name("m", "a"), socket_name("m", "b"));
+    }
+    #[test]
+    fn secure_runtime_dir_ok() {
+        assert!(secure_runtime_dir().is_ok());
+    }
+    #[test]
+    fn verify_rejects_loose_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(verify_private_dir(d.path()).unwrap_err().code, "io");
+        std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(verify_private_dir(d.path()).is_ok());
     }
     #[tokio::test]
     async fn local_exec_runs_probe() {
