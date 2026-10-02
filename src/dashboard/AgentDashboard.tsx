@@ -147,10 +147,8 @@ export function AgentDashboard() {
   const filtering = query.trim() !== "" || filters.machine.length > 0 || filters.agent.length > 0;
   const nFilters = filters.machine.length + filters.agent.length;
 
-  const openCard = (c: DashCard) => {
-    select(c.ref);
-    setOpen(false);
-  };
+  // Selecting closes the dashboard.
+  const openCard = (c: DashCard) => select(c.ref);
 
   return (
     <section className="dashboard" role="dialog" aria-label="Agent Dashboard">

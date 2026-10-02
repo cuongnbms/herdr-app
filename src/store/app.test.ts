@@ -109,6 +109,20 @@ describe("done-seen tracking", () => {
     useApp.getState().upsertMachine(withStatus("working"));
     expect(useApp.getState().doneSeen).toEqual({ "devtuf/default/w1:p1": true });
   });
+  it("does not mark the selected pane seen while the dashboard hides it, only once it closes", () => {
+    useApp.getState().upsertMachine(withStatus("working"));
+    useApp.getState().select(p2);
+    useApp.getState().setDashboardOpen(true);
+    useApp.getState().upsertMachine(withStatus("done"));
+    expect(useApp.getState().doneSeen).toEqual({});
+    useApp.getState().setDashboardOpen(false);
+    expect(useApp.getState().doneSeen).toEqual({ "local/default/w1:p2": true });
+  });
+  it("selecting a pane closes the dashboard", () => {
+    useApp.getState().setDashboardOpen(true);
+    useApp.getState().select(p2);
+    expect(useApp.getState().dashboardOpen).toBe(false);
+  });
   it("toggles the dashboard", () => {
     useApp.getState().setDashboardOpen(true);
     expect(useApp.getState().dashboardOpen).toBe(true);

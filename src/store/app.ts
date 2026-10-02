@@ -77,7 +77,15 @@ export const useApp = create<AppState>((set, get) => ({
   dashboardOpen: false,
   doneSeen: {},
   ...load(),
-  setDashboardOpen: (open) => set({ dashboardOpen: open }),
+  // Closing returns to the selected pane, so a done one counts as seen then.
+  setDashboardOpen: (open) =>
+    set((s) => ({
+      dashboardOpen: open,
+      doneSeen:
+        !open && s.selected && findPane(s.machines, s.selected)?.status === "done"
+          ? { ...s.doneSeen, [paneKey(s.selected)]: true }
+          : s.doneSeen,
+    })),
   setLensNote: (key, note) =>
     set((s) => {
       const { [key]: _old, ...rest } = s.lensNote;
@@ -91,7 +99,8 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
-      doneSeen: seenAfterSnapshot(s.doneSeen, v, s.selected),
+      // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
+      doneSeen: seenAfterSnapshot(s.doneSeen, v, s.dashboardOpen ? null : s.selected),
     }));
   },
   removeMachine: (id) =>
@@ -107,6 +116,7 @@ export const useApp = create<AppState>((set, get) => ({
   select: (ref) =>
     set((s) => ({
       selected: ref,
+      dashboardOpen: ref ? false : s.dashboardOpen,
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
     })),
