@@ -1,0 +1,12 @@
+{"version":"0.9.3","protocol":22,"focused_pane_id":"w1:p1",
+ "workspaces":[{"workspace_id":"w1","label":"herdr-app","number":1,"agent_status":"working","active_tab_id":"w1:t1","focused":true,"pane_count":2,"tab_count":1},
+               {"workspace_id":"w2","label":"api","number":2,"agent_status":"idle","pane_count":1,"tab_count":2}],
+ "tabs":[{"tab_id":"w1:t1","workspace_id":"w1","label":"1","number":1,"agent_status":"working"},
+         {"tab_id":"w2:t1","workspace_id":"w2","label":"1","number":1,"agent_status":"idle"},
+         {"tab_id":"w2:t2","workspace_id":"w2","label":"logs","number":2,"agent_status":"unknown"}],
+ "panes":[{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","terminal_id":"term_a","cwd":"/Users/me/herdr app","terminal_title_stripped":"Rewrite","agent_status":"working","revision":3},
+          {"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1","terminal_id":"term_b","cwd":"/Users/me","agent_status":"blocked"},
+          {"pane_id":"w2:p1","tab_id":"w2:t1","workspace_id":"w2","terminal_id":"term_c","cwd":"/srv","agent_status":"idle"},
+          {"pane_id":"w2:p2","tab_id":"w2:t2","workspace_id":"w2","terminal_id":"term_d","agent_status":"something_new"}],
+ "agents":[{"pane_id":"w1:p1","agent":"claude","agent_status":"working"},{"pane_id":"w1:p2","agent":"pi","agent_status":"blocked"}],
+ "layouts":[]}
