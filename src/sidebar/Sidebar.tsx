@@ -1,6 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-import { herdrCall, machineDisconnect, machineRemove, machineUpdate, sessionStart, sessionStop } from "../lib/ipc";
+import { herdrCall, machineConnect, machineDisconnect, machineRemove, machineUpdate, sessionStart, sessionStop } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneView, SessionView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
@@ -324,7 +324,18 @@ export function Sidebar() {
       },
       rename: (title, initial, run) => setDialog({ kind: "rename", title, initial, run }),
       confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
-      connect: (machine) => setDialog({ kind: "connect", machine }),
+      // Batch first (key or agent); the dialog opens only when that needs the user.
+      connect: (machine) => {
+        if (machine.state === "error" && machine.error?.code === "ssh_auth") {
+          setDialog({ kind: "connect", machine });
+          return;
+        }
+        setError(null);
+        machineConnect(machine.id).catch((e) => {
+          if ((e as { code?: string } | null)?.code === "ssh_auth") setDialog({ kind: "connect", machine });
+          else setError(errorMessage(e));
+        });
+      },
       newWorkspace: (machineId, session) =>
         setDialog({ kind: "workspace", machineId, session, defaultCwd: defaultCwdFor(machineId, session) }),
     }),
@@ -350,7 +361,12 @@ export function Sidebar() {
         onClose={closeDialog} onError={setError} />
     );
   } else if (dialog?.kind === "add-machine") {
-    modal = <AddMachineDialog onClose={closeDialog} />;
+    modal = (
+      <AddMachineDialog
+        onClose={closeDialog}
+        onNeedAuth={(m) => setDialog({ kind: "connect", machine: useApp.getState().machines[m.id] ?? m })}
+      />
+    );
   } else if (dialog?.kind === "connect") {
     modal = (
       <Suspense fallback={null}>

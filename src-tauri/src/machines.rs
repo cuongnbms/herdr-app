@@ -99,6 +99,19 @@ pub fn slug(label: &str, taken: &[String]) -> String {
         .expect("unbounded range")
 }
 
+/// Remove any forwarded-socket files (`<id>-<8 hex>.sock`) left in the runtime dir.
+fn sweep_sockets(id: &str) {
+    let Ok(rd) = std::fs::read_dir(crate::transport::runtime_dir()) else { return };
+    let prefix = format!("{id}-");
+    for f in rd.flatten() {
+        let name = f.file_name().to_string_lossy().into_owned();
+        let hex = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".sock"));
+        if hex.is_some_and(|h| h.len() == 8 && h.chars().all(|c| c.is_ascii_hexdigit())) {
+            let _ = std::fs::remove_file(f.path());
+        }
+    }
+}
+
 /// Watcher retry delay: 1, 2, 4, 8, 16, 32, then 60 s.
 pub fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(if attempt >= 6 { 60 } else { 1u64 << attempt })
@@ -109,6 +122,8 @@ pub enum UiEvent {
     PaneStatus(PaneStatusEvent),
 }
 pub type Emit = Arc<dyn Fn(UiEvent) + Send + Sync>;
+/// Test seam: replaces starting the batch ssh master.
+type MasterStart = Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send>> + Send + Sync>;
 type Factory = Arc<dyn Fn(&MachineConfig) -> Arc<dyn Transport> + Send + Sync>;
 
 struct Sess {
@@ -211,6 +226,7 @@ pub struct MachineManager {
     machines: Mutex<Vec<Machine>>,
     emit: Emit,
     factory: Mutex<Option<Factory>>,
+    master_start: Mutex<Option<MasterStart>>,
     throttle: Mutex<HashMap<String, Throttle>>,
 }
 
@@ -235,6 +251,7 @@ impl MachineManager {
             machines: Mutex::new(machines),
             emit,
             factory: Mutex::new(None),
+            master_start: Mutex::new(None),
             throttle: Mutex::new(HashMap::new()),
         })
     }
@@ -247,6 +264,11 @@ impl MachineManager {
     #[cfg_attr(not(test), allow(dead_code))] // test seam: replaces the default local/ssh transports
     pub(crate) fn with_transport_factory(self: &Arc<Self>, f: Factory) {
         *self.factory.lock().unwrap() = Some(f);
+    }
+
+    #[cfg(test)]
+    fn with_master_start(&self, f: MasterStart) {
+        *self.master_start.lock().unwrap() = Some(f);
     }
 
     fn make_transport(&self, cfg: &MachineConfig) -> AppResult<Arc<dyn Transport>> {
@@ -402,7 +424,7 @@ impl MachineManager {
         let gate = self.with_machine(id, |m| m.gate.clone())?;
         let _g = gate.lock().await;
         // Reconnecting: stop watchers and release the old sockets first.
-        self.teardown(id, false).await;
+        self.teardown(id, false, false).await;
         self.connect_core(&cfg).await
     }
 
@@ -434,7 +456,11 @@ impl MachineManager {
             self.set_state(id, MachineState::Authenticating, None);
             if !master_alive(&s.ctl, &s.target).await {
                 clear_stale_ctl(&s.ctl, &s.target).await;
-                start_master(id, &s.ctl, &s.target).await?;
+                let seam = self.master_start.lock().unwrap().clone();
+                match seam {
+                    Some(f) => f().await?,
+                    None => start_master(id, &s.ctl, &s.target).await?,
+                }
             }
             // Whatever the master's history, its forwards are not the cached ones.
             s.forget_forwards();
@@ -448,7 +474,9 @@ impl MachineManager {
     }
 
     /// Stop watchers, close terminals and release forwarded sockets. `clear` also forgets the Sessions.
-    async fn teardown(&self, id: &str, clear: bool) {
+    /// `close_all` also closes Machine-level terminals (the interactive ssh master);
+    /// a connect must not kill the master the user just authenticated.
+    async fn teardown(&self, id: &str, clear: bool, close_all: bool) {
         let released = self
             .with_machine(id, |m| {
                 m.abort_supervisors();
@@ -463,10 +491,15 @@ impl MachineManager {
             })
             .ok();
         if let Some(a) = self.attach.lock().unwrap().clone() {
-            a.close_machine(id);
+            if close_all {
+                a.close_machine(id);
+            } else {
+                a.close_machine_sessions(id);
+            }
         }
         if let Some((Some(t), entries)) = released {
-            for e in entries.into_iter().filter(|e| e.running) {
+            // Every Session, running or not: one that stopped outside the app may still hold a forward.
+            for e in entries {
                 if let Err(err) = t.release_socket(&e).await {
                     tracing::warn!("release_socket {id}/{}: {err}", e.name);
                 }
@@ -477,7 +510,7 @@ impl MachineManager {
     /// Explicit disconnect: forgets the Sessions and, for ssh, ends the master.
     pub async fn disconnect(&self, id: &str) {
         self.cancel_reconnect(id);
-        self.teardown(id, true).await;
+        self.teardown(id, true, true).await;
         if let Some(s) = self.ssh_of(id) {
             master_exit(&s.ctl, &s.target).await;
         }
@@ -513,7 +546,7 @@ impl MachineManager {
         if !go {
             return;
         }
-        self.teardown(id, false).await;
+        self.teardown(id, false, false).await;
         self.notify(id);
         if let Some(me) = self.me.upgrade() {
             let h = tokio::spawn(me.reconnect_loop(id.to_string()));
@@ -571,6 +604,7 @@ impl MachineManager {
         if let Some(s) = self.ssh_of(id) {
             let _ = std::fs::remove_file(&s.ctl);
         }
+        sweep_sockets(id);
         self.machines.lock().unwrap().retain(|m| m.cfg.id != id);
         self.throttle.lock().unwrap().remove(id);
         self.persist()
@@ -995,6 +1029,88 @@ mod tests {
         // Initial connect would hit the failing list; the first call (count 0) passes.
         mgr.connect("local").await.unwrap();
         mgr.start_session("local", "default").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_releases_sessions_stopped_outside_the_app() {
+        let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
+        let released: Arc<Mutex<Vec<String>>> = Arc::default();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (sock, rel) = (f.path.to_string_lossy().to_string(), released.clone());
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(RecT { inner: FakeT { sock: sock.clone() }, released: rel.clone() }) as Arc<dyn Transport>));
+        mgr.connect("local").await.unwrap(); // lists `old` as stopped
+        mgr.disconnect("local").await;
+        assert!(released.lock().unwrap().contains(&"old".to_string()), "{:?}", released.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn connect_spares_the_ssh_master_terminal() {
+        use crate::attach::{AttachEvent, AttachKey, AttachManager, Sink};
+        struct Rec(Arc<Mutex<Vec<AttachEvent>>>);
+        impl Sink for Rec {
+            fn data(&self, _: Vec<u8>) {}
+            fn event(&self, e: AttachEvent) { self.0.lock().unwrap().push(e); }
+        }
+        let f = FakeHerdr::start(Arc::new(|_, _| Ok(json!({"type":"ok"}))));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>));
+        let att = AttachManager::new(std::time::Duration::from_secs(15));
+        mgr.set_attach_manager(att.clone());
+        mgr.add("box".into(), None, None).await.unwrap();
+        let (master_ev, term_ev) = (Arc::new(Mutex::new(Vec::new())), Arc::new(Mutex::new(Vec::new())));
+        let mk = |session: &str, terminal: &str| AttachKey { machine_id: "box".into(), session: session.into(), terminal_id: terminal.into() };
+        att.open(mk("", "ssh-master"), vec!["sh".into(), "-c".into(), "sleep 5".into()], 80, 24, Arc::new(Rec(master_ev.clone()))).unwrap();
+        att.open(mk("default", "t"), vec!["cat".into()], 80, 24, Arc::new(Rec(term_ev.clone()))).unwrap();
+        mgr.connect("box").await.unwrap();
+        assert!(wait_for(|| term_ev.lock().unwrap().contains(&AttachEvent::Detached)).await);
+        assert!(!master_ev.lock().unwrap().contains(&AttachEvent::Detached));
+        att.write(&mk("", "ssh-master"), b"x").unwrap();
+        mgr.disconnect("box").await; // an explicit disconnect closes everything
+        assert!(wait_for(|| master_ev.lock().unwrap().contains(&AttachEvent::Detached)).await);
+    }
+
+    fn counting_master(calls: Arc<std::sync::atomic::AtomicU32>, code: &'static str) -> MasterStart {
+        Arc::new(move || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move { Err(AppError::new(code, "boom")) })
+        })
+    }
+
+    #[tokio::test]
+    async fn retries_stop_on_ssh_auth_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        mgr.with_master_start(counting_master(calls.clone(), "ssh_auth"));
+        mgr.add("retry-auth".into(), None, None).await.unwrap();
+        assert_eq!(mgr.connect("retry-auth").await.unwrap_err().code, "ssh_auth");
+        mgr.on_master_lost("retry-auth").await;
+        tokio::time::sleep(std::time::Duration::from_millis(3500)).await;
+        // connect + exactly one retry (after 1 s); the 2 s retry never happens.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let v = mgr.views().into_iter().find(|v| v.id == "retry-auth").unwrap();
+        assert_eq!((v.state, v.error.map(|e| e.code)), (MachineState::Error, Some("ssh_auth".to_string())));
+        mgr.remove("retry-auth").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_reconnect_stops_the_loop() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let calls: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        mgr.with_master_start(counting_master(calls.clone(), "io"));
+        mgr.add("retry-cancel".into(), None, None).await.unwrap();
+        assert!(mgr.connect("retry-cancel").await.is_err());
+        mgr.on_master_lost("retry-cancel").await;
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2, "an io failure keeps retrying");
+        mgr.cancel_reconnect("retry-cancel");
+        tokio::time::sleep(std::time::Duration::from_millis(2600)).await;
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        mgr.remove("retry-cancel").await.unwrap();
     }
 
     #[tokio::test]

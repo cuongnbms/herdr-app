@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { machineAdd, machineConnect, sshHosts } from "../lib/ipc";
+import type { MachineView } from "../lib/types";
 import { Modal } from "../sidebar/ContextMenu";
 
 const message = (e: unknown) => (e as { message?: string } | null)?.message ?? String(e);
 
-export function AddMachineDialog({ onClose }: { onClose: () => void }) {
+/** `onNeedAuth` is called when the first (batch) connect fails with `ssh_auth`: open the Connect dialog. */
+export function AddMachineDialog({ onClose, onNeedAuth }: { onClose: () => void; onNeedAuth?: (machine: MachineView) => void }) {
   const [target, setTarget] = useState("");
   const [label, setLabel] = useState("");
   const [herdrPath, setHerdrPath] = useState("");
@@ -32,7 +34,10 @@ export function AddMachineDialog({ onClose }: { onClose: () => void }) {
     try {
       const m = await machineAdd(target.trim(), label.trim() || null, herdrPath.trim() || null);
       // Connecting can take a while (or ask for a password): do not hold the dialog open.
-      void machineConnect(m.id).catch((e) => console.error("machine_connect failed", e));
+      void machineConnect(m.id).catch((e) => {
+        if ((e as { code?: string } | null)?.code === "ssh_auth") onNeedAuth?.(m);
+        else console.error("machine_connect failed", e);
+      });
       onClose();
     } catch (e) {
       setError(message(e));

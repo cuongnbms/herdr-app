@@ -261,6 +261,22 @@ impl AttachManager {
         }
     }
 
+    /// Close the Machine's Session terminals only; the Machine-level terminals
+    /// (empty session, e.g. the interactive ssh master) are left alone.
+    pub fn close_machine_sessions(&self, machine_id: &str) {
+        let list: Vec<Arc<Entry>> = self
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| e.key.machine_id == machine_id && !e.key.session.is_empty())
+            .cloned()
+            .collect();
+        for e in list {
+            detach(&self.entries, &e);
+        }
+    }
+
     pub fn close_machine(&self, machine_id: &str) {
         let list: Vec<Arc<Entry>> =
             self.entries.lock().unwrap().values().filter(|e| e.key.machine_id == machine_id).cloned().collect();

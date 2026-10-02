@@ -87,6 +87,9 @@ impl Transport for SshTransport {
             return Ok(p);
         }
         let local = secure_runtime_dir()?.join(socket_name(&self.machine_id, &session.name));
+        // The master may still hold an identical forward (inherited from a crashed run or
+        // after our cache was dropped); it would ack a re-forward without re-binding the socket.
+        let _ = exec(&LocalTransport, &self.forward_argv("cancel", &local, session)).await;
         match std::fs::remove_file(&local) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
