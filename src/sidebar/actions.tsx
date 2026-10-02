@@ -1,11 +1,14 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { machineConnect } from "../lib/ipc";
-import type { MachineView } from "../lib/types";
+import type { MachineView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { ConfirmDialog, ContextMenu, TextDialog } from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
+import { NewAgentDialog } from "../agents/NewAgentDialog";
+import { setFolder } from "../workspaces/folder";
+import type { WorkspaceRef } from "../workspaces/folder";
 import { AddMachineDialog } from "../machines/AddMachineDialog";
 const ConnectDialog = lazy(() => import("../machines/ConnectDialog").then((m) => ({ default: m.ConnectDialog })));
 
@@ -13,6 +16,8 @@ type Dialog =
   | { kind: "rename"; title: string; initial: string; run: (label: string) => Promise<unknown> }
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
   | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
+  | { kind: "agent"; machineId: string; session: string; workspace: WorkspaceView }
+  | { kind: "folder"; ref: WorkspaceRef; initial: string }
   | { kind: "add-machine" }
   | { kind: "connect"; machine: MachineView };
 
@@ -21,6 +26,8 @@ export interface Actions {
   rename: (title: string, initial: string, run: (label: string) => Promise<unknown>) => void;
   confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
   newWorkspace: (machineId: string, session: string) => void;
+  newAgent: (machineId: string, session: string, workspace: WorkspaceView) => void;
+  changeFolder: (ref: WorkspaceRef, initial: string) => void;
   addMachine: () => void;
   connect: (machine: MachineView) => void;
   guard: (run: () => Promise<unknown>) => void;
@@ -64,6 +71,8 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       },
       rename: (title, initial, run) => setDialog({ kind: "rename", title, initial, run }),
       confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
+      newAgent: (machineId, session, workspace) => setDialog({ kind: "agent", machineId, session, workspace }),
+      changeFolder: (ref, initial) => setDialog({ kind: "folder", ref, initial }),
       addMachine: () => setDialog({ kind: "add-machine" }),
       // Batch first (key or agent); the dialog opens only when that needs the user.
       connect: (machine) => {
@@ -100,6 +109,16 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
     modal = (
       <NewWorkspaceDialog machineId={dialog.machineId} session={dialog.session} defaultCwd={dialog.defaultCwd}
         onClose={closeDialog} onError={setError} />
+    );
+  } else if (dialog?.kind === "agent") {
+    modal = (
+      <NewAgentDialog machineId={dialog.machineId} session={dialog.session} workspace={dialog.workspace}
+        onClose={closeDialog} onError={setError} />
+    );
+  } else if (dialog?.kind === "folder") {
+    modal = (
+      <TextDialog title="Workspace folder" initial={dialog.initial} submitLabel="Save" onClose={closeDialog}
+        onSubmit={(v) => v.trim() && setFolder(dialog.ref, v)} />
     );
   } else if (dialog?.kind === "add-machine") {
     modal = (
