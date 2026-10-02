@@ -4,6 +4,8 @@ import type { Terminal } from "@xterm/xterm";
 export interface Entry {
   term: Terminal;
   fit: FitAddon;
+  /** Runs before the terminal is disposed. */
+  cleanup?: () => void;
 }
 
 const cache = new Map<string, Entry>();
@@ -25,6 +27,7 @@ export function dispose(key: string): void {
   if (!e) return;
   cache.delete(key);
   owners.delete(key);
+  e.cleanup?.();
   e.term.dispose();
 }
 

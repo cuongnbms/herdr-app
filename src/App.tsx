@@ -4,6 +4,7 @@ import { machinesList, onMachine, onPaneStatus, sessionStart } from "./lib/ipc";
 import { notifyPaneStatus } from "./notify";
 import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
+import { applyChatFont, useSettings } from "./settings/store";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
 import { AgentList } from "./agents/AgentList";
@@ -82,6 +83,9 @@ export default function App() {
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const note = useApp((s) => (s.selected ? s.lensNote[paneKey(s.selected)] : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const chatFontSize = useSettings((s) => s.chatFontSize);
+
+  useEffect(() => applyChatFont(chatFontSize), [chatFontSize]);
 
   useEffect(() => {
     let cancelled = false;

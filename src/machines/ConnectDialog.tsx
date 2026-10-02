@@ -13,7 +13,8 @@ import {
   machineMasterAlive,
 } from "../lib/ipc";
 import type { AttachEvent, MachineView } from "../lib/types";
-import { TERM_FONT, TERM_THEME } from "../terminal/theme";
+import { watchTermFont } from "../settings/store";
+import { TERM_THEME } from "../terminal/theme";
 
 function toBytes(buf: unknown): Uint8Array | null {
   if (buf instanceof ArrayBuffer) return new Uint8Array(buf);
@@ -35,13 +36,12 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
     const el = host.current;
     if (!el) return;
     const term = new Terminal({
-      fontFamily: TERM_FONT,
-      fontSize: 13,
       cursorBlink: true,
       theme: TERM_THEME,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const unwatchFont = watchTermFont(term, fit);
     term.open(el);
     try {
       fit.fit();
@@ -92,6 +92,7 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
       clearInterval(poll);
       input.dispose();
       resize.dispose();
+      unwatchFont();
       term.dispose();
       // After success the master must be left alone (it may still be detaching).
       if (!succeeded) void connectClose(id).catch(() => {});

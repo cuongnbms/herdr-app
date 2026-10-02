@@ -6,7 +6,8 @@ import "../fonts/fonts.css";
 import { herdrCall } from "../lib/ipc";
 import { paneKey, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
-import { TERM_FONT, TERM_THEME } from "../terminal/theme";
+import { watchTermFont } from "../settings/store";
+import { TERM_THEME } from "../terminal/theme";
 
 const QUICK: { label: string; key: string }[] = [
   { label: "1", key: "1" },
@@ -33,8 +34,6 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
     const host = hostRef.current;
     if (!host) return;
     const term = new Terminal({
-      fontFamily: TERM_FONT,
-      fontSize: 12,
       disableStdin: true,
       cursorBlink: false,
       scrollback: 200,
@@ -42,6 +41,7 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const unwatchFont = watchTermFont(term, fit, -1);
     term.open(host);
     termRef.current = term;
     try {
@@ -51,6 +51,7 @@ export function BlockedPanel({ pane, view }: { pane: PaneRef; view: PaneView }) 
     }
     return () => {
       termRef.current = null;
+      unwatchFont();
       term.dispose();
     };
   }, []);

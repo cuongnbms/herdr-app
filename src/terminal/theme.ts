@@ -24,5 +24,3 @@ export const TERM_THEME: ITheme = {
   brightCyan: "#a3e0ff",
   brightWhite: "#f2f3f6",
 };
-
-export const TERM_FONT = '"JetBrains Mono", Menlo, monospace';

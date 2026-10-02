@@ -9,7 +9,8 @@ import { attachKeyString, termAck, termOpen, termRelease, termResize, termWrite 
 import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { Banner } from "./Banner";
-import { TERM_FONT, TERM_THEME } from "./theme";
+import { watchTermFont } from "../settings/store";
+import { TERM_THEME } from "./theme";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 
@@ -20,8 +21,6 @@ interface Props {
 
 function createEntry() {
   const term = new Terminal({
-    fontFamily: TERM_FONT,
-    fontSize: 13,
     cursorBlink: true,
     scrollback: 5000,
     allowProposedApi: true,
@@ -30,7 +29,7 @@ function createEntry() {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.attachCustomKeyEventHandler((e) => !e.metaKey);
-  return { term, fit };
+  return { term, fit, cleanup: watchTermFont(term, fit) };
 }
 
 function toBytes(buf: unknown): Uint8Array | null {
