@@ -22,10 +22,27 @@ fn result_text(content: Option<&Value>) -> String {
     }
 }
 
-fn user_text_ok(text: &str) -> bool {
-    !(text.starts_with("<command-")
-        || text.starts_with("<local-command-")
-        || text.starts_with("Caveat:"))
+fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let open = format!("<{name}>");
+    let start = text.find(&open)? + open.len();
+    let len = text[start..].find(&format!("</{name}>"))?;
+    Some(text[start..start + len].trim())
+}
+
+/// The chat text for a user record: a slash command reads as the user typed
+/// it, and the CLI's own bookkeeping (command output, caveats) is dropped.
+fn user_text(text: &str) -> Option<String> {
+    if text.starts_with("<command-") {
+        let name = tag(text, "command-name")?;
+        return Some(match tag(text, "command-args").filter(|a| !a.is_empty()) {
+            Some(args) => format!("{name} {args}"),
+            None => name.to_string(),
+        });
+    }
+    if text.starts_with("<local-command-") || text.starts_with("Caveat:") {
+        return None;
+    }
+    Some(text.to_string())
 }
 
 impl Parser for ClaudeParser {
@@ -55,20 +72,20 @@ impl Parser for ClaudeParser {
         let content = v.get("message").and_then(|m| m.get("content"));
         let mut items = vec![];
         match content {
-            Some(Value::String(s)) if kind == "user" && user_text_ok(s) => {
-                items.push(ChatItem::User { text: s.clone() });
+            Some(Value::String(s)) if kind == "user" => {
+                if let Some(text) = user_text(s) {
+                    items.push(ChatItem::User { text });
+                }
             }
             Some(Value::Array(blocks)) => {
                 for b in blocks {
                     let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
                     match (kind, bt) {
                         ("user", "text") => {
-                            if let Some(t) = b.get("text").and_then(Value::as_str) {
-                                if user_text_ok(t) {
-                                    items.push(ChatItem::User {
-                                        text: t.to_string(),
-                                    });
-                                }
+                            if let Some(text) =
+                                b.get("text").and_then(Value::as_str).and_then(user_text)
+                            {
+                                items.push(ChatItem::User { text });
                             }
                         }
                         ("user", "tool_result") => items.push(ChatItem::ToolResult {
@@ -171,6 +188,9 @@ mod tests {
                     output: "boom".into(),
                     is_error: true
                 },
+                User {
+                    text: "/clear".into()
+                },
                 AssistantText {
                     markdown: "Done.".into()
                 },
@@ -183,6 +203,25 @@ mod tests {
         assert_eq!(items, vec![User { text: "a".into() }]);
         let more = run("{\"type\":\"user\",\"message\":{\"content\":\"b\"}}");
         assert_eq!(more, vec![User { text: "b".into() }]);
+    }
+    #[test]
+    fn shows_slash_commands_as_user_text() {
+        let line = serde_json::json!({"type":"user","message":{"content":"<command-message>working-time</command-message>\n<command-name>/working-time</command-name>\n<command-args>last 1 day</command-args>"}}).to_string();
+        assert_eq!(
+            run(&line),
+            vec![User {
+                text: "/working-time last 1 day".into()
+            }]
+        );
+        let bare = serde_json::json!({"type":"user","message":{"content":"<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>"}}).to_string();
+        assert_eq!(
+            run(&bare),
+            vec![User {
+                text: "/clear".into()
+            }]
+        );
+        let stdout = serde_json::json!({"type":"user","message":{"content":"<local-command-stdout></local-command-stdout>"}}).to_string();
+        assert_eq!(run(&stdout), vec![]);
     }
     #[test]
     fn truncates_long_results() {
