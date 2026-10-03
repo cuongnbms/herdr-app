@@ -35,4 +35,22 @@ describe("createKeyHandler", () => {
     expect(handle(key("keypress", { key: "ab", charCode: 97, altKey: true }))).toBe(true);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("sends Shift+Enter as a line feed, the new line key of Claude and pi", () => {
+    const send = vi.fn();
+    const handle = createKeyHandler(send);
+    const down = key("keydown", { key: "Enter", keyCode: 13, shiftKey: true });
+    expect(handle(down)).toBe(false);
+    expect(down.defaultPrevented).toBe(true);
+    expect(handle(key("keypress", { key: "Enter", charCode: 13, keyCode: 13, shiftKey: true }))).toBe(false);
+    expect(handle(key("keyup", { key: "Enter", keyCode: 13, shiftKey: true }))).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("\n");
+  });
+
+  it("leaves Shift+Enter with other modifiers to xterm", () => {
+    const send = vi.fn();
+    expect(createKeyHandler(send)(key("keydown", { key: "Enter", keyCode: 13, shiftKey: true, ctrlKey: true }))).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
 });
