@@ -129,7 +129,14 @@ pub fn slug(label: &str, taken: &[String]) -> String {
 
 /// Remove any forwarded-socket files (`<id>-<8 hex>.sock`) left in the runtime dir.
 fn sweep_sockets(id: &str) {
-    let Ok(rd) = std::fs::read_dir(crate::transport::runtime_dir()) else {
+    let dir = match crate::transport::secure_runtime_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("not sweeping sockets, runtime dir is not secure: {e}");
+            return;
+        }
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
     let prefix = format!("{id}-");

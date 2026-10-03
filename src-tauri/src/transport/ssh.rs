@@ -1,7 +1,5 @@
 use super::local::LocalTransport;
-use super::{
-    exec, runtime_dir, secure_runtime_dir, sh_quote, socket_name, SessionEntry, Transport,
-};
+use super::{exec, secure_runtime_dir, sh_quote, socket_name, SessionEntry, Transport};
 use crate::error::{AppError, AppResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -134,7 +132,7 @@ impl Transport for SshTransport {
     async fn release_socket(&self, session: &SessionEntry) -> AppResult<()> {
         let _gate = self.gate.lock().await;
         self.forwards.lock().unwrap().remove(&session.name);
-        let local = runtime_dir().join(socket_name(&self.machine_id, &session.name));
+        let local = secure_runtime_dir()?.join(socket_name(&self.machine_id, &session.name));
         let out = exec(
             &LocalTransport,
             &self.forward_argv("cancel", &local, session),

@@ -342,53 +342,53 @@ fn runtime_dir_path() -> PathBuf {
     PathBuf::from(format!("/tmp/herdr-app-{}", unsafe { libc::getuid() }))
 }
 
+fn not_private(dir: &std::path::Path, why: impl std::fmt::Display) -> AppError {
+    AppError::new(
+        "io",
+        format!(
+            "{} is not a private directory owned by this user: {why}",
+            dir.display()
+        ),
+    )
+}
+
 /// Confirm `dir` is a real directory (not a symlink), owned by us, with mode 0700.
 fn verify_private_dir(dir: &std::path::Path) -> AppResult<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let fail = |why: String| {
-        AppError::new(
-            "io",
-            format!(
-                "{} is not a private directory owned by this user: {why}",
-                dir.display()
-            ),
-        )
-    };
     let md = std::fs::symlink_metadata(dir)?;
     if md.file_type().is_symlink() || !md.is_dir() {
-        return Err(fail("not a real directory".into()));
+        return Err(not_private(dir, "not a real directory"));
     }
     let uid = unsafe { libc::getuid() };
     if md.uid() != uid {
-        return Err(fail(format!("owned by uid {}", md.uid())));
+        return Err(not_private(dir, format!("owned by uid {}", md.uid())));
     }
     let mode = md.permissions().mode() & 0o777;
     if mode != 0o700 {
-        return Err(fail(format!("mode is {mode:o}")));
+        return Err(not_private(dir, format!("mode is {mode:o}")));
     }
     Ok(())
 }
 
-/// Create (mode 0700) and verify `/tmp/herdr-app-<uid>`, holding ssh control sockets and
-/// forwarded herdr sockets. Call before creating sockets in it.
-pub fn secure_runtime_dir() -> AppResult<PathBuf> {
+/// Create `dir` (mode 0700) and verify it. Refuses a symlink or non-directory before any
+/// chmod, so a planted link can never redirect the permission change to its target.
+fn secure_dir(dir: &std::path::Path) -> AppResult<()> {
     use std::os::unix::fs::PermissionsExt;
-    let dir = runtime_dir_path();
-    std::fs::create_dir_all(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    verify_private_dir(&dir)?;
-    Ok(dir)
+    std::fs::create_dir_all(dir)?;
+    let md = std::fs::symlink_metadata(dir)?;
+    if md.file_type().is_symlink() || !md.is_dir() {
+        return Err(not_private(dir, "not a real directory"));
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    verify_private_dir(dir)
 }
 
-/// The runtime dir path; logs (but does not fail) if it cannot be secured.
-pub fn runtime_dir() -> PathBuf {
-    match secure_runtime_dir() {
-        Ok(dir) => dir,
-        Err(e) => {
-            tracing::error!("runtime dir is not secure: {e}");
-            runtime_dir_path()
-        }
-    }
+/// Create (mode 0700) and verify `/tmp/herdr-app-<uid>`, holding ssh control sockets and
+/// forwarded herdr sockets. Every caller must go through this; there is no unverified path.
+pub fn secure_runtime_dir() -> AppResult<PathBuf> {
+    let dir = runtime_dir_path();
+    secure_dir(&dir)?;
+    Ok(dir)
 }
 
 fn fnv1a32(s: &str) -> u32 {
@@ -515,9 +515,34 @@ broken               running  /only-one-path\n";
     #[test]
     fn socket_name_is_short() {
         let long = "a-very-long-session-name-that-goes-on-and-on-and-on-forever-and-ever";
-        let p = runtime_dir().join(socket_name("devtuf-machine-x", long));
+        let p = runtime_dir_path().join(socket_name("devtuf-machine-x", long));
         assert!(p.as_os_str().len() <= 104, "{}", p.display());
         assert_ne!(socket_name("m", "a"), socket_name("m", "b"));
+    }
+    #[test]
+    fn secure_dir_refuses_a_symlink_without_touching_its_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(secure_dir(&link).unwrap_err().code, "io");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
+    }
+    #[test]
+    fn secure_dir_creates_a_private_dir_and_tightens_a_loose_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("rt");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        secure_dir(&p).unwrap();
+        assert_eq!(mode(&p), 0o700);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        secure_dir(&p).unwrap();
+        assert_eq!(mode(&p), 0o700);
     }
     #[test]
     fn secure_runtime_dir_ok() {
