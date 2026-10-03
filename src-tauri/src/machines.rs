@@ -36,6 +36,7 @@ pub const ALLOWED_METHODS: &[&str] = &[
     "pane.rename",
     "pane.read",
     "pane.scroll",
+    "pane.send_text",
     "tab.create",
     "tab.close",
     "tab.rename",

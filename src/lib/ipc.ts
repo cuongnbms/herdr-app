@@ -40,6 +40,9 @@ export const herdrCall = <T>(machineId: string, session: string, method: string,
     if ((e as { code?: string } | null)?.code === "timeout") showToast(`${method} timed out`);
     throw e;
   });
+/** Saves image bytes on the Machine (remote ones over ssh) and returns the path there. */
+export const imageSaveTemp = (machineId: string, bytes: Uint8Array, ext: string) =>
+  invoke<string>("image_save_temp", bytes, { headers: { "x-machine-id": machineId, "x-image-ext": ext } });
 
 export const onMachine = (cb: (m: MachineView) => void): Promise<UnlistenFn> =>
   listen<MachineView>("sidebar://machine", (e) => cb(e.payload));

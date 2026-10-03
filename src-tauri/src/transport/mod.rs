@@ -44,18 +44,42 @@ pub trait Transport: Send + Sync {
 
 /// Run `argv` on the Machine with stdin closed, capturing output, 30 s timeout.
 pub async fn exec(t: &dyn Transport, argv: &[String]) -> AppResult<ExecOutput> {
+    exec_input(t, argv, None).await
+}
+
+/// `exec`, feeding `input` to the command's stdin (then closing it) when given.
+pub async fn exec_input(
+    t: &dyn Transport,
+    argv: &[String],
+    input: Option<&[u8]>,
+) -> AppResult<ExecOutput> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
     let wrapped = t.wrap(argv, false);
     let program = wrapped
         .first()
         .ok_or_else(|| AppError::new("invalid", "empty command"))?;
-    let child = Command::new(program)
+    let mut child = Command::new(program)
         .args(&wrapped[1..])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-    match tokio::time::timeout(EXEC_TIMEOUT, child.wait_with_output()).await {
+    let run = async {
+        if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+            // A command that exits early closes the pipe; its exit status tells why.
+            if let Err(e) = stdin.write_all(bytes).await {
+                tracing::debug!("exec stdin write: {e}");
+            }
+        }
+        child.wait_with_output().await
+    };
+    match tokio::time::timeout(EXEC_TIMEOUT, run).await {
         Ok(out) => {
             let out = out?;
             Ok(ExecOutput {
@@ -70,6 +94,66 @@ pub async fn exec(t: &dyn Transport, argv: &[String]) -> AppResult<ExecOutput> {
             format!("{program} took longer than {}s", EXEC_TIMEOUT.as_secs()),
         )),
     }
+}
+
+pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+
+/// Writes stdin to `<dir>/<name>` (dir: `$2`, else `$TMPDIR`, else /tmp), owner-only and
+/// never over an existing file, then prints the path.
+const SAVE_IMAGE_SCRIPT: &str = r#"d="${2:-${TMPDIR:-/tmp}}"
+f="${d%/}/$1"
+umask 077
+set -C
+cat > "$f" && printf '%s\n' "$f""#;
+
+/// Save a pasted image on the Machine (over ssh for a remote one, so the agent there can
+/// read it) and return its path there. `dir` overrides the temp directory (tests).
+pub async fn save_image_in(
+    t: &dyn Transport,
+    bytes: &[u8],
+    ext: &str,
+    dir: Option<&str>,
+) -> AppResult<String> {
+    let ext = ext.to_ascii_lowercase();
+    if !IMAGE_EXTS.contains(&ext.as_str()) {
+        return Err(AppError::new(
+            "invalid",
+            format!("unsupported image type: {ext}"),
+        ));
+    }
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err(AppError::new(
+            "invalid",
+            format!(
+                "image must be 1 byte to {} MB",
+                MAX_IMAGE_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+    static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = format!("herdr-paste-{nanos}-{}-{seq}.{ext}", std::process::id());
+    let argv: Vec<String> = vec![
+        "sh".into(),
+        "-c".into(),
+        SAVE_IMAGE_SCRIPT.into(),
+        "sh".into(),
+        name,
+        dir.unwrap_or("").into(),
+    ];
+    let out = exec_input(t, &argv, Some(bytes)).await?;
+    let path = out.stdout.trim();
+    if out.status != 0 || path.is_empty() {
+        return Err(AppError::new(
+            "io",
+            format!("saving the image failed: {}", out.stderr.trim()),
+        ));
+    }
+    Ok(path.to_string())
 }
 
 /// POSIX single-quote `s` for use in a shell command line.
@@ -455,6 +539,38 @@ broken               running  /only-one-path\n";
             .unwrap();
         assert_eq!(out.status, 0);
         assert!(out.stdout.contains("HOME="), "{}", out.stdout);
+    }
+
+    #[tokio::test]
+    async fn saves_image_bytes_through_stdin_as_a_private_temp_file() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().to_string_lossy().into_owned();
+        let bytes: Vec<u8> = (0..=255u8).cycle().take(300_000).collect();
+        let path = save_image_in(&local::LocalTransport, &bytes, "png", Some(&dir))
+            .await
+            .unwrap();
+        assert!(path.starts_with(&dir), "{path}");
+        assert!(path.ends_with(".png"), "{path}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let again = save_image_in(&local::LocalTransport, &bytes, "png", Some(&dir))
+            .await
+            .unwrap();
+        assert_ne!(path, again);
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_image_types_and_oversized_images() {
+        let t = local::LocalTransport;
+        let err = save_image_in(&t, b"x", "sh", None).await.unwrap_err();
+        assert_eq!(err.code, "invalid");
+        let big = vec![0u8; MAX_IMAGE_BYTES + 1];
+        let err = save_image_in(&t, &big, "png", None).await.unwrap_err();
+        assert_eq!(err.code, "invalid");
+        let err = save_image_in(&t, b"", "png", None).await.unwrap_err();
+        assert_eq!(err.code, "invalid");
     }
 
     #[tokio::test]

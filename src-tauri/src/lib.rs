@@ -40,6 +40,7 @@ pub fn run() {
             commands::session_stop,
             commands::session_delete,
             commands::herdr_call,
+            commands::image_save_temp,
             commands::term_open,
             commands::term_write,
             commands::term_resize,

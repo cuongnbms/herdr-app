@@ -6,7 +6,7 @@ use crate::{
     machines::MachineManager,
     sshconfig,
     transcript::{self, ChatEvent, ChatItem, ChatManager, Located},
-    transport::ssh::master_argv,
+    transport::{self, ssh::master_argv},
     view::{MachineView, PaneRef, PaneView},
 };
 use serde_json::Value;
@@ -107,6 +107,29 @@ pub async fn herdr_call(
     params: Value,
 ) -> Result<Value, AppError> {
     mgr.call(&machine_id, &session, &method, params).await
+}
+
+/// Saves a pasted image on the Machine and returns its path there. The body is the raw
+/// image bytes; `x-machine-id` and `x-image-ext` headers name the Machine and file type.
+#[tauri::command]
+pub async fn image_save_temp(
+    mgr: Mgr<'_>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, AppError> {
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| AppError::new("invalid", format!("missing {name} header")))
+    };
+    let (machine_id, ext) = (header("x-machine-id")?, header("x-image-ext")?);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::new("invalid", "expected raw image bytes"));
+    };
+    let t = mgr.transport(&machine_id)?;
+    transport::save_image_in(t.as_ref(), bytes, &ext, None).await
 }
 
 type Att<'a> = State<'a, Arc<AttachManager>>;
