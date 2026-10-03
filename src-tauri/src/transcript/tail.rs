@@ -110,7 +110,7 @@ struct State {
     last_byte: Option<Instant>,
     /// Dropped with the State, so any end of the parse thread (Eof, closed channel, panic,
     /// failed spawn) marks the tail done.
-    done: DoneOnDrop,
+    _done: DoneOnDrop,
 }
 
 struct DoneOnDrop(Arc<AtomicBool>);
@@ -250,7 +250,7 @@ pub fn spawn_tail(
         size: None,
         consumed: 0,
         last_byte: None,
-        done: DoneOnDrop(done.clone()),
+        _done: DoneOnDrop(done.clone()),
     };
     let link = state.link.clone();
     let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -717,7 +717,7 @@ mod tests {
             size: None,
             consumed: 0,
             last_byte: None,
-            done: DoneOnDrop(Arc::default()),
+            _done: DoneOnDrop(Arc::default()),
         }
     }
 
@@ -725,7 +725,7 @@ mod tests {
     fn the_parse_thread_marks_the_tail_done_however_it_ends() {
         for eof in [true, false] {
             let st = state(Box::new(Lines));
-            let done = st.done.0.clone();
+            let done = st._done.0.clone();
             let (tx, rx) = tokio::sync::mpsc::channel(4);
             if eof {
                 tx.blocking_send(Msg::Eof).unwrap();
