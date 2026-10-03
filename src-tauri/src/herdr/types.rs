@@ -92,7 +92,7 @@ pub struct EventFrame {
     pub data: Value,
 }
 
-/// Data of a `pane_agent_status_changed` event; extra fields are ignored.
+/// Data of a `pane.agent_status_changed` event; extra fields are ignored.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AgentStatusChanged {
     pub pane_id: String,

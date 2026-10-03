@@ -86,7 +86,7 @@ pub struct Applied {
     pub previous: Option<AgentStatus>,
 }
 
-/// Apply a `pane_agent_status_changed` event. Nothing changes for an unknown pane.
+/// Apply a `pane.agent_status_changed` event. Nothing changes for an unknown pane.
 pub fn apply_status(snap: &mut Snapshot, ev: &AgentStatusChanged) -> Applied {
     let Some(pane) = snap.panes.iter_mut().find(|p| p.pane_id == ev.pane_id) else {
         return Applied::default();

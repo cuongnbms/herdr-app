@@ -99,8 +99,8 @@ mod tests {
             }
             f => panic!("{f:?}"),
         }
-        match decode_frame(r#"{"event":"pane_agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"done"}}"#).unwrap() {
-            Frame::Event(e) => { assert_eq!(e.event, "pane_agent_status_changed"); assert_eq!(e.data["agent_status"], "done"); }
+        match decode_frame(r#"{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"done"}}"#).unwrap() {
+            Frame::Event(e) => { assert_eq!(e.event, "pane.agent_status_changed"); assert_eq!(e.data["agent_status"], "done"); }
             f => panic!("{f:?}"),
         }
     }

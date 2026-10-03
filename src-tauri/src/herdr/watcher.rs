@@ -80,7 +80,7 @@ fn handle_status(
 ) -> Handled {
     let Ok(change) = serde_json::from_value::<AgentStatusChanged>(ev.data.clone()) else {
         tracing::warn!(
-            "malformed pane_agent_status_changed, refetching: {}",
+            "malformed pane.agent_status_changed, refetching: {}",
             ev.data
         );
         return Handled::Refetch;
@@ -130,7 +130,7 @@ fn handle_event(
     ev: &EventFrame,
     tx: &UnboundedSender<WatchEvent>,
 ) -> Handled {
-    if ev.event == "pane_agent_status_changed" {
+    if ev.event == "pane.agent_status_changed" {
         handle_status(name, snap, ev, tx)
     } else {
         Handled::Refetch
@@ -294,7 +294,7 @@ mod tests {
                 .unwrap(),
         ));
         let (f, mut rx, _h) = started(snap).await;
-        f.emit("pane_agent_status_changed", json!({"pane_id": 5}));
+        f.emit("pane.agent_status_changed", json!({"pane_id": 5}));
         assert!(
             wait_snapshots(&f, 2).await,
             "malformed status should refetch"
@@ -309,7 +309,7 @@ mod tests {
         ));
         let (f, mut rx, _h) = started(snap).await;
         f.emit(
-            "pane_agent_status_changed",
+            "pane.agent_status_changed",
             json!({"pane_id":"w9:p9","agent_status":"done"}),
         );
         assert!(
@@ -343,7 +343,7 @@ mod tests {
             .unwrap()
             .contains(&json!({"type":"pane.agent_status_changed","pane_id":"w2:p1"})));
         f.emit(
-            "pane_agent_status_changed",
+            "pane.agent_status_changed",
             json!({"pane_id":"w2:p1","workspace_id":"w2","agent_status":"done"}),
         );
         assert!(
@@ -370,14 +370,14 @@ mod tests {
         ));
         let (f, mut rx, _h) = started(snap).await;
         f.emit(
-            "pane_agent_status_changed",
+            "pane.agent_status_changed",
             json!({"pane_id":"w2:p1","agent_status":"idle","agent":"pi"}),
         );
         assert!(
             matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[1].tabs[0].panes[0].agent.as_deref() == Some("pi"))
         );
         f.emit(
-            "pane_agent_status_changed",
+            "pane.agent_status_changed",
             json!({"pane_id":"w2:p1","agent_status":"done","agent":"pi"}),
         );
         assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
