@@ -19,9 +19,10 @@ when hidden, a per-key open lock, `connect_ack`, and no change to `ACK_THRESHOLD
   - held then Take over → same xterm
 
 ## B. Do openpty/spawn outside the global `entries` lock (`src-tauri/src/attach.rs`)
-- `opening: Mutex<HashMap<AttachKey, Arc<Mutex<()>>>>`. `open`, `release`, `close` and
-  `write` hold the key's lock, so same-key operations keep today's order. `ack`, `resize`
-  and other keys never wait on a spawn.
+- `keys: Mutex<HashMap<AttachKey, Arc<Mutex<()>>>>`. `open`, `release` and `close` hold the
+  key's lock, so same-key operations keep today's order. `write` holds it only for its
+  lookup: a write blocked behind a wedged ssh must not stop `close`. `ack`, `resize` and
+  other keys never wait on a spawn.
 - `open_async`, `release_async`, `close_async` run on `spawn_blocking`. `term_open`,
   `connect_open`, `term_release` and `connect_close` await them.
 - Tests (real PTYs):

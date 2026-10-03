@@ -428,6 +428,8 @@ impl AttachManager {
         }
     }
 
+    /// Does not wait for an open of this Machine that is still spawning (it is not in
+    /// `entries` yet); over a dead ssh master that attach exits 255 and reports `Detached`.
     pub fn close_machine(&self, machine_id: &str) {
         let list: Vec<Arc<Entry>> = self
             .entries
