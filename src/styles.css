@@ -759,6 +759,15 @@ kbd {
 }
 .send:hover { filter: brightness(1.08); }
 .send:disabled { background: var(--active); color: var(--fg-3); cursor: default; filter: none; }
+.stop {
+  margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid color-mix(in srgb, var(--err) 45%, transparent); border-radius: 8px;
+  background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); cursor: pointer;
+  transition: background var(--t-fast);
+}
+.stop:hover { background: color-mix(in srgb, var(--err) 22%, transparent); }
+.stop svg { fill: currentColor; }
+.stop + .send { margin-left: 0; }
 .composer-error { font-size: 12px; padding: 0 4px; }
 
 .blocked-panel {

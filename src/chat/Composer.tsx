@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
-import type { PaneRef, SlashCommand } from "../lib/types";
-import { CloseIcon, SendIcon } from "../ui/icons";
+import type { AgentStatus, PaneRef, SlashCommand } from "../lib/types";
+import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
 import { activeTrigger, applyCompletion } from "./mentions";
@@ -48,7 +48,7 @@ const revoke = (a: Attachment) => {
   if (a.preview) URL.revokeObjectURL(a.preview);
 };
 
-export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null }) {
+export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string | null; status?: AgentStatus }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -245,6 +245,13 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
               </button>
             ))}
           </div>
+          {/* Esc interrupts the agent's turn without killing it the way Ctrl+C can. Send stays
+              usable beside it: the agent queues text sent while it works. */}
+          {status === "working" && (
+            <button className="stop" aria-label="Stop" title="Stop (Esc)" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: ["esc"] }).catch(() => {})}>
+              <StopIcon />
+            </button>
+          )}
           <button className="send" aria-label="Send" disabled={!canSend} onClick={send}>
             <SendIcon />
           </button>

@@ -44,6 +44,17 @@ describe("Composer", () => {
     expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.send_keys", { target: "w1:p1", keys: ["esc"] });
   });
 
+  it("shows Stop only while the agent works, and Stop sends Esc", () => {
+    const { rerender } = render(<Composer pane={pane} agent="claude" status="idle" />);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    rerender(<Composer pane={pane} agent="claude" status="working" />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.send_keys", { target: "w1:p1", keys: ["esc"] });
+    // Text typed while the agent works still sends: the agent queues it.
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "also check the docs" } });
+    expect(sendButton().disabled).toBe(false);
+  });
+
   it("saves a pasted image on the pane's machine and shows it as an attachment", async () => {
     render(<Composer pane={pane} agent="claude" />);
     paste(screen.getByRole("textbox"), [png()]);
