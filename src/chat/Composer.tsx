@@ -324,13 +324,14 @@ export function Composer({
             ))}
           </div>
           {agent === "claude" ? (
-            // Claude takes /model and /effort with an argument; while it works they would queue.
+            // Claude takes /model and /effort with an argument; only while idle, since a turn would
+            // queue them and a blocked prompt would take the text as its answer.
             <button
               className="composer-model"
               title="Model · reasoning effort · context tokens"
               aria-haspopup="menu"
               aria-expanded={menuAt !== null}
-              disabled={status === "working"}
+              disabled={status === "working" || status === "blocked"}
               onClick={(e) => setMenuAt(e.currentTarget.getBoundingClientRect())}
             >
               {label ?? "Model"}
@@ -352,12 +353,11 @@ export function Composer({
           <button className="send" aria-label="Send" disabled={!canSend} onClick={send}>
             <SendIcon />
           </button>
-          {/* After Send, so the label's sibling rules above still match while it is open. */}
           {menuAt && (
             <ModelMenu
               anchor={menuAt}
               meta={meta}
-              onPick={(command) => call("agent.prompt", { target: pane.pane_id, text: command }).catch(() => {})}
+              onPick={sendQuick}
               onClose={() => setMenuAt(null)}
             />
           )}

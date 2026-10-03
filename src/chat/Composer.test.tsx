@@ -498,8 +498,11 @@ describe("Composer model menu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.getByRole("menu")).toBeTruthy();
   });
-  it("is unavailable while Claude works", () => {
-    render(<Composer pane={pane} agent="claude" status="working" meta={meta} />);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: /claude-opus-5-5 · high/ }).disabled).toBe(true);
+  it("is unavailable while Claude works or waits on a prompt", () => {
+    const { rerender } = render(<Composer pane={pane} agent="claude" status="working" meta={meta} />);
+    const button = () => screen.getByRole<HTMLButtonElement>("button", { name: /claude-opus-5-5 · high/ });
+    expect(button().disabled).toBe(true);
+    rerender(<Composer pane={pane} agent="claude" status="blocked" meta={meta} />);
+    expect(button().disabled).toBe(true);
   });
 });

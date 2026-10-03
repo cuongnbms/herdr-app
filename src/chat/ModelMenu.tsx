@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { ChatMeta } from "../lib/types";
 
 // Claude Code's `/model` aliases and `/effort` levels (2.1.288); each takes its argument
@@ -42,7 +43,8 @@ export function ModelMenu({
     </li>
   );
 
-  return (
+  // On body, so no ancestor of the Composer can become the fixed menu's containing block.
+  return createPortal(
     <div className="overlay clear" onMouseDown={onClose}>
       <ul
         className="ctx-menu model-menu"
@@ -57,6 +59,7 @@ export function ModelMenu({
         <li role="presentation" className="model-menu-heading">Effort</li>
         {CLAUDE_EFFORTS.map((e) => item(e, meta?.effort === e, `/effort ${e}`))}
       </ul>
-    </div>
+    </div>,
+    document.body,
   );
 }
