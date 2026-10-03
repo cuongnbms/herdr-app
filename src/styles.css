@@ -1,13 +1,14 @@
 /* ---------- Tokens ---------- */
 :root {
   /* Surfaces, from the window background up to floating layers. */
-  --surface-side: rgba(24, 25, 29, 0.72); /* over the native sidebar vibrancy */
-  --surface-0: #141518;
-  --surface-1: #18191d;
-  --surface-2: #1f2025;
-  --surface-3: #27282e;
-  --surface-term: #111214; /* = TERM_THEME.background */
-  --surface-code: #0f1012;
+  --surface-side: rgba(31, 32, 36, 0.72); /* over the native sidebar vibrancy */
+  --surface-chrome: rgba(31, 32, 36, 0.86); /* agents column and header, over the same vibrancy */
+  --surface-0: #1a1b1f;
+  --surface-1: #1f2024;
+  --surface-2: #25262b;
+  --surface-3: #2d2e34;
+  --surface-term: #1a1b1f; /* = TERM_THEME.background, = --surface-0 */
+  --surface-code: #151619;
   --hover: rgba(255, 255, 255, 0.045);
   --active: rgba(255, 255, 255, 0.08);
 
@@ -88,6 +89,7 @@
 /* Light palette: set by applyTheme as <html data-theme="light">. Only colors change. */
 :root[data-theme="light"] {
   --surface-side: rgba(240, 240, 243, 0.7);
+  --surface-chrome: rgba(246, 246, 248, 0.84);
   --surface-0: #ffffff;
   --surface-1: #f6f6f8;
   --surface-2: #ffffff;
@@ -231,8 +233,10 @@ kbd {
   font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
 }
 
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface-0); }
-.main-empty { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; }
+/* Transparent so the header shows the window vibrancy; each lens paints its own opaque surface. */
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: transparent; }
+.main > .titlebar { background: var(--surface-chrome); border-bottom: 1px solid var(--line); }
+.main-empty { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; background: var(--surface-0); }
 
 /* ---------- Empty states ---------- */
 .empty { color: var(--fg-3); }
@@ -330,12 +334,12 @@ kbd {
 .agents {
   flex: 0 0 288px; width: 288px; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column;
-  background: var(--surface-1); border-right: 1px solid var(--line);
+  background: var(--surface-chrome); border-right: 1px solid var(--line);
 }
 .agents-head {
   position: sticky; top: 0; z-index: 1; flex: none;
   display: flex; align-items: center; gap: 8px; height: var(--titlebar); padding: 0 16px; box-sizing: border-box;
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent); backdrop-filter: blur(12px);
+  background: var(--surface-chrome); backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
 }
 .agents-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
@@ -418,7 +422,7 @@ kbd {
 .header {
   flex: none; display: flex; align-items: center; gap: 12px;
   height: var(--titlebar); padding: 0 12px 0 18px; box-sizing: border-box;
-  border-bottom: 1px solid var(--line); background: var(--surface-0);
+  border-bottom: 1px solid var(--line); background: var(--surface-chrome);
 }
 .crumbs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); pointer-events: none; }
 .crumb.current { color: var(--fg); font-weight: 600; }

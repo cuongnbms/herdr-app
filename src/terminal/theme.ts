@@ -2,12 +2,12 @@ import type { ITheme } from "@xterm/xterm";
 
 /** xterm colors; `background` matches `--surface-term` in styles.css. */
 export const TERM_THEME: ITheme = {
-  background: "#111214",
+  background: "#1a1b1f",
   foreground: "#e6e7eb",
   cursor: "#e6e7eb",
-  cursorAccent: "#111214",
+  cursorAccent: "#1a1b1f",
   selectionBackground: "rgba(124, 140, 255, 0.32)",
-  black: "#1c1d21",
+  black: "#26272d",
   red: "#f07178",
   green: "#9ece6a",
   yellow: "#e8b866",
