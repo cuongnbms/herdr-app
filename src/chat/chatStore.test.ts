@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyChat, prepend, reduce } from "./chatStore";
+import { emptyChat, prepend, reduce, TRIM_AT, TRIM_TO } from "./chatStore";
 const u = (t: string) => ({ kind: "user" as const, text: t });
 describe("chat store", () => {
   it("resets, appends, prepends and records errors", () => {
@@ -18,5 +18,23 @@ describe("chat store", () => {
     expect(s.meta).toEqual({ model: "m", effort: "high", context_tokens: 5 });
     s = reduce(s, { type: "reset", items: [], total: 0 });
     expect(s.meta).toEqual({ model: "m", effort: "high", context_tokens: 5 });
+  });
+  const many = (n: number, from = 0) => Array.from({ length: n }, (_, i) => u(`m${from + i}`));
+  it("trims to the newest items when an append at the bottom passes the cap", () => {
+    let s = reduce(emptyChat, { type: "reset", items: many(500, 4500), total: 5000 });
+    s = reduce(s, { type: "append", items: many(TRIM_AT - 500 + 1, 5000) }, true);
+    expect(s.items.length).toBe(TRIM_TO);
+    expect(s.total).toBe(5000 + TRIM_AT - 500 + 1);
+    expect((s.items[TRIM_TO - 1] as any).text).toBe(`m${s.total - 1}`);
+    // Older pages still line up: the item before the first kept one is total - length - 1.
+    const before = s.total - s.items.length;
+    s = prepend(s, [u(`m${before - 1}`)]);
+    expect((s.items[0] as any).text).toBe(`m${before - 1}`);
+    expect((s.items[1] as any).text).toBe(`m${before}`);
+  });
+  it("does not trim while the user reads older rows", () => {
+    let s = reduce(emptyChat, { type: "reset", items: many(500), total: 500 });
+    s = reduce(s, { type: "append", items: many(TRIM_AT, 500) }, false);
+    expect(s.items.length).toBe(TRIM_AT + 500);
   });
 });

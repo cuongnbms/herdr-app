@@ -17,8 +17,8 @@ import { usePiModelPicker } from "./usePiModelPicker";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
-type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
-const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a));
+type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[] };
+const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a, a.atBottom));
 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
@@ -57,7 +57,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
           forceBottom.current = true;
           setOpened((n) => n + 1);
         }
-        dispatch(ev);
+        dispatch(ev.type === "append" ? { ...ev, atBottom: atBottom.current } : ev);
       };
       handle.current?.close();
       const h = openChat(pane, path, channel);
