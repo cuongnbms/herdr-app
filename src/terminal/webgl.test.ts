@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activeWebgl, forgetWebgl, lossesOf, showWebgl } from "./webgl";
+import { WARMUP_SETTLE_MS, activeWebgl, forgetWebgl, lossesOf, showWebgl } from "./webgl";
 import { WEBGL_CONTEXTS } from "./webglPolicy";
 
 function fakeAddon() {
@@ -23,6 +23,31 @@ afterEach(() => {
 });
 
 describe("showWebgl", () => {
+  it("redraws from a fresh atlas once the warm-up has run", () => {
+    vi.useFakeTimers();
+    try {
+      const t = { ...term(), rows: 24, clearTextureAtlas: vi.fn(), refresh: vi.fn() };
+      showWebgl("k0", t, fakeAddon);
+      expect(t.clearTextureAtlas).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(WARMUP_SETTLE_MS);
+      expect(t.clearTextureAtlas).toHaveBeenCalledTimes(1);
+      expect(t.refresh).toHaveBeenCalledWith(0, 23);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("skips the warm-up redraw when the renderer is gone by then", () => {
+    vi.useFakeTimers();
+    try {
+      const t = { ...term(), rows: 24, clearTextureAtlas: vi.fn(), refresh: vi.fn() };
+      showWebgl("k0", t, fakeAddon);
+      forgetWebgl("k0");
+      vi.advanceTimersByTime(WARMUP_SETTLE_MS);
+      expect(t.clearTextureAtlas).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("keeps at most WEBGL_CONTEXTS renderers and evictions are not counted as losses", () => {
     const addons = keys.map(() => fakeAddon());
     keys.forEach((k, i) => showWebgl(k, term(), () => addons[i]));
