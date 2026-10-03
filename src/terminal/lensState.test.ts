@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialLensState as init, lensReducer as r } from "./lensState";
+import { disposesOnEvent, endsOpen, initialLensState as init, lensReducer as r } from "./lensState";
 
 describe("lensReducer", () => {
   it("re-attaches only after observing a non-connected -> connected transition", () => {
@@ -31,5 +31,27 @@ describe("lensReducer", () => {
   it("a manual reattach re-runs the attach at once", () => {
     const s = r(r(init, { type: "event", event: { type: "detached" }, machine: "connected" }), { type: "reattach" });
     expect(s).toMatchObject({ generation: 1, pending: false, sawDown: false, banner: null });
+  });
+});
+
+describe("open lifetime", () => {
+  it("every event but attached ends the open", () => {
+    expect(endsOpen({ type: "attached" })).toBe(false);
+    expect(endsOpen({ type: "held" })).toBe(true);
+    expect(endsOpen({ type: "exited", code: 1 })).toBe(true);
+    expect(endsOpen({ type: "detached" })).toBe(true);
+  });
+  it("a visible pane keeps an exited or held xterm for its banner", () => {
+    expect(disposesOnEvent({ type: "exited", code: 1 }, true)).toBe(false);
+    expect(disposesOnEvent({ type: "held" }, true)).toBe(false);
+  });
+  it("a hidden pane frees its xterm when the open ends", () => {
+    expect(disposesOnEvent({ type: "exited", code: 1 }, false)).toBe(true);
+    expect(disposesOnEvent({ type: "held" }, false)).toBe(true);
+    expect(disposesOnEvent({ type: "attached" }, false)).toBe(false);
+  });
+  it("a detach always frees the xterm", () => {
+    expect(disposesOnEvent({ type: "detached" }, true)).toBe(true);
+    expect(disposesOnEvent({ type: "detached" }, false)).toBe(true);
   });
 });

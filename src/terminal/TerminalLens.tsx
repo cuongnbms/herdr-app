@@ -13,7 +13,7 @@ import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { createKeyHandler } from "./keyHandler";
-import { initialLensState, lensReducer } from "./lensState";
+import { disposesOnEvent, endsOpen, initialLensState, lensReducer } from "./lensState";
 import { applyOsc52 } from "./osc52";
 import { createOutputBuffer } from "./outputBuffer";
 import { claim, disposeIf, getOrCreate } from "./termCache";
@@ -118,24 +118,29 @@ export function TerminalLens({ pane, terminalId }: Props) {
       });
     });
 
+    // The latest open: only its end decides whether the xterm is freed on cleanup.
+    let latest = { ended: false, token: 0 };
     const open = (takeover: boolean) => {
-      // Data and detach handling deliberately ignore `live`: the cached xterm must keep
-      // streaming (and acking) while hidden, and a hidden pane must still be disposed on detach.
-      let closed = false;
-      const token = claim(cacheKey);
+      // Data and event handling deliberately ignore `live`: the cached xterm must keep
+      // streaming (and acking) while hidden, and a hidden pane must still be freed when its
+      // open ends. The backend sends no `detached` after an exit or a held attach, so waiting
+      // for it alone would leak the xterm.
+      const self = { ended: false, token: claim(cacheKey) };
+      latest = self;
+      // Only a detach drops output: `held` arrives just before the chunk that carries it.
+      let detached = false;
       const acks = createAckBatcher((n) => termAck(key, n));
       const data = new Channel<ArrayBuffer>();
       data.onmessage = (buf) => {
         const bytes = toBytes(buf);
-        if (!bytes || closed) return;
+        if (!bytes || detached) return;
         output.write(bytes, () => acks.add(bytes.byteLength));
       };
       const events = new Channel<AttachEvent>();
       events.onmessage = (ev) => {
-        if (ev.type === "detached") {
-          closed = true;
-          disposeIf(cacheKey, token);
-        }
+        if (ev.type === "detached") detached = true;
+        if (endsOpen(ev)) self.ended = true;
+        if (disposesOnEvent(ev, live)) disposeIf(cacheKey, self.token);
         if (live) dispatch({ type: "event", event: ev, machine: machineRef.current });
       };
       termOpen(key, term.cols, term.rows, takeover, data, events).catch((e) => {
@@ -176,6 +181,11 @@ export function TerminalLens({ pane, terminalId }: Props) {
       resize.dispose();
       takeoverRef.current = null;
       void termRelease(key).catch(() => {});
+      // A hidden or unmounted pane frees the xterm its ended open left behind. Deferred
+      // because a Reattach also runs this cleanup: its new effect claims the key in the same
+      // flush, which turns this into a no-op and keeps the scrollback.
+      const { ended, token } = latest;
+      if (ended) setTimeout(() => disposeIf(cacheKey, token), 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cacheKey, lens.generation]);
