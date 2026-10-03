@@ -12,7 +12,8 @@ use tokio::task::JoinHandle;
 
 const BATCH: Duration = Duration::from_millis(50);
 const RESET_ITEMS: usize = 500;
-const INITIAL_CAP: Duration = Duration::from_millis(300);
+/// Silence that ends the first backlog when the size header is unreadable.
+const QUIET: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2) };
 const MAX_LINE: usize = 32 * 1024 * 1024;
 
 type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
@@ -57,10 +58,17 @@ struct State {
     /// Items appended since the last event was queued.
     appended: Vec<ChatItem>,
     sent_first: bool,
-    /// Bytes arrived since the previous tick.
-    got_bytes: bool,
-    ever_got_bytes: bool,
-    started: Instant,
+    /// The file's size when the tail started, from the header line.
+    size: Option<u64>,
+    /// Bytes of the stream read after the header.
+    consumed: u64,
+    /// When the last byte arrived; None until the first.
+    last_byte: Option<Instant>,
+}
+
+/// The header line is `wc -c` output: the size, maybe space-padded.
+fn parse_header(line: &[u8]) -> Option<u64> {
+    std::str::from_utf8(line).ok()?.trim().parse().ok()
 }
 
 impl State {
@@ -96,11 +104,11 @@ impl State {
     }
 
     fn flush(&mut self) {
-        let got = std::mem::take(&mut self.got_bytes);
         if !self.sent_first {
-            // Wait until the backlog has been read (a quiet interval after data) or the cap
-            // passes (empty or missing file), then send one Reset covering everything.
-            let caught_up = (self.ever_got_bytes && !got) || self.started.elapsed() >= INITIAL_CAP;
+            // Wait until the backlog's bytes have all been read (or, with no usable size,
+            // the stream goes quiet), then send one Reset covering everything.
+            let caught_up = self.size.is_some_and(|s| self.consumed >= s)
+                || self.last_byte.is_some_and(|t| t.elapsed() >= QUIET);
             if !caught_up {
                 return;
             }
@@ -153,9 +161,9 @@ pub fn spawn_tail(
         events: Vec::new(),
         appended: Vec::new(),
         sent_first: false,
-        got_bytes: false,
-        ever_got_bytes: false,
-        started: Instant::now(),
+        size: None,
+        consumed: 0,
+        last_byte: None,
     };
     let task = tokio::spawn(run(t, path, state));
     TailHandle {
@@ -168,7 +176,7 @@ pub fn spawn_tail(
 async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
     // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
-    let script = r#"tail -n +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
+    let script = r#"wc -c < "$1" 2>/dev/null || echo 0; tail -c +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
     let argv = t.wrap(
         &["sh".into(), "-c".into(), script.into(), "sh".into(), path],
         false,
@@ -193,14 +201,24 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     let mut chunk = vec![0u8; 64 * 1024];
     let mut buf: Vec<u8> = Vec::new();
     let mut dropping = false;
+    let mut header = true;
     loop {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
                 let n = match n { Ok(0) | Err(_) => break, Ok(n) => n };
-                st.got_bytes = true;
-                st.ever_got_bytes = true;
+                st.last_byte = Some(Instant::now());
                 for part in chunk[..n].split_inclusive(|b| *b == b'\n') {
                     let complete = part.ends_with(b"\n");
+                    if header {
+                        buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
+                        if complete {
+                            st.size = parse_header(&buf);
+                            buf.clear();
+                            header = false;
+                        }
+                        continue;
+                    }
+                    st.consumed += part.len() as u64;
                     if !dropping {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
                         if buf.len() > MAX_LINE {
@@ -466,5 +484,84 @@ mod tests {
                 text: "m0".into()
             }
         );
+    }
+
+    /// Starts the command only after `delay`, like a slow ssh: nothing arrives at first.
+    struct Slow(&'static str);
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Slow {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let mut v: Vec<String> = vec!["sh".into(), "-c".into(), format!("sleep {}; exec \"$@\"", self.0), "sh".into()];
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    /// Prints a junk first line before the command: the size header is unreadable.
+    struct Junk;
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Junk {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let mut v: Vec<String> = vec!["sh".into(), "-c".into(), "echo ' junk'; exec \"$@\"".into(), "sh".into()];
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    fn collect(t: Arc<dyn crate::transport::Transport>, p: &std::path::Path) -> (TailHandle, Arc<Mutex<Vec<ChatEvent>>>) {
+        let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
+        let g = got.clone();
+        let h = spawn_tail(t, p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+        (h, got)
+    }
+
+    #[test]
+    fn reads_the_size_header() {
+        assert_eq!(parse_header(b"   1234"), Some(1234));
+        assert_eq!(parse_header(b"0"), Some(0));
+        assert_eq!(parse_header(b" junk"), None);
+    }
+
+    #[tokio::test]
+    async fn a_slow_start_still_sends_the_whole_backlog_as_one_reset() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, (0..50).map(|i| format!("m{i}\n")).collect::<String>()).unwrap();
+        // Slower than QUIET (1 s in tests): the quiet clock must not run before the first byte.
+        let (_h, got) = collect(Arc::new(Slow("1.3")), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        let ev = got.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { total: 50, .. }), "{ev:?}");
+        assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Append { .. })), "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn a_last_line_without_newline_follows_the_reset() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\nb").unwrap();
+        let (_h, got) = collect(Arc::new(crate::transport::local::LocalTransport), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 1, .. }));
+        use std::io::Write;
+        std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(b"\n").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let ev = got.lock().unwrap();
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items.len() == 1)), "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_header_falls_back_to_quiet() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let (_h, got) = collect(Arc::new(Junk), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        assert!(got.lock().unwrap().is_empty(), "sent before QUIET");
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        // The real size line becomes an item: only the quiet rule could have sent this Reset.
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
     }
 }
