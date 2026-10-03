@@ -37,7 +37,7 @@ Why each source is there:
 | `style-src` | `'self' 'unsafe-inline'` | Mermaid puts a `<style>` in every diagram and `style="…"` on its nodes; xterm creates `<style>` elements for its theme, dimensions and scrollbar; the agent marks and the mermaid SVG are inserted as HTML (`dangerouslySetInnerHTML`), so their `style` attributes are parsed, not set through CSSOM. Inline CSS cannot run script, and any remote `url()` inside it is still stopped by `img-src`/`font-src`. |
 | `img-src` | `'self' blob: data:` | `blob:` is used for chat images and the Composer's pasted images (bytes from `chat_image` turned into object URLs). `data:` is used by the inline agent SVG marks (maki's mark embeds a PNG). No `http:`/`https:`, so no remote GET happens, whatever produced the request: an `<img>`, a CSS `url()` or an SVG `<image>`/`feImage`. |
 | `font-src` | `'self' data:` | Vite inlines the two smallest JetBrains Mono subsets (the Vietnamese ones, under 4 KiB) into the CSS as `url(data:font/woff2…)`. Without `data:` they are blocked. Fonts installed on the Mac go through `new FontFace(name, bytes)`, which is not a URL load. |
-| `connect-src` | `ipc: http://ipc.localhost` | Tauri IPC (`invoke`) on macOS, and the URL it uses on other platforms. The frontend makes no other `fetch`, XHR or WebSocket calls; the only `fetch` in the bundle is Vite's same-origin modulepreload polyfill. |
+| `connect-src` | `ipc: http://ipc.localhost` | Tauri IPC (`invoke`): tauri `scripts/core.js` builds the URL with `convertFileSrc(cmd, 'ipc')`, which is `ipc://localhost/<cmd>` on macOS and `http://ipc.localhost/<cmd>` on Windows. The frontend makes no other `fetch`, XHR or WebSocket calls. The only other `fetch` in the bundle is Vite's modulepreload polyfill. It returns early when `relList.supports('modulepreload')` is true, which it is on WebKit with modulepreload support (Safari 17+), so it never runs here. If it did run, `connect-src` (which has no `'self'`) would block it, and a blocked preload is harmless because the module still loads under `script-src`. That is why `connect-src` needs no `'self'`. Note: when CSP blocks the `ipc:` fetch, Tauri's IPC falls back to postMessage without an error (tauri `scripts/ipc-protocol.js` ~58-67, "IPC custom protocol failed… will now use the postMessage interface"). A wrong `connect-src` would therefore not show up as broken IPC. That is why the `ipc:` source was checked against `scripts/core.js` rather than observed. |
 | `object-src` | `'none'` | No plugins or embeds. |
 | `base-uri` | `'self'` | An injected `<base>` cannot redirect relative URLs. |
 | `form-action` | `'none'` | The app submits no forms. |
@@ -50,7 +50,7 @@ in `csp`.
 ### Why `dangerousDisableAssetCspModification: ["style-src"]`
 
 When Tauri serves an HTML asset, it puts a nonce on every `<style>` element in that file and adds
-the nonce to `style-src` (tauri-codegen 2.7 `inject_nonce_token`, tauri 2.12 `set_csp`). Under
+the nonce to `style-src` (`inject_nonce_token`, defined in tauri-utils 2.10 `html2.rs` and called from tauri-codegen 2.7 `context.rs`; then tauri 2.12 `set_csp`). Under
 CSP, a nonce in a directive makes the browser ignore `'unsafe-inline'`. Every inline style that
 mermaid, xterm and the inserted SVG create at runtime would then be blocked.
 
