@@ -786,7 +786,10 @@ impl MachineManager {
         let out = exec(transport.as_ref(), &argv).await?;
         self.current(id, epoch)?;
         let (head, sessions) = split_probe(&out.stdout);
-        let info = parse_probe(head)?;
+        let info = parse_probe(head).inspect_err(|_| {
+            // Rediscover next time: the known herdr may be the one that no longer fits.
+            let _ = self.with_machine(id, |m| m.last_herdr = None);
+        })?;
         self.with_machine(id, |m| {
             m.last_herdr = Some(info.herdr.clone());
             m.info = Some(info);
@@ -2477,19 +2480,24 @@ mod tests {
 
     /// Fake transport with no sessions that records the last two argv elements of each
     /// probe: the herdr override and the known path.
+    /// Probe number `bad` (0-based) reports an incompatible protocol.
     struct ProbeLog {
         log: Arc<Mutex<Vec<(String, String)>>>,
+        bad: Option<usize>,
     }
     #[async_trait::async_trait]
     impl Transport for ProbeLog {
         fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
             let out = if argv.join(" ").contains("HERDR=") {
                 let n = argv.len();
-                self.log
-                    .lock()
-                    .unwrap()
-                    .push((argv[n - 2].clone(), argv[n - 1].clone()));
-                "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.9.3\nPROTOCOL=22\n"
+                let mut log = self.log.lock().unwrap();
+                let bad = self.bad == Some(log.len());
+                log.push((argv[n - 2].clone(), argv[n - 1].clone()));
+                if bad {
+                    "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.9.3\nPROTOCOL=99\n"
+                } else {
+                    "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.9.3\nPROTOCOL=22\n"
+                }
             } else {
                 "name status directory socket\n"
             };
@@ -2503,16 +2511,38 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn reconnect_probe_passes_the_known_path() {
+    type ProbeArgs = Arc<Mutex<Vec<(String, String)>>>;
+
+    async fn probe_log_mgr(
+        bad: Option<usize>,
+    ) -> (Arc<MachineManager>, ProbeArgs, tempfile::TempDir) {
         let d = tempfile::tempdir().unwrap();
         let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
-        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let log: ProbeArgs = Arc::default();
         let l = log.clone();
         mgr.with_transport_factory(Arc::new(move |_| {
-            Arc::new(ProbeLog { log: l.clone() }) as Arc<dyn Transport>
+            Arc::new(ProbeLog {
+                log: l.clone(),
+                bad,
+            }) as Arc<dyn Transport>
         }));
         mgr.add("box".into(), None, None).await.unwrap();
+        (mgr, log, d)
+    }
+
+    #[tokio::test]
+    async fn failed_probe_forgets_the_known_path() {
+        let (mgr, log, _d) = probe_log_mgr(Some(1)).await;
+        mgr.connect("box").await.unwrap();
+        assert_eq!(mgr.connect("box").await.unwrap_err().code, "incompatible");
+        mgr.connect("box").await.unwrap(); // discovery again, e.g. a newer herdr earlier in PATH
+        let known: Vec<String> = log.lock().unwrap().iter().map(|(_, k)| k.clone()).collect();
+        assert_eq!(known, ["", "/h/herdr", ""]);
+    }
+
+    #[tokio::test]
+    async fn reconnect_probe_passes_the_known_path() {
+        let (mgr, log, _d) = probe_log_mgr(None).await;
         mgr.connect("box").await.unwrap();
         mgr.connect("box").await.unwrap(); // a reconnect
         mgr.update("box", Some("/o/herdr".into())).await.unwrap();
