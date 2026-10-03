@@ -8,6 +8,7 @@ import type { MenuItem } from "./ContextMenu";
 import { MoveToGroupDialog } from "./MoveToGroupDialog";
 import type { SessionKey } from "./groups";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
+import { NewSessionDialog } from "./NewSessionDialog";
 import { NewAgentDialog } from "../agents/NewAgentDialog";
 import { setFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -17,6 +18,7 @@ const ConnectDialog = lazy(() => import("../machines/ConnectDialog").then((m) =>
 type Dialog =
   | { kind: "rename"; title: string; initial: string; submitLabel: string; run: (label: string) => Promise<unknown> }
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
+  | { kind: "session"; machineId: string }
   | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
   | { kind: "agent"; machineId: string; session: string; workspace: WorkspaceView }
   | { kind: "folder"; ref: WorkspaceRef; initial: string }
@@ -28,6 +30,7 @@ export interface Actions {
   menu: (e: MouseEvent, items: MenuItem[]) => void;
   rename: (title: string, initial: string, run: (label: string) => Promise<unknown>, submitLabel?: string) => void;
   confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
+  newSession: (machineId: string) => void;
   newWorkspace: (machineId: string, session: string) => void;
   newAgent: (machineId: string, session: string, workspace: WorkspaceView) => void;
   changeFolder: (ref: WorkspaceRef, initial: string) => void;
@@ -91,6 +94,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
           else setError(errorMessage(e));
         });
       },
+      newSession: (machineId) => setDialog({ kind: "session", machineId }),
       newWorkspace: (machineId, session) =>
         setDialog({ kind: "workspace", machineId, session, defaultCwd: defaultCwdFor(machineId, session) }),
     }),
@@ -110,6 +114,9 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel}
         onClose={closeDialog} onConfirm={() => guard(dialog.run)} />
     );
+  } else if (dialog?.kind === "session") {
+    const existing = useApp.getState().machines[dialog.machineId]?.sessions.map((s) => s.name) ?? [];
+    modal = <NewSessionDialog machineId={dialog.machineId} existing={existing} onClose={closeDialog} onError={setError} />;
   } else if (dialog?.kind === "workspace") {
     modal = (
       <NewWorkspaceDialog machineId={dialog.machineId} session={dialog.session} defaultCwd={dialog.defaultCwd}

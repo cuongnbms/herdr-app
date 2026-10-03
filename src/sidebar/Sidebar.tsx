@@ -141,7 +141,12 @@ function MachineNode({ machine }: { machine: MachineView }) {
   else if (notFound) message = "herdr not found — set its path";
   const items: MenuItem[] = a
     ? [
-        ...(ok ? [{ label: "Refresh sessions", onSelect: () => a.guard(() => sessionsRefresh(machine.id)) }] : []),
+        ...(ok
+          ? [
+              { label: "New session…", onSelect: () => a.newSession(machine.id) },
+              { label: "Refresh sessions", onSelect: () => a.guard(() => sessionsRefresh(machine.id)) },
+            ]
+          : []),
         ...(ssh
           ? [
               ...(machine.state !== "disconnected" ? [{ label: "Disconnect", onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
