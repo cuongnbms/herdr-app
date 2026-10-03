@@ -4,6 +4,7 @@ pub mod claude;
 pub mod images;
 pub mod locate;
 pub mod pi;
+mod skill_prompt;
 pub mod tail;
 
 use crate::error::AppError;

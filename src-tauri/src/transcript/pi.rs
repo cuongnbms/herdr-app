@@ -2,6 +2,7 @@
 //! the last entry up to the root.
 use super::images::{decode_image, ImageSink};
 use super::locate::input_summary;
+use super::skill_prompt::parse_skill_prompt;
 use super::{meta_label, truncate_result, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -144,11 +145,25 @@ fn message_items(entry_id: &str, entry: &Value, sink: &mut dyn ImageSink) -> Vec
         "user" => {
             let mut items: Vec<ChatItem> = text_blocks(content)
                 .into_iter()
-                .map(|text| ChatItem::User {
-                    images: vec![],
-                    skills: vec![],
-                    ts: ts.clone(),
-                    text,
+                .map(|text| {
+                    let (text, skills) = match parse_skill_prompt(&text) {
+                        Some((skills, request)) if !request.is_empty() => (request, skills),
+                        Some((skills, _)) => {
+                            let fallback = skills
+                                .iter()
+                                .map(|s| format!("/skill:{}", s.name))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            (fallback, skills)
+                        }
+                        None => (text, vec![]),
+                    };
+                    ChatItem::User {
+                        images: vec![],
+                        skills,
+                        ts: ts.clone(),
+                        text,
+                    }
                 })
                 .collect();
             let refs = image_refs(entry_id, content, sink);
@@ -320,7 +335,7 @@ impl Parser for PiParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::{ChatItem::*, ChatMeta, ImageRef, Parser, ParserOutput};
+    use crate::transcript::{ChatItem::*, ChatMeta, ImageRef, Parser, ParserOutput, SkillUse};
     fn feed(p: &mut PiParser, text: &str) -> Vec<ParserOutput> {
         text.lines()
             .map(|l| p.push_line(l, &mut Vec::<(String, String, Vec<u8>)>::new()))
@@ -334,6 +349,20 @@ mod tests {
                 ParserOutput::None => vec![],
             })
             .collect()
+    }
+
+    #[test]
+    fn skill_prompt_becomes_request_and_skills() {
+        let mut p = PiParser::default();
+        let text = "<skill name=\"tdd\" location=\"/t/SKILL.md\">\nbody\n</skill>";
+        let line = serde_json::json!({"type":"message","id":"a","parentId":null,"message":{"role":"user","content":[{"type":"text","text":text}]}}).to_string();
+        match p.push_line(&line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
+            ParserOutput::Append(v) => assert_eq!(v, vec![User {
+                ts: None, text: "/skill:tdd".into(), images: vec![],
+                skills: vec![SkillUse { name: "tdd".into(), path: "/t/SKILL.md".into() }],
+            }]),
+            o => panic!("{o:?}"),
+        }
     }
 
     #[test]
