@@ -58,4 +58,12 @@ describe("mermaid blocks", () => {
     expect(container.querySelector(".chat-code-head")?.textContent).toBe("ts");
     expect(mermaid.parse).not.toHaveBeenCalled();
   });
+
+  it("forbids <img> in diagram labels", async () => {
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
+    await waitFor(() => expect(mermaid.initialize).toHaveBeenCalled());
+    expect(mermaid.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({ dompurifyConfig: expect.objectContaining({ FORBID_TAGS: ["img"] }) }),
+    );
+  });
 });
