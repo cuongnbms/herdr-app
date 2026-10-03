@@ -39,7 +39,7 @@ connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'
 Two layers.
 
 1. CSP `img-src` has no `http:`/`https:`, so no remote GET happens whatever produced the `<img>` (markdown or a mermaid label).
-2. `mdComponents` in `src/chat/ChatItemView.tsx` gets an `img` override. A `blob:` or `data:` source renders as an image as today. Any other source renders as a link whose text is the alt text (or the URL when there is no alt), opened with `openUrl` like other chat links. No `<img>` element is created for it.
+2. `mdComponents` in `src/chat/ChatItemView.tsx` gets an `img` override, so markdown never creates an `<img>`. An `http(s)` source renders as a link whose text is the alt text (or the URL when there is no alt), opened with `openUrl` like other chat links; any other source renders as that text alone. Chat images (`blob:`) are drawn by `ChatImages`, not markdown, and react-markdown's default URL transform already strips `blob:` and `data:` sources, so nothing that renders today is lost.
 
 Mermaid's `initialize` call in `src/chat/MermaidBlock.tsx` adds `dompurifyConfig: { FORBID_TAGS: ['img'] }`.
 
@@ -71,11 +71,11 @@ herdr 0.9.3 does not forward OSC 52, so the unguarded clipboard write in `src/te
 
 ## Testing
 
-- Item 2: vitest for the `img` override (remote → link with no `<img>`, `blob:` → `<img>`) and for the mermaid config.
+- Item 2: vitest for the `img` override (remote → link with no `<img>`, relative → text with no `<img>`) and for the mermaid config.
 - Item 3: Rust test that a home cwd yields no entries.
 - Item 4: Rust test that an old `herdr-paste-*` is removed, a fresh one and a non-matching old file are kept, and the save still succeeds.
 - Item 5: extend the tests at `transport/mod.rs` with a symlinked runtime path whose target mode must stay unchanged, and the fail-closed result.
-- Item 1, manual: `pnpm tauri dev` with a chat holding a mermaid diagram, highlighted code and a pasted image, plus a terminal pane: zero CSP violations in the webview console, and a markdown image to `https://…` makes no request.
+- Item 1, manual: `pnpm tauri dev` with a chat holding a mermaid diagram, highlighted code and a pasted image, plus a terminal pane: zero CSP violations in the webview console, and a markdown image to `https://…` makes no request. The same check runs against `pnpm tauri build --debug`, which serves the built assets under the production `csp` rather than `devCsp`.
 - `pnpm test`, `pnpm typecheck` and `cargo test` in `src-tauri/` pass.
 
 ## Delivery
