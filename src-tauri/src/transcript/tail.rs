@@ -4,6 +4,7 @@ use super::{ChatEvent, ChatItem, ChatMeta, Parser, ParserOutput};
 use crate::error::AppError;
 use crate::transport::Transport;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -41,6 +42,8 @@ pub struct TailHandle {
     images: Arc<Mutex<ImageStore>>,
     link: SharedLink,
     task: JoinHandle<()>,
+    /// Set once the parse thread is gone: past that, nothing reaches a sink.
+    done: Arc<AtomicBool>,
 }
 
 impl TailHandle {
@@ -68,9 +71,10 @@ impl TailHandle {
         self.link.lock().unwrap().pending = Some(sink);
     }
 
-    /// Whether the reader task has not finished (the `tail` process is still up).
+    /// Whether the tail still delivers: the parse thread is up and the reader has not
+    /// finished. The reader can outlive the parse thread briefly after an Eof.
     pub fn is_running(&self) -> bool {
-        !self.task.is_finished()
+        !self.done.load(Ordering::Acquire) && !self.task.is_finished()
     }
 
     /// The tail's image store, shared: lock it after letting go of any other lock.
@@ -104,6 +108,17 @@ struct State {
     consumed: u64,
     /// When the last byte arrived; None until the first.
     last_byte: Option<Instant>,
+    /// Dropped with the State, so any end of the parse thread (Eof, closed channel, panic,
+    /// failed spawn) marks the tail done.
+    done: DoneOnDrop,
+}
+
+struct DoneOnDrop(Arc<AtomicBool>);
+
+impl Drop for DoneOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 /// The header line is `wc -c` output: the size, maybe space-padded.
@@ -222,6 +237,7 @@ pub fn spawn_tail(
 ) -> TailHandle {
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
     let images = Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET)));
+    let done: Arc<AtomicBool> = Arc::default();
     let state = State {
         items: items.clone(),
         images: images.clone(),
@@ -234,6 +250,7 @@ pub fn spawn_tail(
         size: None,
         consumed: 0,
         last_byte: None,
+        done: DoneOnDrop(done.clone()),
     };
     let link = state.link.clone();
     let (tx, rx) = tokio::sync::mpsc::channel(16);
@@ -251,6 +268,7 @@ pub fn spawn_tail(
         images,
         link,
         task,
+        done,
     }
 }
 
@@ -699,7 +717,39 @@ mod tests {
             size: None,
             consumed: 0,
             last_byte: None,
+            done: DoneOnDrop(Arc::default()),
         }
+    }
+
+    #[test]
+    fn the_parse_thread_marks_the_tail_done_however_it_ends() {
+        for eof in [true, false] {
+            let st = state(Box::new(Lines));
+            let done = st.done.0.clone();
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            if eof {
+                tx.blocking_send(Msg::Eof).unwrap();
+            } else {
+                drop(tx);
+            }
+            parse_loop(st, rx);
+            assert!(done.load(Ordering::Acquire), "eof: {eof}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_done_tail_is_not_running_while_its_reader_lingers() {
+        let done: Arc<AtomicBool> = Arc::default();
+        let h = TailHandle {
+            items: Arc::default(),
+            images: Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET))),
+            link: Arc::new(Mutex::new(Link { sink: None, pending: None })),
+            task: tokio::spawn(std::future::pending()),
+            done: done.clone(),
+        };
+        assert!(h.is_running());
+        done.store(true, Ordering::Release);
+        assert!(!h.is_running());
     }
 
     #[test]
