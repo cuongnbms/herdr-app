@@ -15,6 +15,7 @@ import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { usePiModelPicker } from "./usePiModelPicker";
 import { ArrowDownIcon } from "../ui/icons";
+import { useLensSettings } from "../settings/lens";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
 type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
@@ -80,7 +81,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
             case "fallback":
               // In memory only: a fresh pane's transcript appears after its first prompt, and
               // useTranscriptProbe returns to Chat then.
-              setLensNote(key, "No conversation transcript for this pane yet; showing the terminal until there is one.");
+              setLensNote(
+                key,
+                useLensSettings.getState().chatAfterFirstPrompt
+                  ? "No conversation transcript for this pane yet; showing the terminal until there is one."
+                  : "No conversation transcript for this pane yet; showing the terminal.",
+              );
               setLensOverride(key, "terminal");
               break;
             case "error":

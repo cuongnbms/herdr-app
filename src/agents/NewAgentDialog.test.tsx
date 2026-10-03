@@ -80,6 +80,8 @@ describe("NewAgentDialog", () => {
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(herdrCall).toHaveBeenNthCalledWith(1, "local", "default", "tab.create", { workspace_id: "w1", cwd: "/home/me/api", label: "pi", focus: false });
     expect(herdrCall).toHaveBeenNthCalledWith(2, "local", "default", "agent.start", { name: "pi", kind: "pi", pane_id: "w1:p7" });
+    // Only Claude is known to have no transcript yet; pi keeps the Chat lens's own fallback.
+    expect(useApp.getState().lensOverride[newKey]).toBeUndefined();
   });
 
   it("does nothing for a blank folder", () => {

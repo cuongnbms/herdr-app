@@ -45,6 +45,14 @@ describe("useTranscriptProbe", () => {
     expect(locate).toHaveBeenCalledTimes(2);
   });
 
+  it("does not take a guessed Claude transcript, made before herdr reports the session", async () => {
+    const guessed = { ...located, ambiguous: true, candidates: ["/p/old.jsonl"] };
+    const locate = vi.fn().mockResolvedValue(guessed);
+    renderHook(() => useTranscriptProbe(pane, "idle", locate, 10));
+    await waitFor(() => expect(locate).toHaveBeenCalledTimes(2));
+    expect(useApp.getState().lensOverride[key]).toBe("terminal");
+  });
+
   it("does nothing for a pane without a fallback", async () => {
     useApp.setState({ lensOverride: {} });
     const locate = vi.fn().mockResolvedValue(located);

@@ -26,8 +26,13 @@ export function useTranscriptProbe(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = (retry: boolean) =>
       locate(pane).then(
-        () => {
+        (l) => {
           if (cancelled) return;
+          // Before herdr reports the session, the newest file in the folder is another pane's.
+          if (l.agent === "claude" && l.ambiguous) {
+            if (retry) timer = setTimeout(() => void probe(false), retryMs);
+            return;
+          }
           const { setLensOverride, setLensNote } = useApp.getState();
           setLensNote(key, null);
           setLensOverride(key, null);
