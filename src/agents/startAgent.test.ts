@@ -23,4 +23,11 @@ describe("startAgent", () => {
     await expect(startAgent(call, params, { intervalMs: 1 })).rejects.toBe(other);
     expect(call).toHaveBeenCalledTimes(1);
   });
+
+  it("picks the next free name when herdr already has an agent by that name", async () => {
+    const taken = (n: string) => ({ code: "herdr_error", message: `agent name ${n} is already used; candidates: pane_id=w2:p45` });
+    const call = vi.fn().mockRejectedValueOnce(busy).mockRejectedValueOnce(taken("claude")).mockRejectedValueOnce(taken("claude-2")).mockResolvedValueOnce({ ok: true });
+    await expect(startAgent(call, params, { intervalMs: 1 })).resolves.toEqual({ ok: true });
+    expect(call).toHaveBeenLastCalledWith("agent.start", { ...params, name: "claude-3" });
+  });
 });
