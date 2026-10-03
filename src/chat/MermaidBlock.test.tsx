@@ -59,11 +59,11 @@ describe("mermaid blocks", () => {
     expect(mermaid.parse).not.toHaveBeenCalled();
   });
 
-  it("forbids <img> in diagram labels", async () => {
+  it("forbids <img> and keeps mermaid's <style> ban in diagram labels", async () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
     await waitFor(() => expect(mermaid.initialize).toHaveBeenCalled());
     expect(mermaid.initialize).toHaveBeenCalledWith(
-      expect.objectContaining({ dompurifyConfig: expect.objectContaining({ FORBID_TAGS: ["img"] }) }),
+      expect.objectContaining({ dompurifyConfig: expect.objectContaining({ FORBID_TAGS: expect.arrayContaining(["img", "style"]) }) }),
     );
   });
 
@@ -76,5 +76,20 @@ describe("mermaid blocks", () => {
     const host = container.querySelector(".chat-mermaid-svg")!;
     expect(host.querySelector("image")).toBeNull();
     expect(host.querySelector("g[data-testid='kept'] rect")).not.toBeNull();
+  });
+
+  it("removes <image> when the svg is not well-formed XML (HTML labels)", async () => {
+    mermaid.render.mockResolvedValue({
+      svg:
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.example/x.png"/>' +
+        '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml" data-testid="label">a<br>b</div></foreignObject></svg>',
+    });
+    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
+    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
+    const host = container.querySelector(".chat-mermaid-svg")!;
+    expect(host.querySelector("image")).toBeNull();
+    const label = host.querySelector("[data-testid='label']")!;
+    expect(label.querySelector("br")).not.toBeNull();
+    expect(label.textContent).toBe("ab");
   });
 });

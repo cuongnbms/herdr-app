@@ -35,7 +35,9 @@ export function MermaidBlock({ source, children }: { source: string; children: R
     const timer = setTimeout(async () => {
       try {
         const mermaid = await loadMermaid();
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", dompurifyConfig: { FORBID_TAGS: ["img"] }, suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
+        // dompurifyConfig replaces mermaid's default label config ({ FORBID_TAGS: ["style"] }) rather
+        // than extending it, so "style" must stay listed: a label <style> would restyle the whole app.
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", dompurifyConfig: { FORBID_TAGS: ["img", "style"] }, suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
         if (cancelled || !(await mermaid.parse(source, { suppressErrors: true }))) return;
         const out = await mermaid.render(id, source);
         if (!cancelled) setSvg(stripImages(out.svg));
