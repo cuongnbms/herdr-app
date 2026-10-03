@@ -54,3 +54,16 @@ export function lensReducer(s: LensState, a: LensAction): LensState {
       return { banner: null, pending: false, sawDown: false, generation: s.generation + 1 };
   }
 }
+
+/** Whether `ev` ends the open it arrived on: the backend sends it nothing more. */
+export function endsOpen(ev: AttachEvent): boolean {
+  return ev.type !== "attached";
+}
+
+/**
+ * Whether `ev` frees the cached xterm at once. A visible pane keeps an exited or held xterm
+ * for its banner (Reattach and Take over reuse it, scrollback and all); a detach always frees it.
+ */
+export function disposesOnEvent(ev: AttachEvent, visible: boolean): boolean {
+  return ev.type === "detached" || (endsOpen(ev) && !visible);
+}

@@ -229,7 +229,9 @@ pub async fn connect_open(
         mgr: Arc::clone(&mgr),
         machine_id,
     };
-    att.open(key, argv, cols, rows, Arc::new(sink))
+    att.inner()
+        .open_async(key, argv, cols, rows, Arc::new(sink))
+        .await
 }
 
 fn master_key(machine_id: String) -> AttachKey {
@@ -248,6 +250,12 @@ pub async fn connect_write(att: Att<'_>, machine_id: String, data: String) -> Re
 }
 
 #[tauri::command]
+pub async fn connect_ack(att: Att<'_>, machine_id: String, bytes: usize) -> Result<(), AppError> {
+    att.ack(&master_key(machine_id), bytes);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn connect_resize(
     att: Att<'_>,
     machine_id: String,
@@ -259,7 +267,7 @@ pub async fn connect_resize(
 
 #[tauri::command]
 pub async fn connect_close(att: Att<'_>, machine_id: String) -> Result<(), AppError> {
-    att.close(&master_key(machine_id));
+    att.inner().close_async(master_key(machine_id)).await;
     Ok(())
 }
 
@@ -286,13 +294,15 @@ pub async fn term_open(
         session,
         terminal_id,
     };
-    att.open(
-        key,
-        argv,
-        cols,
-        rows,
-        Arc::new(ChannelSink { data, events, ssh }),
-    )
+    att.inner()
+        .open_async(
+            key,
+            argv,
+            cols,
+            rows,
+            Arc::new(ChannelSink { data, events, ssh }),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -318,13 +328,13 @@ pub async fn term_ack(att: Att<'_>, key: AttachKey, bytes: usize) -> Result<(), 
 
 #[tauri::command]
 pub async fn term_release(att: Att<'_>, key: AttachKey) -> Result<(), AppError> {
-    att.release(&key);
+    att.inner().release_async(key).await;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn term_close(att: Att<'_>, key: AttachKey) -> Result<(), AppError> {
-    att.close(&key);
+    att.inner().close_async(key).await;
     Ok(())
 }
 
