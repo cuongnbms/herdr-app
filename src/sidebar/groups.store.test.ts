@@ -36,14 +36,24 @@ describe("layout file", () => {
     await initLayout(f);
     expect(useLayout.getState().layout).toEqual(l);
     expect(f.save).not.toHaveBeenCalled();
+    expect(localStorage.getItem(LAYOUT_KEY)).toBeNull();
   });
-  it("migrates the localStorage layout into a missing file and keeps the old key", async () => {
+  it("migrates the localStorage layout into a missing file, then drops the old key", async () => {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
     const f = io(null);
     await initLayout(f);
     await flush();
     expect(useLayout.getState().layout).toEqual(l);
     expect(f.save).toHaveBeenCalledWith(l);
+    expect(localStorage.getItem(LAYOUT_KEY)).toBeNull();
+  });
+  it("keeps the old key when the migration write fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+    const f = io(null);
+    f.save.mockRejectedValueOnce(new Error("disk full"));
+    await initLayout(f);
+    await flush();
     expect(localStorage.getItem(LAYOUT_KEY)).not.toBeNull();
   });
   it("migrates over a misshapen file", async () => {

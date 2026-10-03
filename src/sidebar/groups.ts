@@ -272,7 +272,7 @@ export function groupPaths(layout: Layout): { id: string; path: string }[] {
   return out;
 }
 
-/** Where the layout lived before it moved to a file; read once to migrate, never written. */
+/** Where the layout lived before it moved to a file; read once to migrate, removed once the file holds it. */
 export const LAYOUT_KEY = "herdr-app:sidebar-layout";
 
 function parseLayout(v: unknown): Layout | null {
@@ -290,6 +290,14 @@ export function loadLayout(): Layout {
   }
   return EMPTY_LAYOUT;
 }
+
+const forgetLegacyLayout = () => {
+  try {
+    localStorage.removeItem(LAYOUT_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+};
 
 export interface LayoutIO {
   load: () => Promise<unknown>;
@@ -311,18 +319,30 @@ export async function initLayout(io: LayoutIO): Promise<void> {
     useLayout.setState({ layout: loadLayout() });
     return;
   }
-  let queue = Promise.resolve();
-  persist = (l) => {
-    queue = queue.then(() => io.save(l)).catch((e) => console.error("cannot save the sidebar layout", e));
-  };
+  let queue: Promise<boolean> = Promise.resolve(true);
+  // Each write settles to whether it succeeded, so the queue never rejects.
+  const write = (l: Layout) =>
+    (queue = queue.then(() =>
+      io.save(l).then(
+        () => true,
+        (e) => {
+          console.error("cannot save the sidebar layout", e);
+          return false;
+        },
+      ),
+    ));
+  persist = (l) => void write(l);
   const saved = parseLayout(stored);
   if (saved) {
     useLayout.setState({ layout: saved });
+    forgetLegacyLayout();
     return;
   }
   const legacy = loadLayout();
   useLayout.setState({ layout: legacy });
-  if (legacy !== EMPTY_LAYOUT) persist(legacy);
+  if (legacy === EMPTY_LAYOUT) forgetLegacyLayout();
+  // Drop the old key only once the file holds the layout.
+  else void write(legacy).then((ok) => ok && forgetLegacyLayout());
 }
 
 interface LayoutState {
