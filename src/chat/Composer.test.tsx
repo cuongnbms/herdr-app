@@ -127,6 +127,7 @@ describe("Composer completion", () => {
     type(box, "/c");
     await screen.findByRole("option", { name: /\/clear/ });
     expect(completeCommands).toHaveBeenCalledWith(pane);
+    expect(screen.getByText("dismiss")).toBeTruthy();
     fireEvent.keyDown(box, { key: "ArrowDown" });
     fireEvent.keyDown(box, { key: "Enter" });
     expect((box as HTMLTextAreaElement).value).toBe("/compact ");
