@@ -408,3 +408,40 @@ describe("Composer quick replies", () => {
     expect(screen.queryByRole("group", { name: "Quick replies" })).toBeNull();
   });
 });
+
+describe("Composer /model to pi", () => {
+  const sendText = (value: string) => {
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value } });
+    fireEvent.keyDown(box, { key: "Enter" });
+  };
+
+  it("calls onPiModel once /model has gone to pi", async () => {
+    const onPiModel = vi.fn();
+    render(<Composer pane={pane} agent="pi" onPiModel={onPiModel} />);
+    sendText(" /model ");
+    await waitFor(() => expect(onPiModel).toHaveBeenCalledTimes(1));
+  });
+
+  it("calls onPiModel for /model with a name after it", async () => {
+    const onPiModel = vi.fn();
+    render(<Composer pane={pane} agent="pi" onPiModel={onPiModel} />);
+    sendText("/model sonnet");
+    await waitFor(() => expect(onPiModel).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call onPiModel for claude, for another command, or for a failed send", async () => {
+    const onPiModel = vi.fn();
+    const { unmount } = render(<Composer pane={pane} agent="claude" onPiModel={onPiModel} />);
+    sendText("/model");
+    unmount();
+    render(<Composer pane={{ ...pane, pane_id: "w1:p2" }} agent="pi" onPiModel={onPiModel} />);
+    sendText("/models");
+    sendText("/tree");
+    vi.mocked(herdrCall).mockRejectedValueOnce({ code: "timeout", message: "timed out" });
+    sendText("/model");
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(4));
+    await act(async () => {});
+    expect(onPiModel).not.toHaveBeenCalled();
+  });
+});

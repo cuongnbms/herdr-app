@@ -595,3 +595,111 @@ describe("the fallback card for a blocked pane no reader knows", () => {
     expect(parseFallbackPrompt("gjc", footer("Enter to select")).id).not.toBe(parseFallbackPrompt("gjc", footer("Enter to select · done")).id);
   });
 });
+
+// Screens captured from pi 0.87.1 running /model, at 140 columns and at 46 (herdr-web-ui).
+describe("pi's model picker", () => {
+  const FOOTER = "\n────────────────────────────────────────\n/tmp/app\n0.0%/215k (auto)                                        some-model • medium\n";
+  const MODEL_HINT = " Enter to select · Ctrl+S to set as default · Escape/Ctrl+C to cancel";
+  const wide = `────────────────────────────────────────
+
+Only showing models from configured providers. Use /login to add providers.
+>
+
+→ ✓ vllm/Qwen/Qwen3.8-27B [lwsa-platform] · default
+    vllm-flash/Qwen3.8-Flash-Next [lwsa-platform]
+Could not refresh llama.cpp; showing cached models.
+${MODEL_HINT}
+────────────────────────────────────────${FOOTER}`;
+
+  test("reads the catalogue as a question naming the model in use", () => {
+    const prompt = parseInteractivePrompt("pi", wide)!;
+    expect(prompt).toMatchObject({
+      agent: "pi",
+      kind: "question",
+      question: "Select model (currently vllm/Qwen/Qwen3.8-27B [lwsa-platform])",
+      multi_select: false,
+      custom_option_index: null,
+    });
+    // pi's note under the rows is no model
+    expect(labels(prompt)).toEqual(["vllm/Qwen/Qwen3.8-27B [lwsa-platform] · default", "vllm-flash/Qwen3.8-Flash-Next [lwsa-platform]"]);
+    // the cursor is on the first row: one down picks the second
+    expect(answerKeys(prompt, { option_index: 1 })).toEqual([{ keys: ["down"] }, { keys: ["enter"] }]);
+    expect(answerKeys(prompt, { option_index: 0 })).toEqual([{ keys: ["enter"] }]);
+  });
+
+  test("navigates up from where pi drew the cursor", () => {
+    const moved = wide.replace(
+      "→ ✓ vllm/Qwen/Qwen3.8-27B [lwsa-platform] · default\n    vllm-flash/Qwen3.8-Flash-Next [lwsa-platform]",
+      "  ✓ vllm/Qwen/Qwen3.8-27B [lwsa-platform] · default\n→ vllm-flash/Qwen3.8-Flash-Next [lwsa-platform]",
+    );
+    const prompt = parseInteractivePrompt("pi", moved)!;
+    expect(prompt.question).toBe("Select model (currently vllm/Qwen/Qwen3.8-27B [lwsa-platform])");
+    expect(answerKeys(prompt, { option_index: 0 })).toEqual([{ keys: ["up"] }, { keys: ["enter"] }]);
+  });
+
+  test("asks plainly when no row carries the tick", () => {
+    expect(parseInteractivePrompt("pi", wide.replace("→ ✓ vllm", "→ vllm"))?.question).toBe("Select model");
+  });
+
+  test("is read only for pi", () => {
+    expect(parseInteractivePrompt("claude", wide)).toBeNull();
+  });
+
+  test("ignores rows above the filter line, left from before /model", () => {
+    const earlier = wide.replace(
+      "Only showing models",
+      "→ old-model [stale-provider]\n    other-model [stale-provider]\n\nOnly showing models",
+    );
+    expect(labels(parseInteractivePrompt("pi", earlier))).toEqual(labels(parseInteractivePrompt("pi", wide)));
+  });
+
+  test("voids the reading when a row is cut inside its provider bracket", () => {
+    const cut = wide.replace("Could not refresh", "    another-model [provider-\nCould not refresh");
+    expect(parseInteractivePrompt("pi", cut)).toBeNull();
+    const half = `────────────────────────
+
+>
+
+→ ✓ vllm/Qwen/Qwen3.8-27B [lwsa-
+    vllm-flash/Qwen3.8-Flash-Next
+${MODEL_HINT}
+────────────────────────${FOOTER}`;
+    expect(parseInteractivePrompt("pi", half)).toBeNull();
+  });
+
+  test("needs two rows and a cursor", () => {
+    expect(parseInteractivePrompt("pi", wide.replace("    vllm-flash/Qwen3.8-Flash-Next [lwsa-platform]\n", ""))).toBeNull();
+    expect(parseInteractivePrompt("pi", wide.replace("→ ✓ vllm/Qwen", "  ✓ vllm/Qwen"))).toBeNull();
+  });
+
+  const narrow = `──────────────────────────────
+
+Only showing models from configured providers.
+Use /login to add providers.
+>
+
+→ ✓ vllm-flash/Qwen3.8-Flash-Next
+[lwsa-platform] · default
+    vllm/Qwen/Qwen3.8-27B [lwsa-platform]
+
+  Model Name: qwen-3-8-flash
+
+  Refreshing model catalogs…
+
+  Enter to select · Ctrl+S to set as default ·
+Escape/Ctrl+C to cancel
+──────────────────────────────
+/tmp/pn
+0.0%/215k (auto)  vllm-flash/Qwen3.8-Flash-Nex
+`;
+
+  test("joins the rows and the hint a narrow pane wraps", () => {
+    const prompt = parseInteractivePrompt("pi", narrow)!;
+    expect(labels(prompt)).toEqual(["vllm-flash/Qwen3.8-Flash-Next [lwsa-platform] · default", "vllm/Qwen/Qwen3.8-27B [lwsa-platform]"]);
+    expect(prompt.question).toBe("Select model (currently vllm-flash/Qwen3.8-Flash-Next [lwsa-platform])");
+  });
+
+  test("goes stale once the hint is buried under later output", () => {
+    expect(parseInteractivePrompt("pi", `${narrow}Some later output\nand more\n`)).toBeNull();
+  });
+});
