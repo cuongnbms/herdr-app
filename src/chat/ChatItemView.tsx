@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { ChatItem } from "../lib/types";
 import { BrainIcon, CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
+import { MermaidBlock } from "./MermaidBlock";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 import { ChatImages } from "./images";
 import { SkillChips } from "./skills";
@@ -19,11 +20,20 @@ function codeLanguage(node: unknown): string | null {
   return lang ? lang.slice("language-".length) : null;
 }
 
+/** The raw text of a hast node: the fence's source, with rehype-highlight's spans flattened. */
+function nodeText(node: unknown): string {
+  const n = node as { value?: unknown; children?: unknown[] } | undefined;
+  if (typeof n?.value === "string") return n.value;
+  return (n?.children ?? []).map(nodeText).join("");
+}
+
 const mdComponents: Components = {
   pre({ node, children }) {
+    const lang = codeLanguage(node);
+    if (lang === "mermaid") return <MermaidBlock source={nodeText(node).trimEnd()}>{children}</MermaidBlock>;
     return (
       <div className="chat-code">
-        <div className="chat-code-head">{codeLanguage(node) ?? "code"}</div>
+        <div className="chat-code-head">{lang ?? "code"}</div>
         <pre>{children}</pre>
       </div>
     );
