@@ -14,13 +14,6 @@ interface State {
   losses: number[];
 }
 
-/**
- * How long after attaching to redraw from a fresh atlas. The addon pre-rasterizes ASCII in idle
- * callbacks right away, and in WKWebView those glyphs can come out heavier than ones drawn later
- * with the same installed font, so text mixed two weights until the pane was shown again.
- */
-export const WARMUP_SETTLE_MS = 500;
-
 const states = new Map<string, State>();
 const lru = new WebglLru(WEBGL_CONTEXTS);
 
@@ -63,11 +56,6 @@ export function showWebgl(key: string, term: Terminal, make: () => Addon = () =>
     // Only the addon's new canvases: getContext on a context-less canvas would create one.
     const added = [...(term.element?.querySelectorAll("canvas") ?? [])].filter((c) => !before.has(c));
     st.gl = added.map((c) => c.getContext("webgl2")).find(Boolean);
-    setTimeout(() => {
-      if (own.addon !== addon) return;
-      term.clearTextureAtlas();
-      term.refresh(0, term.rows - 1);
-    }, WARMUP_SETTLE_MS);
     if (import.meta.env.DEV) console.debug(`xterm WebGL contexts: ${activeWebgl()}`);
   } catch (e) {
     try {
