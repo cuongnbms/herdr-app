@@ -47,29 +47,13 @@ function SessionNode({ machineId, session }: { machineId: string; session: Sessi
             },
           ],
     );
-  if (!session.running) {
-    return (
-      <li className="session stopped">
-        <div className="row" onContextMenu={onMenu}>
-          <StatusDot status={session.status} />
-          <span className="label">{session.name}</span>
-          <button
-            className="btn btn-xs start"
-            aria-label={`Start ${session.name}`}
-            onClick={() => a?.guard(() => sessionStart(machineId, session.name))}
-          >
-            Start
-          </button>
-        </div>
-        {session.error && <p className="error">{session.error.message}</p>}
-      </li>
-    );
-  }
+  const open = () => view({ machine_id: machineId, session: session.name });
   return (
-    <li className="session">
+    <li className={"session" + (session.running ? "" : " stopped")}>
       <button
         className={"row" + (viewed ? " active" : "") + hl(session.status)}
-        onClick={() => view({ machine_id: machineId, session: session.name })}
+        aria-label={session.running ? undefined : `Start ${session.name}`}
+        onClick={session.running ? open : () => a?.guard(() => sessionStart(machineId, session.name).then(open))}
         onContextMenu={onMenu}
       >
         <StatusDot status={session.status} />

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ sessionStart: vi.fn().mockResolvedValue(undefined) }));
 import { sessionStart } from "../lib/ipc";
@@ -37,9 +37,10 @@ describe("Sidebar", () => {
     useApp.getState().select({ machine_id: "local", session: "default", pane_id: "w1:p1" });
     expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "default" });
   });
-  it("offers to start a stopped session", () => {
+  it("starts and views a stopped session on click", async () => {
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Start ai-radar" }));
+    fireEvent.click(screen.getByText("ai-radar"));
     expect(sessionStart).toHaveBeenCalledWith("local", "ai-radar");
+    await waitFor(() => expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "ai-radar" }));
   });
 });
