@@ -67,7 +67,6 @@ const mdComponents: Components = {
   },
   // Markdown images never become <img>: a remote one would load on render and leak to its host.
   img: function Img({ src, alt }) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     const inLink = useContext(InLinkContext);
     const text = alt || src || "";
     if (!inLink && typeof src === "string" && /^https?:\/\//i.test(src)) {
