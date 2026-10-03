@@ -8,6 +8,11 @@ describe("ChatItemView", () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Hello **world**" }} />);
     expect(screen.getByText("world").tagName).toBe("STRONG");
   });
+  it("renders a GFM table", () => {
+    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: "| a | b |\n|---|---|\n| 1 | 2 |" }} />);
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(screen.getByText("2").tagName).toBe("TD");
+  });
   it("collapses a tool call and expands to its result", () => {
     render(<ChatItemView item={{ kind: "tool_call", id: "t1", name: "Bash", input_summary: "ls", input: { command: "ls" } }}
       result={{ kind: "tool_result", call_id: "t1", output: "a.txt", is_error: false }} />);

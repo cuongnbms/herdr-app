@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import type { ChatItem } from "../lib/types";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
@@ -42,6 +43,7 @@ const mdComponents: Components = {
     );
   },
 };
+const remarkPlugins = [remarkGfm];
 const rehypePlugins = [[rehypeHighlight, { detect: false }]] as never;
 
 type ToolResult = Extract<ChatItem, { kind: "tool_result" }>;
@@ -192,7 +194,7 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
     case "assistant_text":
       return (
         <div className="chat-row chat-assistant">
-          <Markdown rehypePlugins={rehypePlugins} components={mdComponents}>{item.markdown}</Markdown>
+          <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={mdComponents}>{item.markdown}</Markdown>
           {copy && <CopyButton text={item.markdown} />}
         </div>
       );
