@@ -45,6 +45,28 @@ into `dev`. PR 5 (Connection) may run in parallel: do not edit the supervise loo
 
 ## Results
 
+Both scripts are deterministic (same numbers on repeated runs).
+
+Rust, `emits_only_changed_views` (5 unchanged refetches, then 1 status change):
+
 | Measure | Before | After |
 |---|---|---|
-| (filled in by tasks 1 and 9) | | |
+| `UiEvent::Machine` emits | 6 | 1 |
+
+Frontend, `src/renders.test.tsx`, renders per step as App / Sidebar / AgentList / ChatLens:
+
+| Step | Before | After |
+|---|---|---|
+| identical view (×3, per step) | 1 / 1 / 1 / 1 | 0 / 0 / 0 / 0 |
+| other pane's status | 1 / 1 / 1 / 1 | 0 / 1 / 1 / 0 |
+| selected pane's status | 1 / 1 / 1 / 1 | 1 / 1 / 1 / 1 |
+| new tab elsewhere | 1 / 1 / 1 / 1 | 0 / 1 / 1 / 0 |
+| total over the script | 24 | 8 |
+
+Not measured: how often herdr fires these events in practice, and the renders below ChatLens
+(work blocks keep their `memo` now that `onToggle` is stable; covered by the `WorkBlockView`
+test, not counted). Header still re-renders on any change to the selected Machine (it reads
+labels from every level); it is no longer re-rendered by App.
+
+Deviation from the agreed design: an emptied draft (just sent) is removed at once rather than
+after the debounce, so a send followed by a quit never brings the sent text back.
