@@ -246,7 +246,9 @@ impl ChatManager {
         }
         // `attach` locks the image store, so the map lock is already released.
         entry.handle.attach(sink);
-        self.tails.lock().unwrap().open.insert(pane.clone(), entry);
+        // A concurrent insert may have filled the slot; drop that entry after the guard.
+        let replaced = self.tails.lock().unwrap().open.insert(pane.clone(), entry);
+        drop(replaced);
         true
     }
 
