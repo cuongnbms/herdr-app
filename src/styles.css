@@ -624,7 +624,10 @@ kbd {
 .chat-lens { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--surface-0); }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
-.chat-user { display: flex; flex-direction: column; align-items: flex-end; }
+/* A user turn stacks its images, the bubble line and its Skill chips, all at the right edge. */
+.chat-user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+/* Full row width, so the bubble's max-width stays a share of the row. */
+.chat-user-line { align-self: stretch; display: flex; justify-content: flex-end; align-items: flex-end; gap: 6px; }
 .chat-bubble {
   max-width: 78%; white-space: pre-wrap; line-height: 1.5; font-size: var(--chat-font);
   background: var(--accent-soft); border: 1px solid var(--accent-line);
@@ -640,7 +643,7 @@ kbd {
 .chat-copy svg { width: 14px; height: 14px; }
 .chat-copy:hover { background: var(--active); color: var(--fg); }
 .chat-row:hover .chat-copy, .chat-copy:focus-visible, .chat-copy[aria-label="Copied"] { opacity: 1; }
-.chat-user { align-items: flex-end; gap: 6px; }
+.chat-user-line .chat-copy { order: -1; }
 .chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-user .chat-images { justify-content: flex-end; }
 .skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }

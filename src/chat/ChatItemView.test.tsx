@@ -67,4 +67,22 @@ describe("ChatItemView", () => {
     expect(await screen.findByRole("img", { name: "Image 1" })).toBeTruthy();
     expect(document.querySelector(".chat-bubble")).toBeNull();
   });
+  it("offers no copy on an image-only user turn", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    render(<ChatPaneContext.Provider value={{ machine_id: "m", session: "s", pane_id: "p" }}>
+      <ChatItemView item={{ kind: "user", text: "", images: [{ ref: "u:0", media_type: "image/png" }] }} copy />
+    </ChatPaneContext.Provider>);
+    await screen.findByRole("img", { name: "Image 1" });
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+  });
+  it("puts the copy button beside the user bubble, images above, Skill chips below", () => {
+    const { container } = render(
+      <ChatItemView item={{ kind: "user", text: "go", skills: [{ name: "tdd", path: "/s/tdd" }] }} copy />,
+    );
+    const row = container.querySelector(".chat-user")!;
+    const line = row.querySelector(":scope > .chat-user-line")!;
+    expect(line.querySelector(".chat-bubble")).toBeTruthy();
+    expect(line.querySelector(".chat-copy")).toBeTruthy();
+    expect(row.lastElementChild!.classList.contains("skill-chips")).toBe(true);
+  });
 });

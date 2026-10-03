@@ -180,9 +180,13 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
       return (
         <div className="chat-row chat-user">
           {!!item.images?.length && <ChatImages images={item.images} />}
-          {item.text !== "" && <div className="chat-bubble">{item.text}</div>}
+          {item.text !== "" && (
+            <div className="chat-user-line">
+              <div className="chat-bubble">{item.text}</div>
+              {copy && <CopyButton text={item.text} />}
+            </div>
+          )}
           {!!item.skills?.length && <SkillChips chips={item.skills.map((s) => ({ name: s.name, path: s.path, status: "loaded" }))} />}
-          {copy && <CopyButton text={item.text} />}
         </div>
       );
     case "assistant_text":
