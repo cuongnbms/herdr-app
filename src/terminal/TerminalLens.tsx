@@ -14,6 +14,7 @@ import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
+import { applyUnicode11 } from "./unicode";
 
 interface Props {
   pane: PaneRef;
@@ -30,6 +31,7 @@ function createEntry() {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  applyUnicode11(term);
   term.attachCustomKeyEventHandler((e) => !e.metaKey);
   const unwatchFont = watchTermFont(term, fit);
   const unwatchTheme = watchTermTheme(term);

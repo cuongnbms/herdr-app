@@ -15,6 +15,7 @@ import {
 import type { AttachEvent, MachineView } from "../lib/types";
 import { watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
+import { applyUnicode11 } from "../terminal/unicode";
 
 function toBytes(buf: unknown): Uint8Array | null {
   if (buf instanceof ArrayBuffer) return new Uint8Array(buf);
@@ -37,9 +38,11 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
     if (!el) return;
     const term = new Terminal({
       cursorBlink: true,
+      allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    applyUnicode11(term);
     const unwatchFont = watchTermFont(term, fit);
     const unwatchTheme = watchTermTheme(term);
     term.open(el);
