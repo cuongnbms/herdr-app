@@ -56,6 +56,7 @@ export function showWebgl(key: string, term: Terminal, make: () => Addon = () =>
     // Only the addon's new canvases: getContext on a context-less canvas would create one.
     const added = [...(term.element?.querySelectorAll("canvas") ?? [])].filter((c) => !before.has(c));
     st.gl = added.map((c) => c.getContext("webgl2")).find(Boolean);
+    if (import.meta.env.DEV) console.debug(`xterm WebGL contexts: ${activeWebgl()}`);
   } catch (e) {
     try {
       addon?.dispose();
