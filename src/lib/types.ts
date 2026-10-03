@@ -83,19 +83,25 @@ export type AttachEvent =
   | { type: "exited"; code: number | null }
   | { type: "detached" };
 
+export interface ImageRef { ref: string; media_type: string }
+export interface SkillUse { name: string; path: string }
+/** The Model and Reasoning effort the Transcript last named. */
+export interface ChatMeta { model: string | null; effort: string | null }
+
 /** `ts`: when the Transcript record was written (ISO 8601), if it says. */
 export type ChatItem = (
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; images?: ImageRef[]; skills?: SkillUse[] }
   | { kind: "assistant_text"; markdown: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; id: string; name: string; input_summary: string; input: unknown }
-  | { kind: "tool_result"; call_id: string; output: string; is_error: boolean }
+  | { kind: "tool_result"; call_id: string; output: string; is_error: boolean; images?: ImageRef[] }
   | { kind: "system"; text: string }
 ) & { ts?: string };
 
 export type ChatEvent =
   | { type: "reset"; items: ChatItem[]; total: number }
   | { type: "append"; items: ChatItem[] }
+  | { type: "meta"; model: string | null; effort: string | null }
   | { type: "error"; error: AppError };
 
 export interface Located {

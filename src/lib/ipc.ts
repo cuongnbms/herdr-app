@@ -97,6 +97,8 @@ export const completeFiles = (p: PaneRef) =>
   invoke<string[]>("complete_files", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const chatPage = (p: PaneRef, before: number) =>
   invoke<ChatItem[]>("chat_page", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, before });
+export const chatImage = (p: PaneRef, ref: string) =>
+  invoke<ArrayBuffer>("chat_image", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, ref });
 export const chatClose = (p: PaneRef) =>
   invoke<void>("chat_close", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const quotaFetch = (provider: QuotaProvider) => invoke<QuotaOutcome>("quota_fetch", { provider });

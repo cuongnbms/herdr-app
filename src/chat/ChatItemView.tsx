@@ -5,6 +5,8 @@ import rehypeHighlight from "rehype-highlight";
 import type { ChatItem } from "../lib/types";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
+import { ChatImages } from "./images";
+import { SkillChips } from "./skills";
 import { toolIcon } from "./toolIcon";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
@@ -130,7 +132,10 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
         <div className="chat-tool-body">
           {diffs?.map((d, i) => <Diff key={i} oldText={d.o} newText={d.n} />)}
           {result ? (
-            <pre className={result.is_error ? "chat-result error" : "chat-result"}>{result.output}</pre>
+            <>
+              {!!result.images?.length && <ChatImages images={result.images} />}
+              <pre className={result.is_error ? "chat-result error" : "chat-result"}>{result.output}</pre>
+            </>
           ) : (
             !diffs && <div className="chat-dim">No result yet</div>
           )}
@@ -174,8 +179,14 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
     case "user":
       return (
         <div className="chat-row chat-user">
-          <div className="chat-bubble">{item.text}</div>
-          {copy && <CopyButton text={item.text} />}
+          {!!item.images?.length && <ChatImages images={item.images} />}
+          {item.text !== "" && (
+            <div className="chat-user-line">
+              <div className="chat-bubble">{item.text}</div>
+              {copy && <CopyButton text={item.text} />}
+            </div>
+          )}
+          {!!item.skills?.length && <SkillChips chips={item.skills.map((s) => ({ name: s.name, path: s.path, status: "loaded" }))} />}
         </div>
       );
     case "assistant_text":
@@ -201,6 +212,7 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
     case "tool_result":
       return (
         <div className="chat-row">
+          {!!item.images?.length && <ChatImages images={item.images} />}
           <pre className={item.is_error ? "chat-result error" : "chat-result"}>{item.output}</pre>
         </div>
       );

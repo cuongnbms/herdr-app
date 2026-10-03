@@ -8,6 +8,7 @@ import { onOpenFailure, openChat, watchMachine } from "./chatSession";
 import { PromptPanel } from "./PromptPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
+import { ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
 import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
 import { Composer } from "./Composer";
@@ -37,6 +38,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const forceBottom = useRef(true);
   const generation = useRef(0);
   const handle = useRef<{ close: () => void } | null>(null);
+  // Bumped on each `reset`: thumbnails that failed while the tail was gone ask again.
+  const [opened, setOpened] = useState(0);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
   // The Pane `/model` was sent to: pi waits on its picker idle, so the picker is looked for then.
@@ -51,7 +54,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       const channel = new Channel<ChatEvent>();
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
-        if (ev.type === "reset") forceBottom.current = true;
+        if (ev.type === "reset") {
+          forceBottom.current = true;
+          setOpened((n) => n + 1);
+        }
         dispatch(ev);
       };
       handle.current?.close();
@@ -100,6 +106,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       generation.current++;
       handle.current?.close();
       handle.current = null;
+      revokeChatImages(key);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -190,6 +197,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
 
   const err = openError ?? state.error;
   return (
+    <ChatPaneContext.Provider value={pane}>
+    <ChatOpenContext.Provider value={opened}>
     <div className="chat-lens">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
@@ -233,8 +242,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {view.status === "blocked" || picker.open ? (
         <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} />
       ) : (
-        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} />
+        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} />
       )}
     </div>
+    </ChatOpenContext.Provider>
+    </ChatPaneContext.Provider>
   );
 }

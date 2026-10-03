@@ -1,5 +1,6 @@
 //! Stream a transcript file with `tail -F` on the Machine and feed a parser.
-use super::{ChatEvent, ChatItem, Parser, ParserOutput};
+use super::images::{ImageStore, IMAGE_BUDGET};
+use super::{ChatEvent, ChatItem, ChatMeta, Parser, ParserOutput};
 use crate::error::AppError;
 use crate::transport::Transport;
 use std::process::Stdio;
@@ -12,13 +13,14 @@ use tokio::task::JoinHandle;
 const BATCH: Duration = Duration::from_millis(50);
 const RESET_ITEMS: usize = 500;
 const INITIAL_CAP: Duration = Duration::from_millis(300);
-const MAX_LINE: usize = 8 * 1024 * 1024;
+const MAX_LINE: usize = 32 * 1024 * 1024;
 
 type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
 
 /// A running tail. Dropping it ends the `tail` process.
 pub struct TailHandle {
     items: Arc<Mutex<Vec<ChatItem>>>,
+    images: Arc<Mutex<ImageStore>>,
     task: JoinHandle<()>,
 }
 
@@ -28,6 +30,11 @@ impl TailHandle {
         let items = self.items.lock().unwrap();
         let end = before.min(items.len());
         items[end.saturating_sub(limit)..end].to_vec()
+    }
+
+    /// The tail's image store, shared: lock it after letting go of any other lock.
+    pub fn images(&self) -> Arc<Mutex<ImageStore>> {
+        self.images.clone()
     }
 }
 
@@ -40,6 +47,9 @@ impl Drop for TailHandle {
 
 struct State {
     items: Arc<Mutex<Vec<ChatItem>>>,
+    images: Arc<Mutex<ImageStore>>,
+    /// The Model and Reasoning effort last sent to the sink.
+    last_meta: ChatMeta,
     parser: Box<dyn Parser>,
     sink: Sink,
     /// Events of the current batch, in order.
@@ -62,7 +72,11 @@ impl State {
     }
 
     fn line(&mut self, line: &str) {
-        match self.parser.push_line(line) {
+        let out = {
+            let mut images = self.images.lock().unwrap();
+            self.parser.push_line(line, &mut *images)
+        };
+        match out {
             ParserOutput::None => {}
             ParserOutput::Append(v) => {
                 self.items.lock().unwrap().extend(v.iter().cloned());
@@ -95,6 +109,7 @@ impl State {
             self.appended.clear();
             self.sent_first = true;
             (self.sink)(ev);
+            self.send_meta_if_changed();
             return;
         }
         if !self.appended.is_empty() {
@@ -104,6 +119,18 @@ impl State {
         }
         for ev in self.events.drain(..) {
             (self.sink)(ev);
+        }
+        self.send_meta_if_changed();
+    }
+
+    fn send_meta_if_changed(&mut self) {
+        let meta = self.parser.meta();
+        if meta != self.last_meta {
+            self.last_meta = meta.clone();
+            (self.sink)(ChatEvent::Meta {
+                model: meta.model,
+                effort: meta.effort,
+            });
         }
     }
 }
@@ -115,8 +142,11 @@ pub fn spawn_tail(
     sink: Sink,
 ) -> TailHandle {
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
+    let images = Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET)));
     let state = State {
         items: items.clone(),
+        images: images.clone(),
+        last_meta: ChatMeta::default(),
         parser,
         sink,
         events: Vec::new(),
@@ -127,7 +157,11 @@ pub fn spawn_tail(
         started: Instant::now(),
     };
     let task = tokio::spawn(run(t, path, state));
-    TailHandle { items, task }
+    TailHandle {
+        items,
+        images,
+        task,
+    }
 }
 
 async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
@@ -196,10 +230,11 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::images::ImageSink;
     use std::sync::{Arc, Mutex};
     struct Lines;
     impl Parser for Lines {
-        fn push_line(&mut self, line: &str) -> ParserOutput {
+        fn push_line(&mut self, line: &str, _images: &mut dyn ImageSink) -> ParserOutput {
             if line == "RESET" {
                 ParserOutput::Reset(vec![ChatItem::System {
                     ts: None,
@@ -207,12 +242,105 @@ mod tests {
                 }])
             } else {
                 ParserOutput::Append(vec![ChatItem::User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: line.into(),
                 }])
             }
         }
     }
+    struct MetaLines {
+        model: Option<String>,
+    }
+    impl Parser for MetaLines {
+        fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput {
+            if let Some(m) = line.strip_prefix("MODEL ") {
+                self.model = Some(m.into());
+                return ParserOutput::None;
+            }
+            if let Some(r) = line.strip_prefix("IMG ") {
+                images.put(r.into(), "image/png".into(), vec![7, 7]);
+                return ParserOutput::None;
+            }
+            ParserOutput::Append(vec![ChatItem::User {
+                ts: None,
+                text: line.into(),
+                images: vec![],
+                skills: vec![],
+            }])
+        }
+        fn meta(&self) -> crate::transcript::ChatMeta {
+            crate::transcript::ChatMeta {
+                model: self.model.clone(),
+                effort: None,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn meta_sent_after_reset_and_on_change() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
+        let g = got.clone();
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(MetaLines { model: None }),
+            Arc::new(move |e| g.lock().unwrap().push(e)),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        {
+            let ev = got.lock().unwrap();
+            assert_eq!(ev.len(), 1, "{ev:?}");
+            assert!(matches!(ev[0], ChatEvent::Reset { .. }));
+        }
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+        writeln!(f, "MODEL m1\nb\nIMG r1").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        writeln!(f, "c").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let ev = got.lock().unwrap();
+        let metas: Vec<_> = ev
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::Meta { model, .. } => Some(model.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(metas, vec![Some("m1".to_string())]);
+        let store = h.images();
+        assert_eq!(
+            store.lock().unwrap().get("r1"),
+            Some(("image/png".to_string(), vec![7, 7]))
+        );
+        assert_eq!(store.lock().unwrap().get("nope"), None);
+        drop(ev);
+        drop(h);
+    }
+
+    #[tokio::test]
+    async fn meta_known_at_open_follows_the_reset() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "MODEL m0\na\n").unwrap();
+        let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
+        let g = got.clone();
+        let _h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(MetaLines { model: None }),
+            Arc::new(move |e| g.lock().unwrap().push(e)),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let ev = got.lock().unwrap();
+        assert!(matches!(ev[0], ChatEvent::Reset { .. }));
+        assert!(matches!(&ev[1], ChatEvent::Meta { model: Some(m), .. } if m == "m0"));
+    }
+
     #[tokio::test]
     async fn streams_reset_then_appends() {
         let d = tempfile::tempdir().unwrap();
@@ -233,7 +361,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         let ev = got.lock().unwrap();
         assert!(matches!(&ev[0], ChatEvent::Reset { items, total: 2 } if items.len() == 2));
-        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into() }])));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into(), images: vec![], skills: vec![] }])));
         assert!(matches!(ev.last().unwrap(), ChatEvent::Reset { items, .. } if items.len() == 1));
         drop(ev);
         drop(h);
@@ -253,7 +381,7 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into() } && items[2] == ChatItem::User { ts: None, text: "b".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into(), images: vec![], skills: vec![] } && items[2] == ChatItem::User { ts: None, text: "b".into(), images: vec![], skills: vec![] })
         );
     }
     #[tokio::test]
@@ -324,13 +452,15 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into(), images: vec![], skills: vec![] })
         );
         let older = h.page(200, 200);
         assert_eq!(older.len(), 200);
         assert_eq!(
             older[0],
             ChatItem::User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "m0".into()
             }

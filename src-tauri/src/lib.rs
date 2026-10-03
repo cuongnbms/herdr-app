@@ -53,6 +53,7 @@ pub fn run() {
             commands::chat_open,
             commands::chat_locate,
             commands::chat_page,
+            commands::chat_image,
             commands::chat_close,
             commands::complete_commands,
             commands::complete_files,

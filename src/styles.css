@@ -635,7 +635,10 @@ kbd {
 .chat-lens { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--surface-0); }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
-.chat-user { display: flex; justify-content: flex-end; }
+/* A user turn stacks its images, the bubble line and its Skill chips, all at the right edge. */
+.chat-user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+/* Full row width, so the bubble's max-width stays a share of the row. */
+.chat-user-line { align-self: stretch; display: flex; justify-content: flex-end; align-items: flex-end; gap: 6px; }
 .chat-bubble {
   max-width: 78%; white-space: pre-wrap; line-height: 1.5; font-size: var(--chat-font);
   background: var(--accent-soft); border: 1px solid var(--accent-line);
@@ -651,8 +654,25 @@ kbd {
 .chat-copy svg { width: 14px; height: 14px; }
 .chat-copy:hover { background: var(--active); color: var(--fg); }
 .chat-row:hover .chat-copy, .chat-copy:focus-visible, .chat-copy[aria-label="Copied"] { opacity: 1; }
-.chat-user { align-items: flex-end; gap: 6px; }
-.chat-user .chat-copy { order: -1; }
+.chat-user-line .chat-copy { order: -1; }
+.chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-user .chat-images { justify-content: flex-end; }
+.skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.skill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; color: var(--fg-2); }
+.skill-chip svg { width: 12px; height: 12px; }
+.skill-chip-status { color: var(--fg-3); }
+.chat-image, .chat-image-missing {
+  width: 64px; height: 64px; box-sizing: border-box; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+}
+.chat-image { padding: 0; overflow: hidden; background: none; cursor: zoom-in; }
+.chat-image-pending { background: var(--surface-1, transparent); cursor: default; }
+.chat-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-image-missing { display: grid; place-items: center; text-align: center; color: var(--fg-3); font-size: 11px; }
+.image-viewer {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.8); cursor: zoom-out;
+}
+.image-viewer img { max-width: 92vw; max-height: 92vh; cursor: default; }
 .chat-assistant > .chat-copy { margin-top: 4px; margin-left: -4px; }
 .chat-assistant > :first-child { margin-top: 0; }
 .chat-assistant > :last-child, .chat-assistant > :has(+ .chat-copy:last-child) { margin-bottom: 0; }
@@ -785,6 +805,7 @@ kbd {
 }
 .composer textarea:focus-visible { box-shadow: none; }
 .composer-bar { display: flex; align-items: center; gap: 8px; }
+.composer-model { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: 11.5px; }
 .composer-images { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 4px; }
 .composer-image {
   position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden;
@@ -820,7 +841,7 @@ kbd {
 }
 .stop:hover { background: color-mix(in srgb, var(--err) 22%, transparent); }
 .stop svg { fill: currentColor; }
-.stop + .send { margin-left: 0; }
+.stop + .send, .composer-model + .send, .composer-model + .stop { margin-left: 0; }
 .composer-error { font-size: 12px; padding: 0 4px; }
 
 .blocked-panel {

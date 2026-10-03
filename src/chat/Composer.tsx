@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
-import { paneKey, type AgentStatus, type PaneRef, type SlashCommand } from "../lib/types";
+import { paneKey, type AgentStatus, type ChatMeta, type PaneRef, type SlashCommand } from "../lib/types";
 import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
 import { readDraft, writeDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
+import { modelLabel } from "./modelLabel";
 import { useClaudeSuggestion } from "./useClaudeSuggestion";
 import { useCompletions } from "./useCompletions";
 
@@ -59,12 +60,14 @@ export function Composer({
   agent,
   status,
   onPiModel,
+  meta,
 }: {
   pane: PaneRef;
   agent: string | null;
   status?: AgentStatus;
   /** Called once `/model` has gone to pi, whose picker the Chat lens then shows as a card. */
   onPiModel?: () => void;
+  meta?: ChatMeta;
 }) {
   const key = paneKey(pane);
   const [text, setText] = useState(() => readDraft(key));
@@ -89,6 +92,7 @@ export function Composer({
   // not while a send is on its way: Claude's box would still show the old suggestion.
   const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending);
   const offered = text === "" ? suggestion : null;
+  const label = modelLabel(meta);
   const showQuick = useQuickReplies((s) => s.show);
   const quickReplies = quickReplyButtons(useQuickReplies((s) => s.replies));
 
@@ -316,6 +320,11 @@ export function Composer({
               </button>
             ))}
           </div>
+          {label && (
+            <span className="composer-model" title="Model · reasoning effort">
+              {label}
+            </span>
+          )}
           {/* Esc interrupts the agent's turn without killing it the way Ctrl+C can. Send stays
               usable beside it: the agent queues text sent while it works. */}
           {status === "working" && (

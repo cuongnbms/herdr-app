@@ -48,6 +48,10 @@ A coding agent (Claude Code, pi, ...) that herdr detects running in a Pane, with
 A command an Agent runs when a message starts with it (`/compact`, or `$name` for a Codex skill): a built-in, a user or project command, or a skill, including a plugin's.
 _Avoid_: shortcut, macro
 
+**Skill**:
+A packaged set of instructions an Agent loads for a task, invoked by the user (as a Slash command) or by the Agent itself.
+_Avoid_: plugin, extension
+
 **Lens**:
 A way of viewing a Pane: the **Terminal lens** (the raw attached terminal) or the **Chat lens** (the Agent's Transcript as a conversation).
 _Avoid_: mode, view
@@ -59,6 +63,14 @@ _Avoid_: history, log
 **Provider**:
 The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
 _Avoid_: vendor, model
+
+**Model**:
+The language model an Agent answers with, as its Transcript records it (`claude-opus-5-5`); one Provider offers many.
+_Avoid_: provider, engine
+
+**Reasoning effort**:
+How hard the Model is set to think, as the Transcript records it (`high`, `off`); never inferred.
+_Avoid_: thinking level, effort mode
 
 **Quota**:
 How much of a Provider account's usage allowance is used, read on this Mac only. It belongs to the Provider, never to a Machine or an Agent.

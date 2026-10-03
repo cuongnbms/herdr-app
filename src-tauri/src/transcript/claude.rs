@@ -1,10 +1,15 @@
 //! Claude Code transcript parser.
+use super::images::{decode_image, ImageSink};
 use super::locate::input_summary;
-use super::{truncate_result as truncate, ChatItem, Parser, ParserOutput};
+use super::{
+    meta_label, truncate_result as truncate, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput,
+};
 use serde_json::Value;
 
 #[derive(Default)]
-pub struct ClaudeParser;
+pub struct ClaudeParser {
+    meta: ChatMeta,
+}
 
 fn flag(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or(false)
@@ -46,7 +51,7 @@ fn user_text(text: &str) -> Option<String> {
 }
 
 impl Parser for ClaudeParser {
-    fn push_line(&mut self, line: &str) -> ParserOutput {
+    fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput {
         let v: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => {
@@ -68,6 +73,20 @@ impl Parser for ClaudeParser {
         {
             tracing::trace!(record_type = kind, reason, "skipping transcript record");
             return ParserOutput::None;
+        }
+        if kind == "assistant" {
+            let model = v
+                .get("message")
+                .and_then(|m| m.get("model"))
+                .and_then(Value::as_str)
+                .and_then(meta_label);
+            if model.is_some() {
+                self.meta.model = model;
+            }
+            let effort = v.get("effort").and_then(Value::as_str).and_then(meta_label);
+            if effort.is_some() {
+                self.meta.effort = effort;
+            }
         }
         let ts = v
             .get("timestamp")
@@ -93,13 +112,17 @@ impl Parser for ClaudeParser {
             Some(Value::String(s)) if kind == "user" => {
                 if let Some(text) = user_text(s) {
                     items.push(ChatItem::User {
+                        images: vec![],
+                        skills: vec![],
                         ts: ts.clone(),
                         text,
                     });
                 }
             }
             Some(Value::Array(blocks)) => {
-                for b in blocks {
+                let uuid = v.get("uuid").and_then(Value::as_str);
+                let mut refs = vec![];
+                for (index, b) in blocks.iter().enumerate() {
                     let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
                     match (kind, bt) {
                         ("user", "text") => {
@@ -107,12 +130,15 @@ impl Parser for ClaudeParser {
                                 b.get("text").and_then(Value::as_str).and_then(user_text)
                             {
                                 items.push(ChatItem::User {
+                                    images: vec![],
+                                    skills: vec![],
                                     ts: ts.clone(),
                                     text,
                                 });
                             }
                         }
                         ("user", "tool_result") => items.push(ChatItem::ToolResult {
+                            images: vec![],
                             ts: ts.clone(),
                             call_id: b
                                 .get("tool_use_id")
@@ -157,7 +183,41 @@ impl Parser for ClaudeParser {
                                 input,
                             });
                         }
+                        ("user", "image") => {
+                            let source = b.get("source");
+                            let field =
+                                |k: &str| source.and_then(|s| s.get(k)).and_then(Value::as_str);
+                            if let (Some(uuid), Some("base64"), Some(media_type), Some(data)) =
+                                (uuid, field("type"), field("media_type"), field("data"))
+                            {
+                                if let Some(bytes) = decode_image(media_type, data) {
+                                    let reference = format!("{uuid}:{index}");
+                                    images.put(reference.clone(), media_type.to_string(), bytes);
+                                    refs.push(ImageRef {
+                                        reference,
+                                        media_type: media_type.to_string(),
+                                    });
+                                }
+                            }
+                        }
                         _ => {}
+                    }
+                }
+                if !refs.is_empty() {
+                    match items
+                        .iter_mut()
+                        .find(|i| matches!(i, ChatItem::User { .. }))
+                    {
+                        Some(ChatItem::User { images, .. }) => *images = refs,
+                        _ => items.insert(
+                            0,
+                            ChatItem::User {
+                                ts: ts.clone(),
+                                text: String::new(),
+                                images: refs,
+                                skills: vec![],
+                            },
+                        ),
                     }
                 }
             }
@@ -169,6 +229,10 @@ impl Parser for ClaudeParser {
             ParserOutput::Append(items)
         }
     }
+
+    fn meta(&self) -> ChatMeta {
+        self.meta.clone()
+    }
 }
 
 #[cfg(test)]
@@ -179,7 +243,9 @@ mod tests {
         let mut p = ClaudeParser::default();
         let mut out = vec![];
         for l in text.lines() {
-            if let ParserOutput::Append(v) = p.push_line(l) {
+            if let ParserOutput::Append(v) =
+                p.push_line(l, &mut Vec::<(String, String, Vec<u8>)>::new())
+            {
                 out.extend(v)
             }
         }
@@ -192,6 +258,8 @@ mod tests {
             items,
             vec![
                 User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: "list files".into()
                 },
@@ -211,18 +279,22 @@ mod tests {
                     input: serde_json::json!({"command":"ls","description":"list"})
                 },
                 ToolResult {
+                    images: vec![],
                     ts: None,
                     call_id: "toolu_1".into(),
                     output: "a.txt\nb.txt".into(),
                     is_error: false
                 },
                 ToolResult {
+                    images: vec![],
                     ts: None,
                     call_id: "toolu_2".into(),
                     output: "boom".into(),
                     is_error: true
                 },
                 User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: "/clear".into()
                 },
@@ -239,6 +311,8 @@ mod tests {
         assert_eq!(
             items,
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "a".into()
             }]
@@ -247,6 +321,8 @@ mod tests {
         assert_eq!(
             more,
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "b".into()
             }]
@@ -258,6 +334,8 @@ mod tests {
         assert_eq!(
             run(&line),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "/working-time last 1 day".into()
             }]
@@ -266,6 +344,8 @@ mod tests {
         assert_eq!(
             run(&bare),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "/clear".into()
             }]
@@ -289,6 +369,8 @@ mod tests {
         assert_eq!(
             run(&typed),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "ok".into()
             }]
@@ -318,6 +400,125 @@ mod tests {
             }
             o => panic!("{o:?}"),
         }
+    }
+    use crate::transcript::{ChatMeta, ImageRef};
+    fn run_with(text: &str) -> (Vec<ChatItem>, Vec<(String, String, Vec<u8>)>, ClaudeParser) {
+        let mut p = ClaudeParser::default();
+        let mut sink: Vec<(String, String, Vec<u8>)> = vec![];
+        let mut out = vec![];
+        for l in text.lines() {
+            if let ParserOutput::Append(v) = p.push_line(l, &mut sink) {
+                out.extend(v)
+            }
+        }
+        (out, sink, p)
+    }
+    fn png(data: &str) -> serde_json::Value {
+        serde_json::json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":data}})
+    }
+    #[test]
+    fn image_beside_text_attaches_to_the_user_item() {
+        let line = serde_json::json!({"type":"user","uuid":"u1","message":{"content":[png("AQID"),{"type":"text","text":"look"}]}}).to_string();
+        let (items, sink, _) = run_with(&line);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: None,
+                text: "look".into(),
+                skills: vec![],
+                images: vec![ImageRef {
+                    reference: "u1:0".into(),
+                    media_type: "image/png".into()
+                }],
+            }]
+        );
+        assert_eq!(
+            sink,
+            vec![("u1:0".to_string(), "image/png".to_string(), vec![1, 2, 3])]
+        );
+    }
+    #[test]
+    fn image_only_record_gets_an_empty_user_item() {
+        let line = serde_json::json!({"type":"user","uuid":"u2","message":{"content":[
+            {"type":"image","source":{"type":"base64","media_type":"image/svg+xml","data":"AQID"}},
+            png("not base64!"),
+            png("AQID")
+        ]}})
+        .to_string();
+        let (items, sink, _) = run_with(&line);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: None,
+                text: "".into(),
+                skills: vec![],
+                images: vec![ImageRef {
+                    reference: "u2:2".into(),
+                    media_type: "image/png".into()
+                }],
+            }]
+        );
+        assert_eq!(sink.len(), 1);
+    }
+    #[test]
+    fn no_uuid_no_images() {
+        let line = serde_json::json!({"type":"user","message":{"content":[png("AQID"),{"type":"text","text":"x"}]}}).to_string();
+        let (items, sink, _) = run_with(&line);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: None,
+                text: "x".into(),
+                images: vec![],
+                skills: vec![]
+            }]
+        );
+        assert!(sink.is_empty());
+    }
+    #[test]
+    fn string_content_unchanged() {
+        let (items, sink, _) =
+            run_with(r#"{"type":"user","uuid":"u3","message":{"content":"plain"}}"#);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: None,
+                text: "plain".into(),
+                images: vec![],
+                skills: vec![]
+            }]
+        );
+        assert!(sink.is_empty());
+    }
+    #[test]
+    fn reads_model_and_effort_last_wins() {
+        let lines = [
+            serde_json::json!({"type":"assistant","effort":"medium","message":{"model":"claude-haiku-4-5","content":[]}}),
+            serde_json::json!({"type":"assistant","effort":"high","message":{"model":"claude-opus-5-5","content":[]}}),
+            serde_json::json!({"type":"assistant","message":{"model":"<synthetic>","content":[]}}),
+            serde_json::json!({"type":"assistant","isSidechain":true,"effort":"low","message":{"model":"claude-sonnet-5-5","content":[]}}),
+        ]
+        .map(|v| v.to_string())
+        .join("\n");
+        let (_, _, p) = run_with(&lines);
+        assert_eq!(
+            p.meta(),
+            ChatMeta {
+                model: Some("claude-opus-5-5".into()),
+                effort: Some("high".into())
+            }
+        );
+    }
+    #[test]
+    fn no_effort_field_leaves_it_unset() {
+        let (_, _, p) = run_with(&serde_json::json!({"type":"assistant","message":{"model":"claude-opus-5-5","content":[]}}).to_string());
+        assert_eq!(
+            p.meta(),
+            ChatMeta {
+                model: Some("claude-opus-5-5".into()),
+                effort: None
+            }
+        );
     }
     #[test]
     fn stamps_items_with_the_record_timestamp() {
