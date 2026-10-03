@@ -108,6 +108,12 @@ impl Entry {
 pub struct AttachManager {
     idle: Duration,
     entries: Entries,
+    /// One lock per key in use. Same-key `open`, `release` and `close` (and `write`'s lookup)
+    /// stay ordered while a spawn runs outside `entries`, so other keys never wait on it.
+    keys: Mutex<HashMap<AttachKey, Arc<Mutex<()>>>>,
+    /// Runs in `open` just before the PTY is spawned, so tests can hold a spawn in flight.
+    #[cfg(test)]
+    before_spawn: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl AttachManager {
@@ -115,6 +121,9 @@ impl AttachManager {
         Arc::new(Self {
             idle,
             entries: Arc::new(Mutex::new(HashMap::new())),
+            keys: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            before_spawn: Mutex::new(None),
         })
     }
 
@@ -132,6 +141,27 @@ impl AttachManager {
             })
     }
 
+    /// Run `f` under `key`'s lock, dropping the lock from `keys` once nobody else wants it.
+    fn with_key<R>(&self, key: &AttachKey, f: impl FnOnce() -> R) -> R {
+        let lock = self
+            .keys
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .clone();
+        let r = {
+            let _g = lock.lock().unwrap_or_else(|p| p.into_inner());
+            f()
+        };
+        let mut keys = self.keys.lock().unwrap();
+        // Clones are only taken under `keys`: two holders means the map and this call.
+        if Arc::strong_count(&lock) == 2 {
+            keys.remove(key);
+        }
+        r
+    }
+
     /// Spawn `argv` verbatim on a PTY, or reuse the live attach for `key`.
     pub fn open(
         &self,
@@ -141,7 +171,37 @@ impl AttachManager {
         rows: u16,
         sink: Arc<dyn Sink>,
     ) -> AppResult<()> {
-        // Held across check + spawn + insert so concurrent opens of one key cannot both spawn.
+        // The key's lock spans check + spawn + insert, so concurrent opens of one key cannot
+        // both spawn; `entries` is only held briefly, so other keys never wait on a spawn.
+        self.with_key(&key.clone(), || {
+            self.open_locked(key, argv, cols, rows, sink)
+        })
+    }
+
+    /// `open` on a blocking thread: openpty and fork/exec block, and a second open of the
+    /// same key waits for the first.
+    pub async fn open_async(
+        self: &Arc<Self>,
+        key: AttachKey,
+        argv: Vec<String>,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn Sink>,
+    ) -> AppResult<()> {
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || me.open(key, argv, cols, rows, sink))
+            .await
+            .map_err(|e| AppError::new("io", format!("terminal open task failed: {e}")))?
+    }
+
+    fn open_locked(
+        &self,
+        key: AttachKey,
+        argv: Vec<String>,
+        cols: u16,
+        rows: u16,
+        sink: Arc<dyn Sink>,
+    ) -> AppResult<()> {
         let mut map = self.entries.lock().unwrap();
         if let Some(e) = map.get(&key).cloned() {
             if e.held.load(Ordering::SeqCst) || e.closed.load(Ordering::SeqCst) {
@@ -169,9 +229,14 @@ impl AttachManager {
                 return Ok(());
             }
         }
+        drop(map);
         let program = argv
             .first()
             .ok_or_else(|| AppError::new("invalid", "empty command"))?;
+        #[cfg(test)]
+        if let Some(f) = self.before_spawn.lock().unwrap().clone() {
+            f();
+        }
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -214,8 +279,7 @@ impl AttachManager {
             generation: AtomicU64::new(0),
             handle: tokio::runtime::Handle::try_current().ok(),
         });
-        map.insert(key, entry.clone());
-        drop(map);
+        self.entries.lock().unwrap().insert(key, entry.clone());
 
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let e = entry.clone();
@@ -246,7 +310,9 @@ impl AttachManager {
     }
 
     pub fn write(&self, key: &AttachKey, data: &[u8]) -> AppResult<()> {
-        let e = self.get(key)?;
+        // Only the lookup waits for an in-flight open; a blocked write must never hold the
+        // key's lock, or `close` could not end a wedged terminal.
+        let e = self.with_key(key, || self.get(key))?;
         let mut w = e.writer.lock().unwrap();
         for chunk in data.chunks(WRITE_CHUNK) {
             w.write_all(chunk)?;
@@ -289,8 +355,13 @@ impl AttachManager {
 
     /// Detach after the idle period unless the key is reopened meanwhile.
     pub fn release(&self, key: &AttachKey) {
-        let Ok(e) = self.get(key) else { return };
-        let generation = e.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        // Under the key's lock: a release queued behind an in-flight open must find its
+        // entry, and an open that follows must see this generation bump.
+        let found = self.with_key(key, || {
+            let e = self.get(key).ok()?;
+            Some((e.generation.fetch_add(1, Ordering::SeqCst) + 1, e))
+        });
+        let Some((generation, e)) = found else { return };
         let entries = self.entries.clone();
         let idle = self.idle;
         let fire = move |e: Arc<Entry>| {
@@ -318,8 +389,26 @@ impl AttachManager {
     }
 
     pub fn close(&self, key: &AttachKey) {
-        if let Ok(e) = self.get(key) {
-            detach(&self.entries, &e);
+        self.with_key(key, || {
+            if let Ok(e) = self.get(key) {
+                detach(&self.entries, &e);
+            }
+        });
+    }
+
+    /// `release` on a blocking thread: it waits for an in-flight open of the same key.
+    pub async fn release_async(self: &Arc<Self>, key: AttachKey) {
+        let me = self.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || me.release(&key)).await {
+            tracing::warn!("terminal release task failed: {e}");
+        }
+    }
+
+    /// `close` on a blocking thread: it waits for an in-flight open of the same key.
+    pub async fn close_async(self: &Arc<Self>, key: AttachKey) {
+        let me = self.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || me.close(&key)).await {
+            tracing::warn!("terminal close task failed: {e}");
         }
     }
 
@@ -508,6 +597,22 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
         panic!("timed out");
+    }
+
+    /// Hold every `open` just before its spawn until the returned sender is dropped.
+    /// Returns (spawns entered, release, spawn count).
+    fn gate_spawn(m: &AttachManager) -> (mpsc::Receiver<()>, mpsc::Sender<()>, Arc<AtomicU64>) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let (entered_tx, go_rx) = (Mutex::new(entered_tx), Mutex::new(go_rx));
+        let count = Arc::new(AtomicU64::new(0));
+        let n = count.clone();
+        *m.before_spawn.lock().unwrap() = Some(Arc::new(move || {
+            n.fetch_add(1, Ordering::SeqCst);
+            let _ = entered_tx.lock().unwrap().send(());
+            let _ = go_rx.lock().unwrap().recv();
+        }));
+        (entered_rx, go_tx, count)
     }
 
     fn batches(chunks: Vec<Vec<u8>>, gap: Option<(usize, Duration)>) -> Vec<Vec<u8>> {
@@ -712,6 +817,98 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(800)).await;
         m.close(&key("g"));
         wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
+    }
+    #[tokio::test]
+    async fn other_keys_do_not_wait_for_a_spawn() {
+        let m = AttachManager::new(Duration::from_secs(5));
+        let rec = Arc::new(Rec::default());
+        m.open(
+            key("y"),
+            sh("read l; echo got:$l; sleep 30"),
+            80,
+            24,
+            rec.clone(),
+        )
+        .unwrap();
+        let (entered, go, _) = gate_spawn(&m);
+        let m2 = m.clone();
+        let opening = std::thread::spawn(move || {
+            m2.open(key("x"), sh("sleep 30"), 80, 24, Arc::new(Rec::default()))
+        });
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        let m3 = m.clone();
+        std::thread::spawn(move || {
+            m3.ack(&key("y"), 1);
+            m3.resize(&key("y"), 100, 30).unwrap();
+            m3.write(&key("y"), b"hi\n").unwrap();
+            let _ = done_tx.send(());
+        });
+        let finished = done_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        drop(go);
+        opening.join().unwrap().unwrap();
+        assert!(finished, "key y waited for key x's spawn");
+        wait_for(|| String::from_utf8_lossy(&rec.bytes.lock().unwrap()).contains("got:hi")).await;
+        m.close(&key("x"));
+        m.close(&key("y"));
+    }
+    #[tokio::test]
+    async fn concurrent_opens_of_one_key_spawn_once() {
+        let m = AttachManager::new(Duration::from_secs(5));
+        let (entered, go, spawns) = gate_spawn(&m);
+        let open = |m: Arc<AttachManager>| {
+            std::thread::spawn(move || {
+                m.open(key("s"), sh("sleep 30"), 80, 24, Arc::new(Rec::default()))
+            })
+        };
+        let first = open(m.clone());
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second = open(m.clone());
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !second.is_finished(),
+            "the second open must wait for the first"
+        );
+        drop(go);
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        assert_eq!(spawns.load(Ordering::SeqCst), 1);
+        assert_eq!(m.entries.lock().unwrap().len(), 1);
+        m.close(&key("s"));
+    }
+    #[tokio::test]
+    async fn release_behind_a_spawn_still_detaches() {
+        let m = AttachManager::new(Duration::from_millis(200));
+        let rec = Arc::new(Rec::default());
+        let (entered, go, _) = gate_spawn(&m);
+        let m2 = m.clone();
+        let r = rec.clone();
+        let opening = std::thread::spawn(move || m2.open(key("r"), sh("sleep 30"), 80, 24, r));
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let m3 = m.clone();
+        let releasing = std::thread::spawn(move || m3.release(&key("r")));
+        std::thread::sleep(Duration::from_millis(50));
+        drop(go);
+        opening.join().unwrap().unwrap();
+        releasing.join().unwrap();
+        wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
+    }
+    #[tokio::test]
+    async fn async_open_and_release_round_trip() {
+        let m = AttachManager::new(Duration::from_millis(200));
+        let rec = Arc::new(Rec::default());
+        m.open_async(key("h"), sh("sleep 30"), 80, 24, rec.clone())
+            .await
+            .unwrap();
+        // Spawned on a blocking thread, the entry still gets the runtime for its idle timer.
+        assert!(m.entries.lock().unwrap()[&key("h")].handle.is_some());
+        assert!(
+            m.keys.lock().unwrap().is_empty(),
+            "key locks are dropped once unused"
+        );
+        m.release_async(key("h")).await;
+        wait_for(|| rec.events.lock().unwrap().contains(&AttachEvent::Detached)).await;
+        m.close_async(key("h")).await;
     }
     #[test]
     fn builds_attach_argv() {
