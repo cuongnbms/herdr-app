@@ -18,7 +18,7 @@ use crate::{
         },
         MachineInfo, SessionEntry, Transport,
     },
-    view::{MachineState, MachineView, PaneRef, PaneStatusEvent, SessionView},
+    view::{MachineState, MachineView, PaneRef, PaneStatusEvent, PaneView, SessionView},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -466,6 +466,27 @@ impl MachineManager {
             .iter()
             .map(Machine::view)
             .collect()
+    }
+
+    /// One Pane as `views()` shows it, found under the lock without cloning any view.
+    pub fn pane_view(&self, r: &PaneRef) -> AppResult<PaneView> {
+        let ms = self.machines.lock().unwrap();
+        let sess = ms
+            .iter()
+            .find(|m| m.cfg.id == r.machine_id)
+            .and_then(|m| m.sessions.iter().find(|s| s.entry.name == r.session))
+            .ok_or_else(|| not_found(format!("unknown session {}/{}", r.machine_id, r.session)))?;
+        // `Machine::view` shows a stopped Session, or one not yet seen, with no Workspaces.
+        sess.view
+            .as_ref()
+            .filter(|_| sess.entry.running)
+            .into_iter()
+            .flat_map(|v| &v.workspaces)
+            .flat_map(|w| &w.tabs)
+            .flat_map(|t| &t.panes)
+            .find(|p| p.pane_id == r.pane_id)
+            .cloned()
+            .ok_or_else(|| not_found(format!("unknown pane {}", r.pane_id)))
     }
 
     pub fn transport(&self, id: &str) -> AppResult<Arc<dyn Transport>> {
@@ -2192,6 +2213,82 @@ mod tests {
             Some((MachineState::Disconnected, None)),
             "local is connected separately"
         );
+    }
+
+    /// `pane_view` answers exactly as a lookup through `views()` does, without cloning them.
+    #[tokio::test]
+    async fn pane_view_matches_a_lookup_through_views() {
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        assert!(
+            wait_for(|| mgr
+                .pane_view(&PaneRef {
+                    machine_id: "local".into(),
+                    session: "default".into(),
+                    pane_id: "w2:p1".into(),
+                })
+                .is_ok())
+            .await
+        );
+        let through_views = |r: &PaneRef| -> AppResult<PaneView> {
+            let views = mgr.views();
+            let session = views
+                .iter()
+                .find(|m| m.id == r.machine_id)
+                .and_then(|m| m.sessions.iter().find(|s| s.name == r.session))
+                .ok_or_else(|| {
+                    AppError::new(
+                        "not_found",
+                        format!("unknown session {}/{}", r.machine_id, r.session),
+                    )
+                })?;
+            session
+                .workspaces
+                .iter()
+                .flat_map(|w| &w.tabs)
+                .flat_map(|t| &t.panes)
+                .find(|p| p.pane_id == r.pane_id)
+                .cloned()
+                .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))
+        };
+        let cases = [
+            ("local", "default", "w1:p1"),
+            ("local", "default", "w2:p2"),
+            ("local", "default", "w9:p9"),
+            ("local", "old", "w1:p1"),
+            ("local", "nope", "w1:p1"),
+            ("ghost", "default", "w1:p1"),
+        ];
+        for (m, s, p) in cases {
+            let r = PaneRef {
+                machine_id: m.into(),
+                session: s.into(),
+                pane_id: p.into(),
+            };
+            let (a, b) = (mgr.pane_view(&r), through_views(&r));
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{m}/{s}/{p}");
+        }
+        assert!(mgr
+            .pane_view(&PaneRef {
+                machine_id: "local".into(),
+                session: "default".into(),
+                pane_id: "w1:p1".into(),
+            })
+            .is_ok());
     }
 
     /// Refetches of an unchanged snapshot emit nothing; a real change still does.

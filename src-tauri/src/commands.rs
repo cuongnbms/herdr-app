@@ -343,25 +343,7 @@ type Chats<'a> = State<'a, Arc<ChatManager>>;
 const CHAT_PAGE: usize = 200;
 
 fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<PaneView, AppError> {
-    let views = mgr.views();
-    let session = views
-        .iter()
-        .find(|m| m.id == r.machine_id)
-        .and_then(|m| m.sessions.iter().find(|s| s.name == r.session))
-        .ok_or_else(|| {
-            AppError::new(
-                "not_found",
-                format!("unknown session {}/{}", r.machine_id, r.session),
-            )
-        })?;
-    session
-        .workspaces
-        .iter()
-        .flat_map(|w| &w.tabs)
-        .flat_map(|t| &t.panes)
-        .find(|p| p.pane_id == r.pane_id)
-        .cloned()
-        .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))
+    mgr.pane_view(r)
 }
 
 /// How long to wait for herdr to report a just-started Claude agent's session.
