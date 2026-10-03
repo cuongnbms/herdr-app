@@ -37,7 +37,7 @@
 - Modify: `src-tauri/src/transcript/tail.rs` (constants at 13-16, `State`, `flush` at 98-123, `run` at 168-226, tests)
 
 **Interfaces:**
-- Produces: `fn parse_header(line: &[u8]) -> Option<u64>` (private, in `tail.rs`); `const QUIET: Duration`. `State` gains `size: Option<u64>`, `consumed: u64`, `last_byte: Instant`. `ever_got_bytes`, `got_bytes`, `started` and `INITIAL_CAP` are removed.
+- Produces: `fn parse_header(line: &[u8]) -> Option<u64>` (private, in `tail.rs`); `const QUIET: Duration`. `State` gains `size: Option<u64>`, `consumed: u64`, `last_byte: Option<Instant>` (None until the first byte). `ever_got_bytes`, `got_bytes`, `started` and `INITIAL_CAP` are removed.
 
 - [ ] **Step 1: Write the failing tests** in `tail.rs` `mod tests`:
 
@@ -85,8 +85,9 @@
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("t.jsonl");
         std::fs::write(&p, (0..50).map(|i| format!("m{i}\n")).collect::<String>()).unwrap();
-        let (_h, got) = collect(Arc::new(Slow("0.6")), &p);
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        // Slower than QUIET (1 s in tests): the quiet clock must not run before the first byte.
+        let (_h, got) = collect(Arc::new(Slow("1.3")), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
         let ev = got.lock().unwrap();
         assert!(matches!(&ev[0], ChatEvent::Reset { total: 50, .. }), "{ev:?}");
         assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Append { .. })), "{ev:?}");
@@ -130,8 +131,8 @@ Expected: compile error, because `parse_header` is not defined. Once a stub retu
 
 - The script becomes `wc -c < "$1" 2>/dev/null || echo 0; tail -c +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null`. Keep the stdin-EOF comment.
 - `parse_header` trims ASCII whitespace and parses `u64`.
-- In `run`, the first complete stdout line is the header. It is not passed to `st.line`, and it sets `st.size`. Raw byte counts after the header, including newlines, `\r` and bytes dropped past `MAX_LINE`, add to `st.consumed` and set `st.last_byte = Instant::now()`.
-- In `flush` before the first Reset: `caught_up = st.size.is_some_and(|s| st.consumed >= s) || st.last_byte.elapsed() >= QUIET`. `last_byte` starts at spawn time.
+- In `run`, the first complete stdout line is the header. It is not passed to `st.line`, and it sets `st.size`. Raw byte counts after the header, including newlines, `\r` and bytes dropped past `MAX_LINE`, add to `st.consumed` and set `st.last_byte = Some(Instant::now())`. Every byte, including the header's, sets `last_byte`.
+- In `flush` before the first Reset: `caught_up = st.size.is_some_and(|s| st.consumed >= s) || st.last_byte.is_some_and(|t| t.elapsed() >= QUIET)`. Before the first byte, nothing is sent. A process that never talks ends in `Eof` and the existing error.
 - `const QUIET: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2) };`
 
 - [ ] **Step 4: Run the tail tests**
@@ -640,13 +641,18 @@ Expected: all pass.
 
 - [ ] **Step 2: Re-measure with the same harness**
 
-- Copy the bench harness and its runner (kept in the session scratchpad `chat-bench/`) to `src-tauri/src/transcript/bench.rs`, and add `#[cfg(test)] mod bench;` to `transcript/mod.rs`.
-- Change `h`'s sink argument if `spawn_tail`'s signature changed.
-- Add a reattach timing: `ChatManager::close` then `reattach`, and record the ms to the first `Reset` on the new sink.
-- Run `run.sh after-local` and `run.sh after-devtuf devtuf`.
-- Remove the harness: `git status` must show only the spec change.
+The harness lives in `tmp/chat-bench/` in this worktree. `tmp/` ignores itself. It holds `gen.py`, `run.sh`, `bench.rs` and the baseline outputs.
 
-Expected: in every run the first `Reset` holds `total` equal to the whole file's items. `Append` items before settling are 0, or only lines written live. Reattach takes under 100 ms.
+- Generate the local files with `python3 tmp/chat-bench/gen.py`. The devtuf copies are already in `~/chat-bench/` there.
+- Copy `tmp/chat-bench/bench.rs` to `src-tauri/src/transcript/bench.rs`. Add `#[cfg(test)] mod bench;` after `mod skill_prompt;` in `transcript/mod.rs`. Adjust the call if `spawn_tail`'s signature changed.
+- Add a reattach timing:
+  1. Insert the tail into a `ChatManager` and wait until it settles.
+  2. Call `close`, then `reattach` with a new recording sink.
+  3. Print `reattach_ms`, the time until the first `Reset` reaches that sink.
+- From `src-tauri/`, run `sh ../tmp/chat-bench/run.sh after-local` and `sh ../tmp/chat-bench/run.sh after-devtuf devtuf`. The harness uses its own ControlMaster (`chatbench.ctl`), not the app's.
+- Remove the harness: delete `bench.rs` and revert `mod.rs`. Only the spec may show as changed afterwards.
+
+Expected: in every run the first `Reset` holds `total` equal to the whole file's items (57000 Claude, 42000 pi). `Append` items before settling are 0. Reattach takes under 100 ms.
 
 - [ ] **Step 3: Record the "After" table in the spec and commit**
 
@@ -655,14 +661,16 @@ git add docs/superpowers/specs/2026-10-03-chat-loading-design.md
 git commit -m "docs(chat): record chat loading results"
 ```
 
-- [ ] **Step 4: Manual check in the app** (`pnpm tauri dev`, with the synthetic files local and on devtuf)
+- [ ] **Step 4: Report what was not exercised**
 
-Check:
-- loading older pages after a trim;
+Do not launch `pnpm tauri dev`. It shares app data and ssh masters with the user's installed herdr-app, and quitting it disconnects them. The tests and the harness cover the Rust side, the reducer, row keys and the Mermaid cache.
+
+In the final report, list what still needs one look in the real app:
+- scroll position while paging older rows after a trim;
 - a pi branch switch;
-- images, including after a park and reattach;
+- images after a park and a reattach;
 - live appends while at the bottom and while scrolled up;
 - Edit/Write diffs on a capped input (marker visible);
-- switching between four Chat panes (the oldest one re-reads, the others are instant).
+- switching between four Chat panes.
 
-Report any regression before finishing the branch.
+Ask the user to open the app once for these.

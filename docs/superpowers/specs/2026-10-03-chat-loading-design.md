@@ -110,8 +110,10 @@ wc -c < "$1" 2>/dev/null || echo 0; tail -c +1 -F "$1" & p=$!; cat >/dev/null; k
 - The first `Reset` is sent at the first flush where `consumed >= size`, even mid-line. A last line
   that had no `\n` when `wc` ran arrives later as an `Append`.
 - `size == 0` sends an empty `Reset` at the first flush.
-- **Safety net:** if no byte has arrived for **2 s** (counted from spawn, or from the last byte),
-  the first `Reset` is sent with what has been parsed. This covers a file truncated or replaced
+- **Safety net:** once bytes have started arriving, if none arrives for **2 s**, the first `Reset`
+  is sent with what has been parsed. The clock starts at the first byte, not at spawn: an ssh
+  slower than 2 s to start would otherwise send an empty `Reset` and stream the backlog as
+  `Append` again. A process that never talks ends in `Eof` and the "tail exited" error. This covers a file truncated or replaced
   between `wc` and `tail`, a bad header, and a stalled ssh. It is inactivity-based, so a large file
   still downloading over ssh is not cut off.
 - Bytes appended between `wc` and `tail` arrive as `Append`, as any live line.
