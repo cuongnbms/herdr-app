@@ -1,12 +1,14 @@
 //! Transcript discovery and streaming: find an agent's JSONL transcript on a Machine and
 //! tail it into chat items.
 pub mod claude;
+pub mod images;
 pub mod locate;
 pub mod pi;
 pub mod tail;
 
 use crate::error::AppError;
 use crate::view::PaneRef;
+use images::ImageSink;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -15,11 +17,37 @@ use std::sync::Mutex;
 pub use locate::{locate, Located};
 pub use tail::{spawn_tail, TailHandle};
 
+/// An image attached to a chat item; its bytes are fetched by `reference`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ImageRef {
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub media_type: String,
+}
+
+/// A Skill the user invoked in a message.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SkillUse {
+    pub name: String,
+    pub path: String,
+}
+
+/// The Model and Reasoning effort an Agent reports in its Transcript.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ChatMeta {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChatItem {
     User {
         text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageRef>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        skills: Vec<SkillUse>,
         #[serde(skip_serializing_if = "Option::is_none")]
         ts: Option<String>,
     },
@@ -45,6 +73,8 @@ pub enum ChatItem {
         call_id: String,
         output: String,
         is_error: bool,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ImageRef>,
         #[serde(skip_serializing_if = "Option::is_none")]
         ts: Option<String>,
     },
@@ -72,9 +102,20 @@ impl ChatItem {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
-    Reset { items: Vec<ChatItem>, total: usize },
-    Append { items: Vec<ChatItem> },
-    Error { error: AppError },
+    Reset {
+        items: Vec<ChatItem>,
+        total: usize,
+    },
+    Append {
+        items: Vec<ChatItem>,
+    },
+    Error {
+        error: AppError,
+    },
+    Meta {
+        model: Option<String>,
+        effort: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -85,7 +126,22 @@ pub enum ParserOutput {
 }
 
 pub trait Parser: Send {
-    fn push_line(&mut self, line: &str) -> ParserOutput;
+    fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput;
+    /// The latest Model and Reasoning effort seen so far.
+    fn meta(&self) -> ChatMeta {
+        ChatMeta::default()
+    }
+}
+
+/// A Model or Reasoning effort value fit to show: not empty, at most 100 chars, not a
+/// `<placeholder>`.
+#[allow(dead_code)] // the parsers start using it in later changes
+pub(crate) fn meta_label(s: &str) -> Option<String> {
+    if s.is_empty() || s.chars().count() > 100 || s.starts_with('<') {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 const MAX_RESULT_BYTES: usize = 16 * 1024;
@@ -103,9 +159,10 @@ pub(crate) fn truncate_result(s: String) -> String {
 }
 
 /// The transcript parser for an agent.
+#[allow(clippy::default_constructed_unit_structs)] // ClaudeParser gains state in a later change
 pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
     match agent {
-        "claude" => Some(Box::new(claude::ClaudeParser)),
+        "claude" => Some(Box::new(claude::ClaudeParser::default())),
         "pi" => Some(Box::new(pi::PiParser::default())),
         _ => None,
     }
@@ -159,7 +216,7 @@ mod tests {
 
     struct NoItems;
     impl Parser for NoItems {
-        fn push_line(&mut self, _: &str) -> ParserOutput {
+        fn push_line(&mut self, _: &str, _: &mut dyn ImageSink) -> ParserOutput {
             ParserOutput::None
         }
     }
@@ -194,15 +251,70 @@ mod tests {
     fn serializes_ts_only_when_known() {
         let with = serde_json::to_value(ChatItem::User {
             text: "a".into(),
+            images: vec![],
+            skills: vec![],
             ts: Some("2026-10-03T00:00:00Z".into()),
         })
         .unwrap();
         assert_eq!(with["ts"], "2026-10-03T00:00:00Z");
         let without = serde_json::to_value(ChatItem::User {
             text: "a".into(),
+            images: vec![],
+            skills: vec![],
             ts: None,
         })
         .unwrap();
         assert!(without.get("ts").is_none());
+    }
+
+    #[test]
+    fn omits_empty_images_and_skills() {
+        let v = serde_json::to_value(ChatItem::User {
+            text: "a".into(),
+            images: vec![],
+            skills: vec![],
+            ts: None,
+        })
+        .unwrap();
+        assert!(v.get("images").is_none() && v.get("skills").is_none());
+        let v = serde_json::to_value(ChatItem::ToolResult {
+            call_id: "c".into(),
+            output: "o".into(),
+            is_error: false,
+            images: vec![ImageRef {
+                reference: "e:0".into(),
+                media_type: "image/png".into(),
+            }],
+            ts: None,
+        })
+        .unwrap();
+        assert_eq!(
+            v["images"],
+            serde_json::json!([{ "ref": "e:0", "media_type": "image/png" }])
+        );
+    }
+
+    #[test]
+    fn serializes_meta_event() {
+        let v = serde_json::to_value(ChatEvent::Meta {
+            model: Some("m".into()),
+            effort: None,
+        })
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "type": "meta", "model": "m", "effort": null })
+        );
+    }
+
+    #[test]
+    fn meta_label_rejects_placeholders() {
+        assert_eq!(
+            meta_label("claude-opus-5-5"),
+            Some("claude-opus-5-5".into())
+        );
+        assert_eq!(meta_label("<synthetic>"), None);
+        assert_eq!(meta_label(""), None);
+        assert_eq!(meta_label(&"x".repeat(101)), None);
     }
 }

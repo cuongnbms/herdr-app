@@ -1,5 +1,6 @@
 //! pi transcript parser: entries form a tree; the visible conversation is the branch from
 //! the last entry up to the root.
+use super::images::ImageSink;
 use super::locate::input_summary;
 use super::{truncate_result, ChatItem, Parser, ParserOutput};
 use serde_json::Value;
@@ -90,6 +91,8 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
         "user" => text_blocks(content)
             .into_iter()
             .map(|text| ChatItem::User {
+                images: vec![],
+                skills: vec![],
                 ts: ts.clone(),
                 text,
             })
@@ -138,6 +141,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
             items
         }
         "toolResult" => vec![ChatItem::ToolResult {
+            images: vec![],
             ts: ts.clone(),
             call_id: str_of(msg, &["toolCallId", "callId"]).to_string(),
             output: truncate_result(text_blocks(content).join("\n")),
@@ -148,7 +152,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
 }
 
 impl Parser for PiParser {
-    fn push_line(&mut self, line: &str) -> ParserOutput {
+    fn push_line(&mut self, line: &str, _images: &mut dyn ImageSink) -> ParserOutput {
         if self.too_large {
             return ParserOutput::None;
         }
@@ -242,7 +246,9 @@ mod tests {
     use super::*;
     use crate::transcript::{ChatItem::*, Parser, ParserOutput};
     fn feed(p: &mut PiParser, text: &str) -> Vec<ParserOutput> {
-        text.lines().map(|l| p.push_line(l)).collect()
+        text.lines()
+            .map(|l| p.push_line(l, &mut Vec::<(String, String, Vec<u8>)>::new()))
+            .collect()
     }
     fn appended(outs: Vec<ParserOutput>) -> Vec<ChatItem> {
         outs.into_iter()
@@ -262,6 +268,8 @@ mod tests {
             items,
             vec![
                 User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: "hi".into()
                 },
@@ -281,6 +289,7 @@ mod tests {
                     input: serde_json::json!({"command":"pwd"})
                 },
                 ToolResult {
+                    images: vec![],
                     ts: None,
                     call_id: "c1".into(),
                     output: "/w/app".into(),
@@ -293,16 +302,20 @@ mod tests {
     fn branch_switch_resets_to_new_path() {
         let mut p = PiParser::default();
         feed(&mut p, include_str!("../../tests/fixtures/pi.jsonl"));
-        let out = p.push_line(r#"{"type":"message","id":"e","parentId":"a","message":{"role":"user","content":"again"}}"#);
+        let out = p.push_line(r#"{"type":"message","id":"e","parentId":"a","message":{"role":"user","content":"again"}}"#, &mut Vec::<(String, String, Vec<u8>)>::new());
         match out {
             ParserOutput::Reset(items) => assert_eq!(
                 items,
                 vec![
                     User {
+                        images: vec![],
+                        skills: vec![],
                         ts: None,
                         text: "hi".into()
                     },
                     User {
+                        images: vec![],
+                        skills: vec![],
                         ts: None,
                         text: "again".into()
                     }
@@ -310,7 +323,7 @@ mod tests {
             ),
             o => panic!("{o:?}"),
         }
-        let next = p.push_line(r#"{"type":"message","id":"f","parentId":"e","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}"#);
+        let next = p.push_line(r#"{"type":"message","id":"f","parentId":"e","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}"#, &mut Vec::<(String, String, Vec<u8>)>::new());
         assert!(
             matches!(next, ParserOutput::Append(v) if v == vec![AssistantText { ts: None, markdown: "ok".into() }])
         );
@@ -318,9 +331,9 @@ mod tests {
     #[test]
     fn unknown_parent_starts_branch_there() {
         let mut p = PiParser::default();
-        let out = p.push_line(r#"{"type":"message","id":"x","parentId":"gone","message":{"role":"user","content":"hey"}}"#);
+        let out = p.push_line(r#"{"type":"message","id":"x","parentId":"gone","message":{"role":"user","content":"hey"}}"#, &mut Vec::<(String, String, Vec<u8>)>::new());
         assert!(
-            matches!(out, ParserOutput::Reset(v) if v == vec![User { ts: None, text: "hey".into() }])
+            matches!(out, ParserOutput::Reset(v) if v == vec![User { ts: None, text: "hey".into(), images: vec![], skills: vec![] }])
         );
     }
     #[test]
@@ -328,7 +341,7 @@ mod tests {
         let mut p = PiParser::default();
         let big = "x".repeat(20_000);
         let line = serde_json::json!({"type":"message","id":"a","parentId":null,"message":{"role":"toolResult","toolCallId":"t","content":[{"type":"text","text":big}]}}).to_string();
-        match p.push_line(&line) {
+        match p.push_line(&line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
             ParserOutput::Append(v) => match &v[0] {
                 ToolResult { output, .. } => {
                     assert!(output.len() < 16_500);
@@ -343,12 +356,15 @@ mod tests {
     fn oversize_branch_emits_system_once_then_stops() {
         let mut p = PiParser::with_limit(300);
         let l1 = r#"{"type":"message","id":"a","parentId":null,"message":{"role":"user","content":"one"}}"#;
-        assert!(matches!(p.push_line(l1), ParserOutput::Append(_)));
+        assert!(matches!(
+            p.push_line(l1, &mut Vec::<(String, String, Vec<u8>)>::new()),
+            ParserOutput::Append(_)
+        ));
         let big = format!(
             r#"{{"type":"message","id":"b","parentId":"a","message":{{"role":"user","content":"{}"}}}}"#,
             "y".repeat(300)
         );
-        match p.push_line(&big) {
+        match p.push_line(&big, &mut Vec::<(String, String, Vec<u8>)>::new()) {
             ParserOutput::Reset(v) => assert_eq!(
                 v,
                 vec![System {
@@ -358,13 +374,16 @@ mod tests {
             ),
             o => panic!("{o:?}"),
         }
-        assert!(matches!(p.push_line(l1), ParserOutput::None));
+        assert!(matches!(
+            p.push_line(l1, &mut Vec::<(String, String, Vec<u8>)>::new()),
+            ParserOutput::None
+        ));
     }
     #[test]
     fn stamps_items_with_the_entry_timestamp() {
         let mut p = PiParser::default();
         let line = r#"{"type":"message","id":"a","parentId":null,"timestamp":"2026-10-02T11:46:32.940Z","message":{"role":"user","content":"hi","timestamp":1790941592936}}"#;
-        match p.push_line(line) {
+        match p.push_line(line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
             ParserOutput::Append(v) => assert_eq!(v[0].ts(), Some("2026-10-02T11:46:32.940Z")),
             o => panic!("{o:?}"),
         }

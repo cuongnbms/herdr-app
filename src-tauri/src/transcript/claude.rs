@@ -1,4 +1,5 @@
 //! Claude Code transcript parser.
+use super::images::ImageSink;
 use super::locate::input_summary;
 use super::{truncate_result as truncate, ChatItem, Parser, ParserOutput};
 use serde_json::Value;
@@ -46,7 +47,7 @@ fn user_text(text: &str) -> Option<String> {
 }
 
 impl Parser for ClaudeParser {
-    fn push_line(&mut self, line: &str) -> ParserOutput {
+    fn push_line(&mut self, line: &str, _images: &mut dyn ImageSink) -> ParserOutput {
         let v: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => {
@@ -93,6 +94,8 @@ impl Parser for ClaudeParser {
             Some(Value::String(s)) if kind == "user" => {
                 if let Some(text) = user_text(s) {
                     items.push(ChatItem::User {
+                        images: vec![],
+                        skills: vec![],
                         ts: ts.clone(),
                         text,
                     });
@@ -107,12 +110,15 @@ impl Parser for ClaudeParser {
                                 b.get("text").and_then(Value::as_str).and_then(user_text)
                             {
                                 items.push(ChatItem::User {
+                                    images: vec![],
+                                    skills: vec![],
                                     ts: ts.clone(),
                                     text,
                                 });
                             }
                         }
                         ("user", "tool_result") => items.push(ChatItem::ToolResult {
+                            images: vec![],
                             ts: ts.clone(),
                             call_id: b
                                 .get("tool_use_id")
@@ -179,7 +185,9 @@ mod tests {
         let mut p = ClaudeParser::default();
         let mut out = vec![];
         for l in text.lines() {
-            if let ParserOutput::Append(v) = p.push_line(l) {
+            if let ParserOutput::Append(v) =
+                p.push_line(l, &mut Vec::<(String, String, Vec<u8>)>::new())
+            {
                 out.extend(v)
             }
         }
@@ -192,6 +200,8 @@ mod tests {
             items,
             vec![
                 User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: "list files".into()
                 },
@@ -211,18 +221,22 @@ mod tests {
                     input: serde_json::json!({"command":"ls","description":"list"})
                 },
                 ToolResult {
+                    images: vec![],
                     ts: None,
                     call_id: "toolu_1".into(),
                     output: "a.txt\nb.txt".into(),
                     is_error: false
                 },
                 ToolResult {
+                    images: vec![],
                     ts: None,
                     call_id: "toolu_2".into(),
                     output: "boom".into(),
                     is_error: true
                 },
                 User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: "/clear".into()
                 },
@@ -239,6 +253,8 @@ mod tests {
         assert_eq!(
             items,
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "a".into()
             }]
@@ -247,6 +263,8 @@ mod tests {
         assert_eq!(
             more,
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "b".into()
             }]
@@ -258,6 +276,8 @@ mod tests {
         assert_eq!(
             run(&line),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "/working-time last 1 day".into()
             }]
@@ -266,6 +286,8 @@ mod tests {
         assert_eq!(
             run(&bare),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "/clear".into()
             }]
@@ -289,6 +311,8 @@ mod tests {
         assert_eq!(
             run(&typed),
             vec![User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "ok".into()
             }]

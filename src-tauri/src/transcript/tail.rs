@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 const BATCH: Duration = Duration::from_millis(50);
 const RESET_ITEMS: usize = 500;
 const INITIAL_CAP: Duration = Duration::from_millis(300);
-const MAX_LINE: usize = 8 * 1024 * 1024;
+const MAX_LINE: usize = 32 * 1024 * 1024;
 
 type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
 
@@ -62,7 +62,10 @@ impl State {
     }
 
     fn line(&mut self, line: &str) {
-        match self.parser.push_line(line) {
+        match self
+            .parser
+            .push_line(line, &mut Vec::<(String, String, Vec<u8>)>::new())
+        {
             ParserOutput::None => {}
             ParserOutput::Append(v) => {
                 self.items.lock().unwrap().extend(v.iter().cloned());
@@ -196,10 +199,11 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcript::images::ImageSink;
     use std::sync::{Arc, Mutex};
     struct Lines;
     impl Parser for Lines {
-        fn push_line(&mut self, line: &str) -> ParserOutput {
+        fn push_line(&mut self, line: &str, _images: &mut dyn ImageSink) -> ParserOutput {
             if line == "RESET" {
                 ParserOutput::Reset(vec![ChatItem::System {
                     ts: None,
@@ -207,6 +211,8 @@ mod tests {
                 }])
             } else {
                 ParserOutput::Append(vec![ChatItem::User {
+                    images: vec![],
+                    skills: vec![],
                     ts: None,
                     text: line.into(),
                 }])
@@ -233,7 +239,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         let ev = got.lock().unwrap();
         assert!(matches!(&ev[0], ChatEvent::Reset { items, total: 2 } if items.len() == 2));
-        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into() }])));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into(), images: vec![], skills: vec![] }])));
         assert!(matches!(ev.last().unwrap(), ChatEvent::Reset { items, .. } if items.len() == 1));
         drop(ev);
         drop(h);
@@ -253,7 +259,7 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into() } && items[2] == ChatItem::User { ts: None, text: "b".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into(), images: vec![], skills: vec![] } && items[2] == ChatItem::User { ts: None, text: "b".into(), images: vec![], skills: vec![] })
         );
     }
     #[tokio::test]
@@ -324,13 +330,15 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into(), images: vec![], skills: vec![] })
         );
         let older = h.page(200, 200);
         assert_eq!(older.len(), 200);
         assert_eq!(
             older[0],
             ChatItem::User {
+                images: vec![],
+                skills: vec![],
                 ts: None,
                 text: "m0".into()
             }
