@@ -96,12 +96,7 @@ pub fn run() {
             app.manage(mgr.clone());
             app.manage(attach);
             app.manage(chats);
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = mgr.connect("local").await {
-                    tracing::error!("connect local: {e}");
-                }
-                mgr.connect_enabled_ssh().await;
-            });
+            tauri::async_runtime::spawn(async move { mgr.connect_at_startup().await });
             Ok(())
         })
         .build(tauri::generate_context!())

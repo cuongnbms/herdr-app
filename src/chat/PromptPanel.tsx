@@ -255,11 +255,11 @@ export function PromptPanel({ pane, view, fallback = true }: { pane: PaneRef; vi
     };
   }, []);
 
-  // Read on mount, on every status update, and on a timer while waiting.
+  // Read on mount, on every status update, and on a timer while waiting (not while the window is in the background).
   useEffect(() => {
     void refresh();
     const timer = setInterval(() => {
-      if (!busy.current) void refresh();
+      if (!busy.current && !document.hidden) void refresh();
     }, PROMPT_POLL_MS);
     return () => clearInterval(timer);
   }, [refresh, view.status, view.title]);

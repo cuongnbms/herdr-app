@@ -146,6 +146,15 @@ impl Transport for SshTransport {
         }
         Ok(())
     }
+
+    /// No `-O cancel`: the master's `-O exit` that follows drops every forward.
+    async fn forget_socket(&self, session: &SessionEntry) -> AppResult<()> {
+        let _gate = self.gate.lock().await;
+        self.forwards.lock().unwrap().remove(&session.name);
+        let local = secure_runtime_dir()?.join(socket_name(&self.machine_id, &session.name));
+        let _ = std::fs::remove_file(&local);
+        Ok(())
+    }
 }
 
 /// `ssh -M -S ctl -o ControlPersist=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3

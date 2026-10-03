@@ -8,9 +8,10 @@ import { showToast } from "../ui/Toast";
 /**
  * A pane that fell back to the Terminal lens because its agent had no transcript yet (Claude
  * writes it on the first prompt) returns to the Chat lens once the transcript exists. Looks
- * again when the pane is shown and whenever its agent changes status, then once more after
- * `retryMs`, since the status can change just before the file is written. Off when the user
- * turned off switching to Chat after the first prompt.
+ * when the pane is shown and again when its agent starts or finishes work (the moments a
+ * transcript appears; blocked/idle flips would only repeat the ssh lookups), each time once
+ * more after `retryMs`, since the status can change just before the file is written. Off
+ * when the user turned off switching to Chat after the first prompt.
  */
 export function useTranscriptProbe(
   pane: PaneRef | null,
@@ -21,6 +22,7 @@ export function useTranscriptProbe(
   const key = pane ? paneKey(pane) : "";
   const fallenBack = useApp((s) => (key ? s.lensOverride[key] === "terminal" : false));
   const enabled = useLensSettings((s) => s.chatAfterFirstPrompt);
+  const phase = status === "working" || status === "done" ? status : "other";
   useEffect(() => {
     if (!pane || !fallenBack || !enabled) return;
     let cancelled = false;
@@ -47,5 +49,5 @@ export function useTranscriptProbe(
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, status, fallenBack, enabled]);
+  }, [key, phase, fallenBack, enabled]);
 }

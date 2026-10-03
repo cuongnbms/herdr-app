@@ -45,7 +45,7 @@ async fn ssh_localhost_master_exec_and_forward() {
     assert!(st.success(), "ssh master failed to start");
     assert!(master_alive(&ssh.ctl, &ssh.target).await);
 
-    let out = exec(&ssh, &probe_argv(None)).await.unwrap();
+    let out = exec(&ssh, &probe_argv(None, None)).await.unwrap();
     assert!(out.stdout.contains("HOME="), "{}", out.stdout);
 
     let _guard = SessionGuard;
