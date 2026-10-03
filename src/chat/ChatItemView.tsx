@@ -4,7 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { ChatItem } from "../lib/types";
-import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
+import { BrainIcon, CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 import { ChatImages } from "./images";
 import { SkillChips } from "./skills";
@@ -201,7 +201,7 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
     case "thinking":
       return (
         <details className="chat-row chat-thinking">
-          <summary>Thinking…</summary>
+          <summary><BrainIcon className="icon chat-thinking-icon" />Thinking…</summary>
           <div className="chat-dim">{item.text}</div>
         </details>
       );

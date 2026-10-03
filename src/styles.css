@@ -699,7 +699,8 @@ kbd {
 .chat-assistant a:hover { border-bottom-color: currentColor; }
 .chat-thinking summary { cursor: pointer; color: var(--fg-3); font-size: 12px; font-style: italic; list-style: none; }
 .chat-thinking summary::-webkit-details-marker { display: none; }
-.chat-thinking summary::before { content: "◆ "; font-style: normal; color: var(--fg-3); opacity: 0.6; }
+.chat-thinking summary { display: inline-flex; align-items: center; gap: 6px; }
+.chat-thinking-icon { flex: none; width: 14px; height: 14px; color: var(--fg-3); opacity: 0.8; }
 .chat-thinking[open] .chat-dim { margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--line-2); }
 .chat-dim { color: var(--fg-3); white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
 .chat-system { text-align: center; color: var(--fg-3); font-size: 11.5px; }
