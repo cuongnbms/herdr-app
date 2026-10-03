@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({
   herdrCall: vi.fn().mockResolvedValue({}),
@@ -7,6 +7,7 @@ vi.mock("../lib/ipc", () => ({
   completeFiles: vi.fn(),
 }));
 import { completeCommands, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
+import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
 import { clearCompletionCache } from "./useCompletions";
 import { SUGGESTION_POLL_MS } from "./useClaudeSuggestion";
@@ -371,5 +372,39 @@ describe("Composer completion", () => {
     } finally {
       now.mockRestore();
     }
+  });
+});
+
+describe("Composer quick replies", () => {
+  beforeEach(() => useQuickReplies.setState({ show: true, replies: [...DEFAULT_QUICK_REPLIES] }));
+
+  it("sends a quick reply at once, leaving the draft alone", () => {
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "half a thought" } });
+    const group = screen.getByRole("group", { name: "Quick replies" });
+    fireEvent.click(within(group).getByRole("button", { name: "continue" }));
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "continue" });
+    expect(box.value).toBe("half a thought");
+  });
+
+  it("disables the replies while one is on its way", async () => {
+    let finish: (v: unknown) => void = () => {};
+    vi.mocked(herdrCall).mockReturnValueOnce(new Promise((r) => (finish = r)));
+    render(<Composer pane={pane} agent="claude" />);
+    fireEvent.click(screen.getByRole("button", { name: "yes" }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "no" }).disabled).toBe(true);
+    await act(async () => finish({}));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "no" }).disabled).toBe(false);
+  });
+
+  it("shows the replies with text only, and none when switched off", () => {
+    useQuickReplies.setState({ replies: ["ship it", "  "] });
+    const { unmount } = render(<Composer pane={pane} agent="claude" />);
+    expect(within(screen.getByRole("group", { name: "Quick replies" })).getAllByRole("button")).toHaveLength(1);
+    unmount();
+    useQuickReplies.setState({ show: false });
+    render(<Composer pane={pane} agent="claude" />);
+    expect(screen.queryByRole("group", { name: "Quick replies" })).toBeNull();
   });
 });

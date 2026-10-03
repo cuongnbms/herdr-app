@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({
   systemFonts: vi.fn(async () => ["CaskaydiaCove Nerd Font Mono", "Lilex", "Menlo"]),
 }));
+import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, useQuickReplies } from "./quickReplies";
 import { Settings } from "./Settings";
 import { DEFAULTS, loadFonts, useSettings } from "./store";
 import { useTheme } from "./theme";
@@ -51,6 +52,43 @@ describe("Settings dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Settings quick replies", () => {
+  beforeEach(() => useQuickReplies.setState({ show: true, replies: [...DEFAULT_QUICK_REPLIES] }));
+
+  function openChat() {
+    render(<Settings />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
+  }
+
+  it("switches the quick replies off", () => {
+    openChat();
+    const sw = screen.getByRole<HTMLInputElement>("switch", { name: "Quick replies" });
+    expect(sw.checked).toBe(true);
+    fireEvent.click(sw);
+    expect(useQuickReplies.getState().show).toBe(false);
+  });
+
+  it("edits, removes, adds and resets replies", () => {
+    openChat();
+    fireEvent.change(screen.getByRole("textbox", { name: "Quick reply 1" }), { target: { value: "go on" } });
+    expect(useQuickReplies.getState().replies[0]).toBe("go on");
+    fireEvent.click(screen.getByRole("button", { name: "Remove quick reply 2" }));
+    expect(useQuickReplies.getState().replies).toEqual(["go on", "no", "commit and push", "retry"]);
+    fireEvent.click(screen.getByRole("button", { name: "Add quick reply" }));
+    expect(useQuickReplies.getState().replies).toHaveLength(5);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Quick reply 5" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset quick replies" }));
+    expect(useQuickReplies.getState().replies).toEqual(DEFAULT_QUICK_REPLIES);
+  });
+
+  it("stops adding at the limit", () => {
+    useQuickReplies.setState({ replies: Array.from({ length: QUICK_REPLIES_MAX }, (_, i) => `r${i}`) });
+    openChat();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Add quick reply" }).disabled).toBe(true);
   });
 });
 

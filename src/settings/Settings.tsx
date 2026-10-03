@@ -1,7 +1,8 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
-import { GearIcon, SearchIcon } from "../ui/icons";
+import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
+import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
 
@@ -103,11 +104,66 @@ function FontSettings() {
   );
 }
 
+function ChatSettings() {
+  const q = useQuickReplies();
+  const list = useRef<HTMLDivElement>(null);
+  const added = useRef(false);
+  // Focus the row just added, so typing goes straight into it.
+  useEffect(() => {
+    if (!added.current) return;
+    added.current = false;
+    list.current?.querySelector<HTMLInputElement>(".quick-reply-row:last-child input")?.focus();
+  }, [q.replies.length]);
+  const isDefault = q.replies.length === DEFAULT_QUICK_REPLIES.length && q.replies.every((r, i) => r === DEFAULT_QUICK_REPLIES[i]);
+  return (
+    <>
+      <label className="switch">
+        <span>Quick replies</span>
+        <input type="checkbox" role="switch" checked={q.show} onChange={(e) => q.setShow(e.target.checked)} />
+      </label>
+      <p className="note">Buttons above the message box that send a short reply in one click.</p>
+      <div className="quick-reply-list" ref={list}>
+        {q.replies.map((r, i) => (
+          <div key={i} className="quick-reply-row">
+            <input
+              aria-label={`Quick reply ${i + 1}`}
+              value={r}
+              maxLength={QUICK_REPLY_MAX_CHARS}
+              placeholder="Reply text"
+              onChange={(e) => q.setReplies(q.replies.map((x, j) => (j === i ? e.target.value : x)))}
+            />
+            <button className="icon-btn" aria-label={`Remove quick reply ${i + 1}`} onClick={() => q.setReplies(q.replies.filter((_, j) => j !== i))}>
+              <CloseIcon />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="settings-foot">
+        <button
+          className="btn btn-xs"
+          aria-label="Add quick reply"
+          disabled={q.replies.length >= QUICK_REPLIES_MAX}
+          onClick={() => {
+            added.current = true;
+            q.setReplies([...q.replies, ""]);
+          }}
+        >
+          Add reply
+        </button>
+        <button className="btn btn-xs" aria-label="Reset quick replies" disabled={isDefault} onClick={q.reset}>
+          Reset to defaults
+        </button>
+      </div>
+    </>
+  );
+}
+
 /** Add a section here for each new group of settings. */
 const SECTIONS = [
   { id: "general", label: "General", Body: GeneralSettings },
   { id: "appearance", label: "Appearance", Body: AppearanceSettings },
   { id: "fonts", label: "Fonts", Body: FontSettings },
+  { id: "chat", label: "Chat", Body: ChatSettings },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];

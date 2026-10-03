@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
 import { paneKey, type AgentStatus, type PaneRef, type SlashCommand } from "../lib/types";
+import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
@@ -74,6 +75,8 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
   // not while a send is on its way: Claude's box would still show the old suggestion.
   const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending);
   const offered = text === "" ? suggestion : null;
+  const showQuick = useQuickReplies((s) => s.show);
+  const quickReplies = quickReplyButtons(useQuickReplies((s) => s.replies));
 
   const found = activeTrigger(text, caret, { skills: agent === "codex" });
   const trigger = found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
@@ -184,8 +187,27 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
       .finally(() => setSending(false));
   };
 
+  /** A canned reply goes straight out; what is typed in the box stays a draft. */
+  const sendQuick = (reply: string) => {
+    if (sending) return;
+    clearSuggestion();
+    setSending(true);
+    call("agent.prompt", { target: pane.pane_id, text: reply })
+      .catch(() => {})
+      .finally(() => setSending(false));
+  };
+
   return (
     <div className="composer">
+      {showQuick && quickReplies.length > 0 && (
+        <div className="composer-quick" role="group" aria-label="Quick replies">
+          {quickReplies.map((reply, i) => (
+            <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="composer-box">
         {images.length > 0 && (
           <div className="composer-images">

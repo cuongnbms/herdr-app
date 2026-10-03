@@ -7,7 +7,8 @@ Transcript-parsing logic in `src-tauri/src/transcript/`, the screen-prompt reade
 next prompt in `src/chat/prompt/claudeSuggestion.ts` (and the screens in its tests), the Chat lens work blocks
 and todo checklists in `src/chat/workBlocks.ts` and `src/chat/checklist.ts`, the Composer's completion
 triggers in `src/chat/mentions.ts`, the file scoring in `src/chat/complete.ts`, the built-in Slash
-command tables and descriptions in `src-tauri/src/complete/commands.rs`, and the agent marks in
+command tables and descriptions in `src-tauri/src/complete/commands.rs`, the tool-row icon choice in
+`src/chat/toolIcon.ts`, the quick-reply defaults and limits in `src/settings/quickReplies.ts`, and the agent marks in
 `src/agents/AgentMark.tsx` and `src/agents/agentSvgMarks.ts` are adapted from
 [herdr-web-ui](https://github.com/devswha/herdr-web-ui). Several of those marks come from
 [lobe-icons](https://github.com/lobehub/lobe-icons) (MIT). The provider logos remain the
@@ -20,6 +21,18 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Lucide
+
+The tool-row icons in `src/ui/icons.tsx` (book-open, file-search, file-pen, bot, globe,
+list-checks, target, wrench) are drawn from [Lucide](https://lucide.dev).
+
+ISC License. Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of
+Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## JetBrains Mono
 
