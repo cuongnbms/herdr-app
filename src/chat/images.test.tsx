@@ -54,4 +54,36 @@ describe("ChatImages", () => {
     const { container } = render(<ChatImages images={[png]} />);
     expect(container.innerHTML).toBe("");
   });
+
+  it("keeps a loaded thumbnail when the pane is re-rendered as an equal new object", async () => {
+    const ui = (p: typeof pane) =>
+      <ChatPaneContext.Provider value={p}><ChatImages images={[png]} /></ChatPaneContext.Provider>;
+    const { rerender } = render(ui(pane));
+    await screen.findByRole("img", { name: "Image 1" });
+    rerender(ui({ ...pane }));
+    expect(screen.getByRole("img", { name: "Image 1" })).toBeTruthy();
+    expect(chatImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a loaded thumbnail on first paint of a remount", async () => {
+    const first = show();
+    await screen.findByRole("img", { name: "Image 1" });
+    first.unmount();
+    show();
+    expect(screen.getByRole("img", { name: "Image 1" })).toBeTruthy();
+  });
+
+  it("holds a placeholder box while an image is pending", () => {
+    vi.mocked(chatImage).mockReturnValue(new Promise(() => {}));
+    const { container } = show();
+    expect(container.querySelector(".chat-image")).toBeTruthy();
+  });
+
+  it("renders the viewer under document.body", async () => {
+    const { container } = show();
+    fireEvent.click(await screen.findByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog", { name: "Image" });
+    expect(container.contains(dialog)).toBe(false);
+    expect(document.body.contains(dialog)).toBe(true);
+  });
 });

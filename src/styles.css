@@ -647,6 +647,7 @@ kbd {
   width: 64px; height: 64px; box-sizing: border-box; border: 1px solid var(--line-2); border-radius: var(--r-sm);
 }
 .chat-image { padding: 0; overflow: hidden; background: none; cursor: zoom-in; }
+.chat-image-pending { background: var(--surface-1, transparent); cursor: default; }
 .chat-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .chat-image-missing { display: grid; place-items: center; text-align: center; color: var(--fg-3); font-size: 11px; }
 .image-viewer {

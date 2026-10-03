@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { createContext, useContext, useEffect, useState } from "react";
 import { chatImage } from "../lib/ipc";
 import { paneKey, type ImageRef, type PaneRef } from "../lib/types";
@@ -41,19 +42,22 @@ export function revokeChatImages(key: string): void {
 }
 
 export function useChatImage(pane: PaneRef, image: ImageRef): { url: string | null; failed: boolean } {
-  const [state, setState] = useState<{ url: string | null; failed: boolean }>({ url: null, failed: false });
+  // Keyed by value, not by the pane object: callers may pass a fresh equal object on every render.
+  const k = `${paneKey(pane)}\n${image.ref}`;
+  const peek = cache.get(k)?.url ?? null;
+  const [state, setState] = useState<{ k: string; url: string | null; failed: boolean }>({ k, url: peek, failed: false });
   useEffect(() => {
     let live = true;
-    setState({ url: null, failed: false });
     load(pane, image).promise.then(
-      (url) => live && setState({ url, failed: false }),
-      () => live && setState({ url: null, failed: true }),
+      (url) => live && setState({ k, url, failed: false }),
+      () => live && setState({ k, url: null, failed: true }),
     );
     return () => {
       live = false;
     };
-  }, [pane, image.ref, image.media_type]); // eslint-disable-line react-hooks/exhaustive-deps
-  return state;
+  }, [k, image.media_type]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A state left over from another image is ignored; an already-resolved entry shows at once.
+  return state.k === k ? state : { url: peek, failed: false };
 }
 
 function ImageViewer({ url, onClose }: { url: string; onClose: () => void }) {
@@ -64,10 +68,12 @@ function ImageViewer({ url, onClose }: { url: string; onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // In the body: a virtual row's transform would confine a fixed overlay to the row.
+  return createPortal(
     <div className="image-viewer" role="dialog" aria-label="Image" onClick={onClose}>
       <img src={url} alt="" onClick={(e) => e.stopPropagation()} />
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -75,7 +81,8 @@ function ChatImageView({ pane, image, n }: { pane: PaneRef; image: ImageRef; n: 
   const { url, failed } = useChatImage(pane, image);
   const [open, setOpen] = useState(false);
   if (failed) return <div className="chat-image-missing">Image unavailable</div>;
-  if (!url) return null;
+  // A fixed-size box while pending keeps the row's height stable.
+  if (!url) return <div className="chat-image chat-image-pending" aria-hidden="true" />;
   return (
     <>
       <button className="chat-image" aria-label={`Open image ${n}`} onClick={() => setOpen(true)}>
