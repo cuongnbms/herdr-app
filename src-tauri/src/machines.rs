@@ -173,6 +173,19 @@ pub fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(if attempt >= 6 { 60 } else { 1u64 << attempt })
 }
 
+/// How long a watcher must have been up (since its first snapshot) to count as recovered.
+pub const STABLE_WATCH: Duration = Duration::from_secs(30);
+
+/// The backoff attempt after a watcher ended: back to the start only when it had been up
+/// for `STABLE_WATCH`, so one that fails right after its snapshot keeps backing off.
+fn retry_attempt(attempt: u32, up_for: Option<Duration>) -> u32 {
+    if up_for.is_some_and(|d| d >= STABLE_WATCH) {
+        0
+    } else {
+        attempt
+    }
+}
+
 pub enum UiEvent {
     Machine(MachineView),
     PaneStatus(PaneStatusEvent),
@@ -1345,7 +1358,7 @@ impl MachineManager {
             let Ok(entry) = self.session(&id, &name) else {
                 return;
             };
-            let mut got_view = false;
+            let mut first_view: Option<tokio::time::Instant> = None;
             let err = match transport.local_socket(&entry).await {
                 Err(e) => e,
                 Ok(socket) => {
@@ -1356,8 +1369,7 @@ impl MachineManager {
                     while let Some(ev) = rx.recv().await {
                         match ev {
                             WatchEvent::View(v) => {
-                                attempt = 0;
-                                got_view = true;
+                                first_view.get_or_insert_with(tokio::time::Instant::now);
                                 self.update_session(&id, &name, |s| {
                                     s.view = Some(v);
                                     s.error = None;
@@ -1390,7 +1402,7 @@ impl MachineManager {
                 }
             };
             // The first snapshot over a freshly forwarded socket ending in EOF: sshd refused it.
-            let err = if !got_view {
+            let err = if first_view.is_none() {
                 self.forward_refusal(&id, err)
             } else {
                 err
@@ -1409,6 +1421,7 @@ impl MachineManager {
                     return; // stopped (apply_list already marked it) or machine gone
                 }
             }
+            attempt = retry_attempt(attempt, first_view.map(|t| t.elapsed()));
             tokio::time::sleep(backoff(attempt)).await;
             attempt = attempt.saturating_add(1);
         }
@@ -1608,6 +1621,18 @@ mod tests {
     fn backoff_schedule() {
         let s: Vec<u64> = (0..9).map(|a| backoff(a).as_secs()).collect();
         assert_eq!(s, vec![1, 2, 4, 8, 16, 32, 60, 60, 60]);
+    }
+    #[test]
+    fn backoff_resets_only_after_a_stable_watch() {
+        let s = std::time::Duration::from_secs;
+        assert_eq!(retry_attempt(4, None), 4, "never got a snapshot");
+        assert_eq!(
+            retry_attempt(4, Some(s(5))),
+            4,
+            "snapshot, then a quick drop"
+        );
+        assert_eq!(retry_attempt(4, Some(s(30))), 0);
+        assert_eq!(retry_attempt(0, Some(s(29))), 0);
     }
     #[tokio::test]
     async fn add_and_remove_persist() {
