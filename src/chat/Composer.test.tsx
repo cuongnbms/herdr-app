@@ -6,7 +6,12 @@ vi.mock("../lib/ipc", () => ({
   completeCommands: vi.fn(),
   completeFiles: vi.fn(),
 }));
+vi.mock("./complete", async (orig) => {
+  const m = await orig<typeof import("./complete")>();
+  return { ...m, rankFiles: vi.fn(m.rankFiles) };
+});
 import { completeCommands, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
+import { rankFiles } from "./complete";
 import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
 import { clearCompletionCache } from "./useCompletions";
@@ -81,7 +86,8 @@ describe("Composer", () => {
     fireEvent.change(box, { target: { value: "try again" } });
     await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
     expect(box.value).toBe("try again");
-    expect(localStorage.getItem("herdr-app:draft:devtuf/default/w1:p1")).toBe("try again");
+    // Written once the debounce passes.
+    await waitFor(() => expect(localStorage.getItem("herdr-app:draft:devtuf/default/w1:p1")).toBe("try again"));
   });
 
   it("saves a pasted image on the pane's machine and shows it as an attachment", async () => {
@@ -276,6 +282,19 @@ describe("Composer completion", () => {
     expect(completeFiles).toHaveBeenCalledWith(pane);
     fireEvent.keyDown(box, { key: "Tab" });
     expect((box as HTMLTextAreaElement).value).toBe("look at @src/x.ts ");
+  });
+
+  it("ranks files only when the list or the query changes", async () => {
+    const { rerender } = render(<Composer pane={pane} agent="claude" status="idle" />);
+    const box = screen.getByRole("textbox");
+    type(box, "@src");
+    await screen.findByRole("option", { name: /src\/x\.ts/ });
+    const calls = vi.mocked(rankFiles).mock.calls.length;
+    rerender(<Composer pane={pane} agent="claude" status="working" />);
+    expect(vi.mocked(rankFiles).mock.calls.length).toBe(calls);
+    type(box, "@src/y");
+    await screen.findByRole("option", { name: /src\/y\.ts/ });
+    expect(vi.mocked(rankFiles).mock.calls.length).toBe(calls + 1);
   });
 
   it("quotes a path with spaces", async () => {
