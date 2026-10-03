@@ -253,6 +253,10 @@ export function Composer({
           ref={box}
           value={text}
           rows={2}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
           placeholder={
             offered
               ? `${offered}  (Tab to use)`

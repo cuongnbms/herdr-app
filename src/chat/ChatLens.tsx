@@ -30,6 +30,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const [openError, setOpenError] = useState<AppError | null>(null);
   const [unseen, setUnseen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const loadingOlder = useRef(false);
   const anchor = useRef<number | null>(null);
@@ -144,6 +145,20 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     prevItems.current = state.items.length;
   }, [rows.length, state.items.length, virt]);
 
+  // Rows measure taller than their estimate after the jump, and the working indicator
+  // shrinks the viewport: neither fires a scroll event, so stay pinned while at the bottom.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (atBottom.current && anchor.current === null) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
+
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -179,7 +194,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
-        <div style={{ height: virt.getTotalSize(), position: "relative" }}>
+        <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {
             const row = rows[v.index];
             return (
