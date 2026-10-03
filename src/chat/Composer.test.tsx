@@ -408,3 +408,15 @@ describe("Composer quick replies", () => {
     expect(screen.queryByRole("group", { name: "Quick replies" })).toBeNull();
   });
 });
+
+describe("Composer model label", () => {
+  it("shows the Model and effort when known", () => {
+    render(<Composer pane={pane} agent="claude" meta={{ model: "claude-opus-5-5", effort: "high" }} />);
+    const label = screen.getByTitle("Model · reasoning effort");
+    expect(label.textContent).toBe("claude-opus-5-5 · high");
+  });
+  it("shows nothing when neither is known", () => {
+    render(<Composer pane={pane} agent="claude" meta={{ model: null, effort: null }} />);
+    expect(screen.queryByTitle("Model · reasoning effort")).toBeNull();
+  });
+});
