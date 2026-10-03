@@ -8,6 +8,7 @@ import { paneKey, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
+import { applyUnicode11 } from "../terminal/unicode";
 import { readPrompt, type PromptAnswer, type ScreenPrompt } from "./prompt/screenPrompt";
 import { sendAnswer, type PromptIo } from "./prompt/sendAnswer";
 
@@ -47,9 +48,12 @@ function ScreenMirror({ text }: { text: string }) {
       disableStdin: true,
       cursorBlink: false,
       scrollback: 200,
+      allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // Same widths as the pane it mirrors.
+    applyUnicode11(term);
     const unwatchFont = watchTermFont(term, fit, -1);
     const unwatchTheme = watchTermTheme(term);
     term.open(host);
