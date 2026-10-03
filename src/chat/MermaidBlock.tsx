@@ -23,7 +23,7 @@ export function MermaidBlock({ source, children }: { source: string; children: R
     const timer = setTimeout(async () => {
       try {
         const mermaid = await loadMermaid();
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default" });
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
         if (cancelled || !(await mermaid.parse(source, { suppressErrors: true }))) return;
         const out = await mermaid.render(id, source);
         if (!cancelled) setSvg(out.svg);
