@@ -30,6 +30,8 @@ export function reduce(state: ChatState, ev: ChatEvent, atBottom = false): ChatS
   }
 }
 
-export function prepend(state: ChatState, older: ChatItem[]): ChatState {
+/** `before` is the index the page was fetched for: a trim or reset since then moved it. */
+export function prepend(state: ChatState, older: ChatItem[], before: number): ChatState {
+  if (state.total - state.items.length !== before) return state;
   return { ...state, items: [...older, ...state.items] };
 }

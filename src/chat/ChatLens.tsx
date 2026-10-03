@@ -17,8 +17,8 @@ import { usePiModelPicker } from "./usePiModelPicker";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
-type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[] };
-const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a, a.atBottom));
+type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[]; before: number };
+const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items, a.before) : reduce(s, a, a.atBottom));
 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
@@ -26,6 +26,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const machineState = useApp((s) => s.machines[pane.machine_id]?.state);
   const sawDown = useRef(false);
   const [state, dispatch] = useReducer(reducer, emptyChat);
+  const latest = useRef(state);
+  latest.current = state;
   const [located, setLocated] = useState<Located | null>(null);
   const [openError, setOpenError] = useState<AppError | null>(null);
   const [unseen, setUnseen] = useState(false);
@@ -177,8 +179,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       chatPage(pane, before)
         .then((older) => {
           if (gen !== generation.current || older.length === 0) return;
+          // A trim or reset since the fetch moved the window: the reducer drops the page, so
+          // leave no anchor behind for it.
+          const now = latest.current;
+          if (now.total - now.items.length !== before) return;
           anchor.current = 0;
-          dispatch({ type: "prepend", items: older });
+          dispatch({ type: "prepend", items: older, before });
         })
         .catch((e) => console.error("chat_page failed", e))
         .finally(() => {
