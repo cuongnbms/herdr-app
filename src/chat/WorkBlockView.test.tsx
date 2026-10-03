@@ -26,7 +26,7 @@ describe("WorkBlockView", () => {
     const onToggle = vi.fn();
     render(<WorkBlockView block={block} results={results} open={false} onToggle={onToggle} live={false} />);
     fireEvent.click(screen.getByRole("button", { name: /Worked/ }));
-    expect(onToggle).toHaveBeenCalledOnce();
+    expect(onToggle).toHaveBeenCalledExactlyOnceWith("a", false);
   });
 
   it("shows narration and tool rows when open", () => {
