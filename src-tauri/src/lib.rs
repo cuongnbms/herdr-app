@@ -1,5 +1,6 @@
 pub mod attach;
 pub mod commands;
+pub mod complete;
 pub mod error;
 pub mod fonts;
 pub mod herdr;
