@@ -20,6 +20,14 @@ _Avoid_: space, project
 The folder the app remembers for a Workspace; Agents started from the app's UI run in a new Tab there. herdr itself does not know it.
 _Avoid_: project dir, workspace cwd
 
+**Group**:
+A named, nestable set of Sessions the user arranges in the sidebar; it can hold Sessions from any Machine. herdr itself does not know it.
+_Avoid_: folder, project
+
+**Bookmark**:
+A Session the user pinned to the top of the sidebar, independent of which Group it is in.
+_Avoid_: favourite, pin
+
 **Tab**:
 A layout of Panes inside a Workspace.
 
@@ -61,6 +69,7 @@ The moment a Window's used percent goes back to zero.
 ## Relationships
 
 - A **Machine** has zero or more **Sessions**
+- A **Session** is in at most one **Group**; a **Group** has zero or more **Sessions** and **Groups**; a Session may also be a **Bookmark**
 - A running **Session** has one or more **Workspaces**; a **Workspace** has one or more **Tabs**; a **Tab** has one or more **Panes**
 - Each **Pane** has exactly one **Terminal**
 - A **Pane** has at most one **Agent**; an **Agent** has at most one **Transcript** the app can find
