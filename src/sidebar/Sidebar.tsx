@@ -237,11 +237,21 @@ export function Sidebar() {
   }, [dragging]);
   // Empty Bookmarks stay hidden, except while a Session is dragged so a first Bookmark can be dropped.
   const draggingSession = dragging?.kind === "node" && dragging.ref.kind === "session";
+  const [emptyBookmarksShown, setEmptyBookmarksShown] = useState(false);
+  useEffect(() => {
+    if (!draggingSession) {
+      setEmptyBookmarksShown(false);
+      return;
+    }
+    // Inserting the section during dragstart shifts the rows under the pointer and WebKit cancels the drag.
+    const t = setTimeout(() => setEmptyBookmarksShown(true));
+    return () => clearTimeout(t);
+  }, [draggingSession]);
   return (
     <ActionsProvider>
       <DragContext.Provider value={dragState}>
         <DashboardEntry />
-        {(bookmarks.length > 0 || draggingSession) && <BookmarksSection bookmarks={bookmarks} />}
+        {(bookmarks.length > 0 || (draggingSession && emptyBookmarksShown)) && <BookmarksSection bookmarks={bookmarks} />}
         <section aria-label="Groups">
           <GroupTree />
         </section>

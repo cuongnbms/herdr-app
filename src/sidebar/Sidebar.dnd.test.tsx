@@ -103,10 +103,24 @@ describe("Sidebar drag and drop", () => {
     expect(document.querySelector(".drop-into, .drop-before, .drop-after")).toBeNull();
     fireEvent.dragEnd(rowOf("x"), { dataTransfer });
   });
-  it("bookmarks a session dropped on the Bookmarks header and reorders bookmarks", () => {
+  it("waits until after dragstart to show empty Bookmarks", () => {
+    vi.useFakeTimers();
     render(<Sidebar />);
     const dataTransfer = dt();
     fireEvent.dragStart(rowOf("x"), { dataTransfer });
+    // Inserting the section during dragstart shifts the rows under the pointer and WebKit cancels the drag.
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).toBeNull();
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).not.toBeNull();
+    fireEvent.dragEnd(rowOf("x"), { dataTransfer });
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).toBeNull();
+  });
+  it("bookmarks a session dropped on the Bookmarks header and reorders bookmarks", () => {
+    vi.useFakeTimers();
+    render(<Sidebar />);
+    const dataTransfer = dt();
+    fireEvent.dragStart(rowOf("x"), { dataTransfer });
+    act(() => vi.runOnlyPendingTimers());
     const header = within(screen.getByRole("region", { name: "Bookmarks" })).getByText("Bookmarks");
     fireEvent.dragOver(header, { dataTransfer });
     fireEvent.drop(header, { dataTransfer });
