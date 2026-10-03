@@ -135,7 +135,6 @@ pub trait Parser: Send {
 
 /// A Model or Reasoning effort value fit to show: not empty, at most 100 chars, not a
 /// `<placeholder>`.
-#[allow(dead_code)] // the parsers start using it in later changes
 pub(crate) fn meta_label(s: &str) -> Option<String> {
     if s.is_empty() || s.chars().count() > 100 || s.starts_with('<') {
         None
@@ -159,7 +158,6 @@ pub(crate) fn truncate_result(s: String) -> String {
 }
 
 /// The transcript parser for an agent.
-#[allow(clippy::default_constructed_unit_structs)] // ClaudeParser gains state in a later change
 pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
     match agent {
         "claude" => Some(Box::new(claude::ClaudeParser::default())),
