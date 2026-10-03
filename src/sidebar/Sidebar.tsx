@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DragContext, useDragState } from "./dnd";
 import type { Drag, Indicator } from "./dnd";
 import { indicatorClass, useBookmarkRowDnd, useBookmarksDropDnd, useTreeRowDnd } from "./useRowDnd";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import {
   machineDisconnect,
   machineRemove,
@@ -91,11 +91,10 @@ export function SessionRow({ node, bookmark, nextKey = null }: { node: RSession;
         onClick={onClick}
         onContextMenu={onMenu}
       >
-        {bookmark && <StarIcon className="icon star-icon" />}
         <span className="label">{session.name}</span>
         <span className="badge">
-          {session.running && <StatusDot status={session.status} />}
           <span className="badge-label">{machine.label}</span>
+          {session.running && <StatusDot status={session.status} />}
         </span>
       </button>
       {session.error && <p className="error">{session.error.message}</p>}
@@ -185,12 +184,13 @@ function AddMachine() {
   );
 }
 
-function SectionHeader({ id, label }: { id: string; label: string }) {
+function SectionHeader({ id, label, icon }: { id: string; label: string; icon?: ReactNode }) {
   const open = useApp((s) => s.expanded[id] ?? true);
   const toggle = useApp((s) => s.toggle);
   return (
     <button className="section-toggle" aria-expanded={open} onClick={() => toggle(id, open)}>
       <Chevron open={open} />
+      {icon}
       {label}
     </button>
   );
@@ -202,7 +202,7 @@ function BookmarksSection({ bookmarks }: { bookmarks: RSession[] }) {
   const dnd = useBookmarksDropDnd();
   return (
     <section aria-label="Bookmarks" className={indicatorClass(drag, "bookmarks").trim()} {...dnd}>
-      <SectionHeader id="bookmarks" label="Bookmarks" />
+      <SectionHeader id="bookmarks" label="Bookmarks" icon={<StarIcon className="icon star-icon" />} />
       {open && (
         <ul className="tree">
           {bookmarks.map((n, i) => <SessionRow key={n.key} node={n} bookmark nextKey={bookmarks[i + 1]?.key ?? null} />)}
