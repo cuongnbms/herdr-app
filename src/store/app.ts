@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
 import { pruneFolders } from "../workspaces/folder";
+import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 
 export interface SessionRef {
   machine_id: string;
@@ -96,6 +97,11 @@ export const useApp = create<AppState>((set, get) => ({
     // just-created Workspace survives until the snapshot lists it.
     const prev = get().machines[v.id]?.sessions;
     for (const s of v.sessions) pruneFolders(v.id, s, prev?.find((p) => p.name === s.name));
+    // Only a connected snapshot is authoritative about which Sessions exist.
+    if (v.state === "connected" && prev) {
+      const gone = prev.filter((p) => !v.sessions.some((s) => s.name === p.name)).map((p) => sessionKey(v.id, p.name));
+      if (gone.length) useLayout.getState().update((l) => forgetSessions(l, gone));
+    }
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
@@ -103,7 +109,8 @@ export const useApp = create<AppState>((set, get) => ({
       doneSeen: seenAfterSnapshot(s.doneSeen, v, s.dashboardOpen ? null : s.selected),
     }));
   },
-  removeMachine: (id) =>
+  removeMachine: (id) => {
+    useLayout.getState().update((l) => forgetMachine(l, id));
     set((s) => {
       const { [id]: _gone, ...machines } = s.machines;
       return {
@@ -112,7 +119,8 @@ export const useApp = create<AppState>((set, get) => ({
         selected: s.selected?.machine_id === id ? null : s.selected,
         viewed: s.viewed?.machine_id === id ? null : s.viewed,
       };
-    }),
+    });
+  },
   select: (ref) =>
     set((s) => ({
       selected: ref,

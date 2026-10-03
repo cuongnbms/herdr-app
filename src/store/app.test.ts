@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { chosenLens, useApp, selectedPane } from "./app";
 import type { MachineView } from "../lib/types";
 import { getFolder, setFolder } from "../workspaces/folder";
+import { EMPTY_LAYOUT, sessionKey, useLayout } from "../sidebar/groups";
 
 const machine: MachineView = {
   id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "blocked",
@@ -128,5 +129,44 @@ describe("done-seen tracking", () => {
     expect(useApp.getState().dashboardOpen).toBe(true);
     useApp.getState().setDashboardOpen(false);
     expect(useApp.getState().dashboardOpen).toBe(false);
+  });
+});
+
+describe("layout pruning", () => {
+  const sess = (name: string) => ({ name, running: false, status: "unknown" as const, error: null, workspaces: [] });
+  const box = (state: MachineView["state"], ...names: string[]): MachineView => ({
+    id: "box", label: "box", kind: "ssh", state, error: null, version: "0.9.3", status: "unknown", sessions: names.map(sess),
+  });
+  const placed = (...keys: string[]) => ({ tree: keys.map((key) => ({ kind: "session" as const, key })), bookmarks: [...keys] });
+  const kept = () => useLayout.getState().layout.bookmarks;
+  beforeEach(() => {
+    useApp.setState({ machines: {}, order: [], selected: null });
+    useLayout.setState({ layout: EMPTY_LAYOUT });
+  });
+
+  it("forgets sessions that left a connected machine since its previous view", () => {
+    useLayout.setState({ layout: placed(sessionKey("box", "a"), sessionKey("box", "b")) });
+    useApp.getState().upsertMachine(box("connected", "a", "b"));
+    useApp.getState().upsertMachine(box("connected", "a"));
+    expect(kept()).toEqual([sessionKey("box", "a")]);
+    expect(useLayout.getState().layout.tree).toEqual([{ kind: "session", key: sessionKey("box", "a") }]);
+  });
+  it("keeps everything on a first snapshot, even an empty one", () => {
+    useLayout.setState({ layout: placed(sessionKey("box", "a")) });
+    useApp.getState().upsertMachine(box("connected"));
+    expect(kept()).toEqual([sessionKey("box", "a")]);
+  });
+  it("does not prune for a machine that is not connected", () => {
+    useLayout.setState({ layout: placed(sessionKey("box", "a")) });
+    useApp.getState().upsertMachine(box("connected", "a"));
+    useApp.getState().upsertMachine(box("disconnected"));
+    useApp.getState().upsertMachine(box("error"));
+    expect(kept()).toEqual([sessionKey("box", "a")]);
+  });
+  it("forgets every session of a removed machine", () => {
+    useLayout.setState({ layout: placed(sessionKey("box", "a"), sessionKey("local", "x")) });
+    useApp.getState().upsertMachine(box("connected", "a"));
+    useApp.getState().removeMachine("box");
+    expect(kept()).toEqual([sessionKey("local", "x")]);
   });
 });
