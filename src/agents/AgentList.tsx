@@ -4,7 +4,7 @@ import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from 
 import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { PlusIcon } from "../ui/icons";
+import { CloseIcon, PlusIcon } from "../ui/icons";
 import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
 
@@ -52,19 +52,20 @@ function AgentCard({ machineId, session, entry }: { machineId: string; session: 
   const select = useApp((s) => s.select);
   const a = useActions();
   const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const close = call("pane.close", { pane_id: pane.pane_id });
   const items: MenuItem[] = a
     ? [
         { label: "Rename…", onSelect: () => a.rename("Rename pane", pane.title, (label) => call("pane.rename", { pane_id: pane.pane_id, label })()) },
         { label: "Split right", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "right" })) },
         { label: "Split down", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "down" })) },
-        { label: "Close pane", onSelect: () => a.confirm("Close pane", `Close "${pane.title}"?`, "Close", call("pane.close", { pane_id: pane.pane_id })) },
+        { label: "Close pane", onSelect: () => a.guard(close) },
         { label: "New tab", onSelect: () => a.guard(call("tab.create", { workspace_id: ws.workspace_id })) },
         { label: "Rename tab…", onSelect: () => a.rename("Rename tab", tab.label, (label) => call("tab.rename", { tab_id: tab.tab_id, label })()) },
         { label: "Close tab", onSelect: () => a.confirm("Close tab", `Close tab "${tab.label}" and all its panes?`, "Close", call("tab.close", { tab_id: tab.tab_id })) },
       ]
     : [];
   return (
-    <li>
+    <li className="agent-card-item">
       <button
         className={"agent-card" + (active ? " active" : "") + (pane.status === "blocked" ? " blocked" : "")}
         onClick={() => select(ref)}
@@ -79,6 +80,9 @@ function AgentCard({ machineId, session, entry }: { machineId: string; session: 
             {entry.sub && <span className="agent-card-sub">{entry.sub}</span>}
           </span>
         </span>
+      </button>
+      <button className="agent-card-close" aria-label={`Close ${pane.title}`} title="Close pane" onClick={() => a?.guard(close)}>
+        <CloseIcon />
       </button>
     </li>
   );

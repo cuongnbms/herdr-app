@@ -120,6 +120,13 @@ describe("AgentList", () => {
     expect(herdrCall).toHaveBeenCalledWith("local", "default", "pane.split", { target_pane_id: "p3", direction: "right" });
   });
 
+  it("closes a pane from its card button without asking", () => {
+    render(<AgentList />);
+    fireEvent.click(screen.getByRole("button", { name: "Close Tag v1.4.0" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "pane.close", { pane_id: "p3" });
+  });
+
   it("asks for a session when none is viewed", () => {
     useApp.setState({ viewed: null });
     render(<AgentList />);
