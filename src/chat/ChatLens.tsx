@@ -195,7 +195,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         </button>
       )}
       <WorkingIndicator status={view.status} />
-      {view.status === "blocked" ? <BlockedPanel pane={pane} view={view} /> : <Composer pane={pane} />}
+      {view.status === "blocked" ? <BlockedPanel pane={pane} view={view} /> : <Composer pane={pane} agent={view.agent} />}
     </div>
   );
 }
