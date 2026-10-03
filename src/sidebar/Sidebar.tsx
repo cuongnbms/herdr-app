@@ -42,7 +42,9 @@ export function SessionRow({ node, bookmark }: { node: RSession; bookmark?: bool
   const onMenu = (e: MouseEvent) =>
     a?.menu(
       e,
-      session.running
+      !online
+        ? [bookmarkItem]
+        : session.running
         ? [
             { label: "New workspace…", onSelect: () => a.newWorkspace(machineId, session.name) },
             { label: "Stop session", onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },

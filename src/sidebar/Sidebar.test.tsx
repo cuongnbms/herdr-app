@@ -74,5 +74,9 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByText("default"));
     expect(useApp.getState().viewed).toBeNull();
     expect(row("default").getAttribute("aria-disabled")).toBe("true");
+    fireEvent.contextMenu(screen.getByText("default"));
+    expect(screen.getByRole("menuitem", { name: "Bookmark" })).toBeTruthy();
+    for (const name of ["Delete session…", "Start session", "Stop session", "New workspace…"])
+      expect(screen.queryByRole("menuitem", { name })).toBeNull();
   });
 });

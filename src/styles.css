@@ -275,7 +275,7 @@ kbd {
 .title, .mono { font-family: var(--mono); font-size: 12px; }
 .agent { margin-left: auto; color: var(--fg-3); font-size: 11px; }
 .machine.offline > .row, .machine.offline > .row .label { color: var(--fg-3); }
-.session.offline .row { color: var(--fg-3); opacity: .5; }
+.session.offline .row { color: var(--fg-3); opacity: .5; cursor: default; }
 .row .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge {
   display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-left: auto;
