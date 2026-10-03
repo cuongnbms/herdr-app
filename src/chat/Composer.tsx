@@ -6,6 +6,7 @@ import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
 import { readDraft, writeDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
+import { useClaudeSuggestion } from "./useClaudeSuggestion";
 import { useCompletions } from "./useCompletions";
 
 // Key names verified against herdr's key parser (pane.send_keys accepts esc, ctrl+c,
@@ -67,6 +68,12 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
   // Sending clears the text and a failed send restores it, so the draft follows both.
   useEffect(() => writeDraft(key, text), [key, text]);
+
+  const [sending, setSending] = useState(false);
+  // Read only while the box is empty (that is when the suggestion shows, and Tab takes it), and
+  // not while a send is on its way: Claude's box would still show the old suggestion.
+  const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending);
+  const offered = text === "" ? suggestion : null;
 
   const found = activeTrigger(text, caret, { skills: agent === "codex" });
   const trigger = found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
@@ -162,14 +169,19 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
     const sentImages = images;
     setText("");
     setImages([]);
+    // The suggestion was for the turn this send answers.
+    clearSuggestion();
+    setSending(true);
     // Optimistic clear; restore the draft if the prompt did not go through (unless the user typed meanwhile).
-    submit(sent, sentImages.map((a) => a.path as string)).then(
-      () => sentImages.forEach(revoke),
-      () => {
-        setText((cur) => (cur === "" ? sent : cur));
-        setImages((cur) => (cur.length === 0 ? sentImages : (sentImages.forEach(revoke), cur)));
-      },
-    );
+    submit(sent, sentImages.map((a) => a.path as string))
+      .then(
+        () => sentImages.forEach(revoke),
+        () => {
+          setText((cur) => (cur === "" ? sent : cur));
+          setImages((cur) => (cur.length === 0 ? sentImages : (sentImages.forEach(revoke), cur)));
+        },
+      )
+      .finally(() => setSending(false));
   };
 
   return (
@@ -202,7 +214,11 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
           ref={box}
           value={text}
           rows={2}
-          placeholder="Message the agent…  (Enter to send, Shift+Enter for newline, paste images)"
+          placeholder={
+            offered
+              ? `${offered}  (Tab to use)`
+              : "Message the agent…  (Enter to send, Shift+Enter for newline, paste images)"
+          }
           onChange={(e) => {
             setText(e.target.value);
             setCaret(e.target.selectionStart);
@@ -234,6 +250,14 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
                 e.preventDefault();
                 return choose(current);
               }
+            }
+            // After the completion list: Tab takes the suggestion into the empty box, as in Claude's own input.
+            if (offered && e.key === "Tab" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              setText(offered);
+              setCaret(offered.length);
+              requestAnimationFrame(() => box.current?.setSelectionRange(offered.length, offered.length));
+              return;
             }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

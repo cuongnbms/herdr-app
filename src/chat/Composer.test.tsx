@@ -9,6 +9,7 @@ vi.mock("../lib/ipc", () => ({
 import { completeCommands, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
 import { Composer } from "./Composer";
 import { clearCompletionCache } from "./useCompletions";
+import { SUGGESTION_POLL_MS } from "./useClaudeSuggestion";
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
 const png = () => new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
 const sendButton = () => screen.getByRole<HTMLButtonElement>("button", { name: "Send" });
@@ -152,6 +153,87 @@ describe("Composer", () => {
     render(<Composer pane={pane} agent="claude" />);
     paste(screen.getByRole("textbox"), [], "hello");
     expect(imageSaveTemp).not.toHaveBeenCalled();
+  });
+});
+
+const RULE = "\u001b[38;2;136;136;136m" + "─".repeat(60) + "\u001b[0m";
+const claudeScreen = (suggestion: string) => ["● done", RULE, `❯ \u001b[2m${suggestion}\u001b[0m`, RULE, "  ⏵⏵ accept edits on"].join("\r\n");
+const reads = () => vi.mocked(herdrCall).mock.calls.filter((c) => c[2] === "pane.read");
+
+describe("Composer suggestion", () => {
+  beforeEach(() => {
+    vi.mocked(herdrCall).mockImplementation(async (_m, _s, method) =>
+      method === "pane.read" ? { text: claudeScreen("run the tests again") } : {},
+    );
+  });
+
+  it("shows Claude's suggestion as the placeholder and takes it with Tab", async () => {
+    render(<Composer pane={pane} agent="claude" status="done" />);
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await waitFor(() => expect(box.placeholder).toContain("run the tests again"));
+    expect(reads()[0][3]).toEqual({ pane_id: "w1:p1", source: "visible", format: "ansi", strip_ansi: false });
+    const tab = fireEvent.keyDown(box, { key: "Tab" });
+    expect(tab).toBe(false);
+    expect(box.value).toBe("run the tests again");
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "run the tests again" });
+  });
+
+  it("does not read the old suggestion back while a send is on its way", async () => {
+    let finish!: () => void;
+    render(<Composer pane={pane} agent="claude" status="idle" />);
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await waitFor(() => expect(box.placeholder).toContain("run the tests again"));
+    vi.mocked(herdrCall).mockImplementation(async (_m, _s, method) => {
+      if (method === "pane.read") return { text: claudeScreen("run the tests again") };
+      await new Promise<void>((r) => (finish = r));
+      return {};
+    });
+    const before = reads().length;
+    fireEvent.change(box, { target: { value: "something else" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await act(async () => {});
+    expect(reads()).toHaveLength(before);
+    expect(box.placeholder).not.toContain("run the tests again");
+    await act(async () => finish());
+  });
+
+  it("leaves Tab alone while something is typed", async () => {
+    render(<Composer pane={pane} agent="claude" status="idle" />);
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await waitFor(() => expect(box.placeholder).toContain("run the tests again"));
+    fireEvent.change(box, { target: { value: "my own" } });
+    expect(fireEvent.keyDown(box, { key: "Tab" })).toBe(true);
+    expect(box.value).toBe("my own");
+  });
+
+  it("reads again while Claude waits, and drops the suggestion once it works", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<Composer pane={pane} agent="claude" status="idle" />);
+      await act(async () => {});
+      expect(reads()).toHaveLength(1);
+      vi.mocked(herdrCall).mockImplementation(async (_m, _s, method) =>
+        method === "pane.read" ? { text: claudeScreen("commit it") } : {},
+      );
+      await act(async () => vi.advanceTimersByTime(SUGGESTION_POLL_MS));
+      expect(reads()).toHaveLength(2);
+      const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+      expect(box.placeholder).toContain("commit it");
+
+      rerender(<Composer pane={pane} agent="claude" status="working" />);
+      expect(box.placeholder).not.toContain("commit it");
+      await act(async () => vi.advanceTimersByTime(SUGGESTION_POLL_MS * 3));
+      expect(reads()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads no suggestion for other agents", async () => {
+    render(<Composer pane={pane} agent="codex" status="idle" />);
+    await act(async () => {});
+    expect(reads()).toHaveLength(0);
   });
 });
 
