@@ -53,6 +53,8 @@ pub fn run() {
             commands::chat_locate,
             commands::chat_page,
             commands::chat_close,
+            commands::complete_commands,
+            commands::complete_files,
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,
