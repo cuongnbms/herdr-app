@@ -14,7 +14,17 @@ type Props = Record<string, unknown>;
 const rectZone = (e: DragEvent, row: "session" | "group"): Zone =>
   dropZone(e.currentTarget.getBoundingClientRect(), e.clientY, row);
 
-const leftRow = (e: DragEvent) => !e.currentTarget.contains(e.relatedTarget as Node | null);
+/** True when the pointer is outside the row; does not rely on `relatedTarget`, which WebKit may leave null. */
+const leftRow = (e: DragEvent) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+};
+
+/** A drop ends the drag even when the source row was remounted and never gets its `dragend`. */
+const endDrag = (s: DragState) => {
+  s.setDragging(null);
+  s.setIndicator(() => null);
+};
 
 /** Marks `id` as the only row with an indicator (no state change when it already is). */
 const show = (s: DragState, id: string, zone: Zone) =>
@@ -77,16 +87,17 @@ export function useTreeRowDnd(ref: NodeRef, id: string, group?: { open: boolean;
   const onDragOver = (e: DragEvent) => {
     const d = nodeDrag();
     if (!d) return;
-    const zone = rectZone(e, ref.kind);
-    if (canMove(useLayout.getState().layout, d.ref, targetFor(zone))) {
+    const target = targetFor(rectZone(e, ref.kind));
+    const ok = canMove(useLayout.getState().layout, d.ref, target);
+    if (ok) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-      show(s, id, zone);
+      show(s, id, target.kind);
     } else {
       e.dataTransfer.dropEffect = "none";
       hide(s, id);
     }
-    if (ref.kind === "group" && group && !group.open && timer.current === null) {
+    if (ok && ref.kind === "group" && group && !group.open && timer.current === null) {
       const key = `group:${ref.id}`;
       timer.current = setTimeout(() => {
         timer.current = null;
@@ -106,7 +117,7 @@ export function useTreeRowDnd(ref: NodeRef, id: string, group?: { open: boolean;
     },
     onDrop: (e: DragEvent) => {
       const d = nodeDrag();
-      hide(s, id);
+      endDrag(s);
       clearTimer();
       if (!d) return;
       e.preventDefault();
@@ -134,7 +145,7 @@ export function useTreeEndDnd(): Props {
     onDragLeave: (e: DragEvent) => leftRow(e) && hide(s, "tree-end"),
     onDrop: (e: DragEvent) => {
       const d = nodeDrag();
-      hide(s, "tree-end");
+      endDrag(s);
       if (!d) return;
       e.preventDefault();
       moveTo(d.ref, target);
@@ -149,7 +160,13 @@ export function useBookmarkRowDnd(key: SessionKey, nextKey: SessionKey | null): 
   const id = `bookmark:${key}`;
   const bookmarkDrag = () => (s.dragging?.kind === "bookmark" ? s.dragging : null);
   const onDragOver = (e: DragEvent) => {
-    if (!bookmarkDrag()) return;
+    if (!bookmarkDrag()) {
+      // Bookmark rows take only Bookmark drags; keep a Session drag from reaching the section.
+      e.stopPropagation();
+      if (s.dragging) e.dataTransfer.dropEffect = "none";
+      hide(s, id);
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
@@ -162,10 +179,10 @@ export function useBookmarkRowDnd(key: SessionKey, nextKey: SessionKey | null): 
     onDragLeave: (e: DragEvent) => leftRow(e) && hide(s, id),
     onDrop: (e: DragEvent) => {
       const d = bookmarkDrag();
-      hide(s, id);
+      endDrag(s);
+      e.stopPropagation();
       if (!d) return;
       e.preventDefault();
-      e.stopPropagation();
       const before = rectZone(e, "session") === "before" ? key : nextKey;
       useLayout.getState().update((l) => moveBookmark(l, d.key, before));
     },
@@ -192,7 +209,7 @@ export function useBookmarksDropDnd(): Props {
     onDragLeave: (e: DragEvent) => leftRow(e) && hide(s, "bookmarks"),
     onDrop: (e: DragEvent) => {
       const ref = sessionDrag();
-      hide(s, "bookmarks");
+      endDrag(s);
       if (!ref) return;
       e.preventDefault();
       useLayout.getState().update((l) => setBookmarked(l, ref.key, true));

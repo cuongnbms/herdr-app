@@ -952,4 +952,4 @@ kbd {
 .row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
 .row.drop-into, section.drop-into { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .tree-end { min-height: 24px; border-radius: var(--r-sm); }
-.tree-end.drop-into { box-shadow: inset 0 2px 0 var(--accent); }
+.tree-end.drop-into { background: color-mix(in srgb, var(--accent) 18%, transparent); }

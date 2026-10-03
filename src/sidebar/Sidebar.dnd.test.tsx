@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ sessionStart: vi.fn().mockResolvedValue(undefined) }));
 import { useApp } from "../store/app";
@@ -39,6 +39,34 @@ describe("Sidebar drag and drop", () => {
     expect((tree[0] as GroupNode).children).toEqual([{ kind: "session", key: ky }]);
     expect(tree[1]).toEqual({ kind: "session", key: kx });
     expect(document.querySelector(".drop-into, .drop-before, .drop-after")).toBeNull();
+    // The dragged row was remounted under the group, so its dragend never reached React.
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).toBeNull();
+  });
+  it("does not bookmark a session dropped on a bookmark row", () => {
+    useLayout.setState({ layout: { tree: [], bookmarks: [ky] } });
+    render(<Sidebar />);
+    const bm = screen.getByRole("region", { name: "Bookmarks" });
+    const before = useLayout.getState().layout;
+    drag(rowOf("x"), within(bm).getByText("y").closest("button")!);
+    expect(useLayout.getState().layout).toBe(before);
+  });
+  it("shows an into indicator and inserts first when dropping below an open group with children", () => {
+    useLayout.setState({ layout: { tree: [{ kind: "group", id: "a", label: "A", children: [{ kind: "session", key: ky }] }], bookmarks: [] } });
+    render(<Sidebar />);
+    const dataTransfer = dt();
+    const g = rowOf("A");
+    g.getBoundingClientRect = () => ({ top: 0, height: 100, bottom: 100, left: 0, right: 100, width: 100, x: 0, y: 0, toJSON() {} });
+    fireEvent.dragStart(rowOf("x"), { dataTransfer });
+    // jsdom has no DragEvent, so clientY must be set by hand.
+    const over = createEvent.dragOver(g, { dataTransfer });
+    Object.defineProperty(over, "clientY", { value: 90 });
+    fireEvent(g, over);
+    expect(g.className).toContain("drop-into");
+    const drop = createEvent.drop(g, { dataTransfer });
+    Object.defineProperty(drop, "clientY", { value: 90 });
+    fireEvent(g, drop);
+    const tree = useLayout.getState().layout.tree;
+    expect((tree[0] as GroupNode).children).toEqual([{ kind: "session", key: kx }, { kind: "session", key: ky }]);
   });
   it("refuses to drop a group into its own child", () => {
     useLayout.setState({ layout: { tree: [{ kind: "group", id: "a", label: "A", children: [{ kind: "group", id: "b", label: "B", children: [] }] }], bookmarks: [] } });

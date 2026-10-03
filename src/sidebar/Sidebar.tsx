@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DragContext, useDragState } from "./dnd";
 import type { Drag, Indicator } from "./dnd";
 import { indicatorClass, useBookmarkRowDnd, useBookmarksDropDnd, useTreeRowDnd } from "./useRowDnd";
@@ -221,6 +221,20 @@ export function Sidebar() {
   const [dragging, setDragging] = useState<Drag | null>(null);
   const [indicator, setIndicator] = useState<Indicator | null>(null);
   const dragState = useMemo(() => ({ dragging, setDragging, indicator, setIndicator }), [dragging, indicator]);
+  // Safety net: the source row can be remounted by a drop, so its own `dragend` may never reach React.
+  useEffect(() => {
+    if (!dragging) return;
+    const end = () => {
+      setDragging(null);
+      setIndicator(null);
+    };
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, [dragging]);
   // Empty Bookmarks stay hidden, except while a Session is dragged so a first Bookmark can be dropped.
   const draggingSession = dragging?.kind === "node" && dragging.ref.kind === "session";
   return (
