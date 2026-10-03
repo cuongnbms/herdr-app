@@ -1,6 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useReducer, useRef } from "react";
@@ -15,13 +14,14 @@ import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 import { applyUnicode11 } from "./unicode";
+import { forgetWebgl, showWebgl } from "./webgl";
 
 interface Props {
   pane: PaneRef;
   terminalId: string;
 }
 
-function createEntry() {
+function createEntry(key: string) {
   const term = new Terminal({
     cursorBlink: true,
     scrollback: 5000,
@@ -39,6 +39,7 @@ function createEntry() {
     term,
     fit,
     cleanup: () => {
+      forgetWebgl(key);
       unwatchFont();
       unwatchTheme();
     },
@@ -71,31 +72,37 @@ export function TerminalLens({ pane, terminalId }: Props) {
     if (!container) return;
     const key = { machine_id: pane.machine_id, session: pane.session, terminal_id: terminalId };
     let live = true;
-    const { term, fit } = getOrCreate(cacheKey, createEntry);
-    if (!term.element) {
-      term.open(container);
-      // The WebGL atlas rasterizes ASCII up front, so the font must be a web font first
-      // (see ensureTermFont); the DOM renderer covers the wait.
-      void ensureTermFont(useSettings.getState().terminalFontFamily).then(() => {
-        try {
-          const gl = new WebglAddon();
-          gl.onContextLoss(() => {
-            console.warn("xterm WebGL context lost; falling back to DOM renderer");
-            gl.dispose();
-          });
-          term.loadAddon(gl);
-        } catch (e) {
-          console.warn("xterm WebGL unavailable; using DOM renderer", e);
-        }
-      });
-    } else {
-      container.appendChild(term.element);
-    }
+    const { term, fit } = getOrCreate(cacheKey, () => createEntry(cacheKey));
+    const revealed = !!term.element;
+    if (revealed) container.appendChild(term.element!);
+    else term.open(container);
     try {
       fit.fit();
     } catch {
       /* container not measurable yet */
     }
+    let frame = 0;
+    // The WebGL atlas rasterizes ASCII up front, so the font must be a web font first
+    // (see ensureTermFont); the DOM renderer covers the wait.
+    void ensureTermFont(useSettings.getState().terminalFontFamily).then(() => {
+      if (!live) return;
+      showWebgl(cacheKey, term);
+      if (!revealed) return;
+      // Cells parsed while hidden, or under the other renderer's metrics, can composite stale
+      // pixels; redraw once layout has settled.
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          if (!live) return;
+          term.clearTextureAtlas();
+          term.refresh(0, term.rows - 1);
+          try {
+            fit.fit();
+          } catch {
+            /* ignore */
+          }
+        });
+      });
+    });
 
     const open = (takeover: boolean) => {
       // Data and detach handling deliberately ignore `live`: the cached xterm must keep
@@ -144,6 +151,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
 
     return () => {
       live = false;
+      cancelAnimationFrame(frame);
       clearTimeout(timer);
       inputQueue.dispose();
       ro.disconnect();
