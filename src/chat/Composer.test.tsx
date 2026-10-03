@@ -17,7 +17,7 @@ const paste = (box: HTMLElement, files: File[], text = "") =>
   fireEvent.paste(box, { clipboardData: { files, getData: () => text } });
 
 beforeEach(() => {
-  vi.mocked(herdrCall).mockClear();
+  vi.mocked(herdrCall).mockReset().mockResolvedValue({});
   vi.mocked(imageSaveTemp).mockReset().mockResolvedValue("/tmp/herdr-paste-1.png");
   clearCompletionCache();
   localStorage.clear();

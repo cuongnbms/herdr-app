@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ChatItemView } from "./ChatItemView";
 describe("ChatItemView", () => {
@@ -37,12 +37,12 @@ describe("ChatItemView", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     const { unmount } = render(<ChatItemView item={{ kind: "user", text: "fix the bug" }} copy />);
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenLastCalledWith("fix the bug");
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("fix the bug"));
     expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
     unmount();
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Done **now**" }} copy />);
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenLastCalledWith("Done **now**");
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("Done **now**"));
   });
   it("offers no copy unless asked (narration in a work block)", () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Looking at the file" }} />);

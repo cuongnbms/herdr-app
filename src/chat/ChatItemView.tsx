@@ -150,7 +150,10 @@ function CopyButton({ text }: { text: string }) {
       aria-label={copied ? "Copied" : "Copy"}
       title={copied ? "Copied" : "Copy"}
       onClick={() =>
-        navigator.clipboard.writeText(text).then(
+        // Through a promise, so a webview without the Clipboard API fails here, not in the handler.
+        Promise.resolve()
+          .then(() => navigator.clipboard.writeText(text))
+          .then(
           () => setCopied(true),
           (e) => console.error("copy failed", e),
         )

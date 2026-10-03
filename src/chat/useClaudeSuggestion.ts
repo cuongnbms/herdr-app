@@ -27,8 +27,10 @@ export function useClaudeSuggestion(pane: PaneRef, agent: string | null, status:
   useEffect(() => {
     if (!waiting || !reading) return;
     let live = true;
-    const read = () =>
-      herdrCall(pane.machine_id, pane.session, "pane.read", {
+    const read = () => {
+      // No reads while the window is in the background; the next tick after it returns reads.
+      if (document.hidden) return;
+      return herdrCall(pane.machine_id, pane.session, "pane.read", {
         pane_id: pane.pane_id,
         source: "visible",
         format: "ansi",
@@ -41,6 +43,7 @@ export function useClaudeSuggestion(pane: PaneRef, agent: string | null, status:
         // Only a nicety: a failed read leaves no suggestion.
         () => live && setSuggestion(null),
       );
+    };
     void read();
     const timer = setInterval(read, SUGGESTION_POLL_MS);
     return () => {
