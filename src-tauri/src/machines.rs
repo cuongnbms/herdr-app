@@ -278,6 +278,8 @@ impl Drop for AbortOnDrop {
 struct Throttle {
     last: Option<Instant>,
     pending: bool,
+    /// The view last emitted; an equal one is not emitted (nor serialized) again.
+    sent: Option<MachineView>,
 }
 
 pub struct MachineManager {
@@ -496,9 +498,16 @@ impl MachineManager {
             .iter()
             .find(|m| m.cfg.id == id && !m.removing)
             .map(Machine::view);
-        if let Some(v) = view {
-            (self.emit)(UiEvent::Machine(v));
+        let Some(v) = view else { return };
+        {
+            let mut t = self.throttle.lock().unwrap();
+            let e = t.entry(id.to_string()).or_default();
+            if e.sent.as_ref() == Some(&v) {
+                return;
+            }
+            e.sent = Some(v.clone());
         }
+        (self.emit)(UiEvent::Machine(v));
     }
 
     /// Emit the Machine's view at most once per `EMIT_THROTTLE`; the latest state wins
@@ -2097,6 +2106,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unchanged_view_is_not_emitted_again() {
+        let states: Arc<Mutex<Vec<MachineState>>> = Arc::default();
+        let st = states.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    st.lock().unwrap().push(v.state)
+                }
+            }),
+        );
+        mgr.set_state("local", MachineState::Probing, None);
+        mgr.set_state("local", MachineState::Probing, None);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await; // past any trailing emit
+        mgr.set_state("local", MachineState::Probing, None);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        mgr.set_state("local", MachineState::Connected, None);
+        assert_eq!(
+            *states.lock().unwrap(),
+            [MachineState::Probing, MachineState::Connected]
+        );
+    }
+
+    #[tokio::test]
     async fn remove_emits_nothing_for_the_removed_machine() {
         let ids: Arc<Mutex<Vec<String>>> = Arc::default();
         let rec = ids.clone();
@@ -2157,6 +2191,63 @@ mod tests {
             state("local"),
             Some((MachineState::Disconnected, None)),
             "local is connected separately"
+        );
+    }
+
+    /// Refetches of an unchanged snapshot emit nothing; a real change still does.
+    #[tokio::test]
+    async fn emits_only_changed_views() {
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
+        let emits: Arc<Mutex<Vec<MachineView>>> = Arc::default();
+        let ev = emits.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    ev.lock().unwrap().push(v)
+                }
+            }),
+        );
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        assert!(wait_for(|| f.calls_of("events.subscribe") >= 1).await);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        emits.lock().unwrap().clear();
+        for i in 0..5 {
+            let before = f.calls_of("session.snapshot");
+            mgr.call(
+                "local",
+                "default",
+                "pane.rename",
+                json!({"pane_id":"w1:p1","label":format!("x{i}")}),
+            )
+            .await
+            .unwrap();
+            assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        f.emit(
+            "pane.agent_status_changed",
+            json!({"pane_id":"w2:p1","workspace_id":"w2","agent_status":"done"}),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let emits = emits.lock().unwrap();
+        assert_eq!(emits.len(), 1, "machine emits: {}", emits.len());
+        assert_eq!(
+            emits[0].sessions[0].workspaces[1].status,
+            crate::herdr::types::AgentStatus::Done
         );
     }
 
