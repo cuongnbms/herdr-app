@@ -5,7 +5,7 @@ import { chatPage } from "../lib/ipc";
 import { paneKey, type AppError, type ChatEvent, type ChatItem, type Located, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { onOpenFailure, openChat, watchMachine } from "./chatSession";
-import { BlockedPanel } from "./BlockedPanel";
+import { PromptPanel } from "./PromptPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
 import { Composer } from "./Composer";
@@ -195,7 +195,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         </button>
       )}
       <WorkingIndicator status={view.status} />
-      {view.status === "blocked" ? <BlockedPanel pane={pane} view={view} /> : <Composer pane={pane} agent={view.agent} />}
+      {view.status === "blocked" ? <PromptPanel pane={pane} view={view} /> : <Composer pane={pane} agent={view.agent} />}
     </div>
   );
 }
