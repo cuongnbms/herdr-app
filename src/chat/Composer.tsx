@@ -321,7 +321,7 @@ export function Composer({
             ))}
           </div>
           {label && (
-            <span className="composer-model" title="Model · reasoning effort">
+            <span className="composer-model" title="Model · reasoning effort · context tokens">
               {label}
             </span>
           )}

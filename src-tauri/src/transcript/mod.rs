@@ -33,11 +33,13 @@ pub struct SkillUse {
     pub path: String,
 }
 
-/// The Model and Reasoning effort an Agent reports in its Transcript.
+/// The Model, Reasoning effort and context size an Agent reports in its Transcript.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ChatMeta {
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// Tokens the last main-thread reply took in and gave out: how full the context is.
+    pub context_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -116,6 +118,7 @@ pub enum ChatEvent {
     Meta {
         model: Option<String>,
         effort: Option<String>,
+        context_tokens: Option<u64>,
     },
 }
 
@@ -128,7 +131,7 @@ pub enum ParserOutput {
 
 pub trait Parser: Send {
     fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput;
-    /// The latest Model and Reasoning effort seen so far.
+    /// The latest Model, Reasoning effort and context size seen so far.
     fn meta(&self) -> ChatMeta {
         ChatMeta::default()
     }
@@ -394,11 +397,12 @@ mod tests {
         let v = serde_json::to_value(ChatEvent::Meta {
             model: Some("m".into()),
             effort: None,
+            context_tokens: Some(42),
         })
         .unwrap();
         assert_eq!(
             v,
-            serde_json::json!({ "type": "meta", "model": "m", "effort": null })
+            serde_json::json!({ "type": "meta", "model": "m", "effort": null, "context_tokens": 42 })
         );
     }
 

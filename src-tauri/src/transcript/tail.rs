@@ -130,6 +130,7 @@ impl State {
             (self.sink)(ChatEvent::Meta {
                 model: meta.model,
                 effort: meta.effort,
+                context_tokens: meta.context_tokens,
             });
         }
     }
@@ -273,7 +274,7 @@ mod tests {
         fn meta(&self) -> crate::transcript::ChatMeta {
             crate::transcript::ChatMeta {
                 model: self.model.clone(),
-                effort: None,
+                ..Default::default()
             }
         }
     }

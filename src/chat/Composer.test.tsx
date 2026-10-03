@@ -447,13 +447,13 @@ describe("Composer /model to pi", () => {
 });
 
 describe("Composer model label", () => {
-  it("shows the Model and effort when known", () => {
-    render(<Composer pane={pane} agent="claude" meta={{ model: "claude-opus-5-5", effort: "high" }} />);
-    const label = screen.getByTitle("Model · reasoning effort");
-    expect(label.textContent).toBe("claude-opus-5-5 · high");
+  it("shows the Model, effort and context tokens when known", () => {
+    render(<Composer pane={pane} agent="claude" meta={{ model: "claude-opus-5-5", effort: "high", context_tokens: 48612 }} />);
+    const label = screen.getByTitle("Model · reasoning effort · context tokens");
+    expect(label.textContent).toBe("claude-opus-5-5 · high · 48.6k");
   });
   it("shows nothing when neither is known", () => {
-    render(<Composer pane={pane} agent="claude" meta={{ model: null, effort: null }} />);
-    expect(screen.queryByTitle("Model · reasoning effort")).toBeNull();
+    render(<Composer pane={pane} agent="claude" meta={{ model: null, effort: null, context_tokens: null }} />);
+    expect(screen.queryByTitle("Model · reasoning effort · context tokens")).toBeNull();
   });
 });

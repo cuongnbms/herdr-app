@@ -87,6 +87,9 @@ impl Parser for ClaudeParser {
             if effort.is_some() {
                 self.meta.effort = effort;
             }
+            if let Some(n) = context_tokens(v.get("message").and_then(|m| m.get("usage"))) {
+                self.meta.context_tokens = Some(n);
+            }
         }
         let ts = v
             .get("timestamp")
@@ -233,6 +236,22 @@ impl Parser for ClaudeParser {
     fn meta(&self) -> ChatMeta {
         self.meta.clone()
     }
+}
+
+/// A reply's whole context: the prompt (fresh, cached and newly cached) plus its output.
+/// None when the usage is missing or all zero, as on a synthetic reply.
+fn context_tokens(usage: Option<&Value>) -> Option<u64> {
+    let usage = usage?;
+    let n: u64 = [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens",
+    ]
+    .iter()
+    .filter_map(|k| usage.get(*k).and_then(Value::as_u64))
+    .sum();
+    (n > 0).then_some(n)
 }
 
 #[cfg(test)]
@@ -505,9 +524,23 @@ mod tests {
             p.meta(),
             ChatMeta {
                 model: Some("claude-opus-5-5".into()),
-                effort: Some("high".into())
+                effort: Some("high".into()),
+                context_tokens: None,
             }
         );
+    }
+    #[test]
+    fn reads_context_tokens_from_the_last_main_thread_usage() {
+        let lines = [
+            serde_json::json!({"type":"assistant","message":{"model":"claude-opus-5-5","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":100,"output_tokens":5}}}),
+            serde_json::json!({"type":"assistant","message":{"model":"claude-opus-5-5","content":[],"usage":{"input_tokens":2,"cache_creation_input_tokens":20,"cache_read_input_tokens":300,"output_tokens":7}}}),
+            serde_json::json!({"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-4-5","content":[],"usage":{"input_tokens":9000,"output_tokens":1}}}),
+            serde_json::json!({"type":"assistant","message":{"model":"<synthetic>","content":[],"usage":{"input_tokens":0,"output_tokens":0}}}),
+        ]
+        .map(|v| v.to_string())
+        .join("\n");
+        let (_, _, p) = run_with(&lines);
+        assert_eq!(p.meta().context_tokens, Some(329));
     }
     #[test]
     fn no_effort_field_leaves_it_unset() {
@@ -516,7 +549,7 @@ mod tests {
             p.meta(),
             ChatMeta {
                 model: Some("claude-opus-5-5".into()),
-                effort: None
+                ..Default::default()
             }
         );
     }

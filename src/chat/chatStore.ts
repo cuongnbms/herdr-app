@@ -7,7 +7,7 @@ export interface ChatState {
   meta: ChatMeta;
 }
 
-export const emptyChat: ChatState = { items: [], total: 0, error: null, meta: { model: null, effort: null } };
+export const emptyChat: ChatState = { items: [], total: 0, error: null, meta: { model: null, effort: null, context_tokens: null } };
 
 export function reduce(state: ChatState, ev: ChatEvent): ChatState {
   switch (ev.type) {
@@ -16,7 +16,7 @@ export function reduce(state: ChatState, ev: ChatEvent): ChatState {
     case "append":
       return { ...state, items: [...state.items, ...ev.items], total: state.total + ev.items.length };
     case "meta":
-      return { ...state, meta: { model: ev.model, effort: ev.effort } };
+      return { ...state, meta: { model: ev.model, effort: ev.effort, context_tokens: ev.context_tokens } };
     case "error":
       return { ...state, error: ev.error };
   }

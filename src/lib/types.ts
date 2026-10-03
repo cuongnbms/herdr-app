@@ -85,8 +85,8 @@ export type AttachEvent =
 
 export interface ImageRef { ref: string; media_type: string }
 export interface SkillUse { name: string; path: string }
-/** The Model and Reasoning effort the Transcript last named. */
-export interface ChatMeta { model: string | null; effort: string | null }
+/** The Model, Reasoning effort and context size (tokens) the Transcript last named. */
+export interface ChatMeta { model: string | null; effort: string | null; context_tokens: number | null }
 
 /** `ts`: when the Transcript record was written (ISO 8601), if it says. */
 export type ChatItem = (
@@ -101,7 +101,7 @@ export type ChatItem = (
 export type ChatEvent =
   | { type: "reset"; items: ChatItem[]; total: number }
   | { type: "append"; items: ChatItem[] }
-  | { type: "meta"; model: string | null; effort: string | null }
+  | ({ type: "meta" } & ChatMeta)
   | { type: "error"; error: AppError };
 
 export interface Located {

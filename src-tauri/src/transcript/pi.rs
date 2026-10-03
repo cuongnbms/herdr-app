@@ -49,7 +49,7 @@ impl PiParser {
         }
     }
 
-    /// Track the latest Model and Reasoning effort, in file order whatever the branch.
+    /// Track the latest Model, Reasoning effort and context size, in file order whatever the branch.
     fn read_meta(&mut self, v: &Value) {
         let label = |x: Option<&Value>| x.and_then(Value::as_str).and_then(meta_label);
         match v.get("type").and_then(Value::as_str) {
@@ -68,6 +68,14 @@ impl PiParser {
                 if msg.and_then(|m| m.get("role")).and_then(Value::as_str) == Some("assistant") {
                     if let Some(m) = label(msg.and_then(|m| m.get("model"))) {
                         self.meta.model = Some(m);
+                    }
+                    // A failed reply reports all zeros: keep the last real count.
+                    let total = msg
+                        .and_then(|m| m.get("usage"))
+                        .and_then(|u| u.get("totalTokens"))
+                        .and_then(Value::as_u64);
+                    if let Some(n) = total.filter(|&n| n > 0) {
+                        self.meta.context_tokens = Some(n);
                     }
                 }
             }
@@ -562,7 +570,8 @@ mod tests {
         for l in [
             r#"{"type":"model_change","id":"m1","parentId":null,"provider":"anthropic","modelId":"claude-sonnet-5-5"}"#,
             r#"{"type":"thinking_level_change","id":"t1","parentId":"m1","thinkingLevel":"off"}"#,
-            r#"{"type":"message","id":"a","parentId":"t1","message":{"role":"assistant","model":"gpt-5","content":[]}}"#,
+            r#"{"type":"message","id":"a","parentId":"t1","message":{"role":"assistant","model":"gpt-5","content":[],"usage":{"input":241,"output":119,"cacheRead":82560,"totalTokens":82920}}}"#,
+            r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","model":"gpt-5","content":[],"usage":{"input":0,"output":0,"totalTokens":0}}}"#,
             r#"{"type":"model_change","id":"m2","parentId":"a","modelId":"<none>"}"#,
         ] {
             p.push_line(l, &mut sink);
@@ -571,7 +580,8 @@ mod tests {
             p.meta(),
             ChatMeta {
                 model: Some("gpt-5".into()),
-                effort: Some("off".into())
+                effort: Some("off".into()),
+                context_tokens: Some(82920),
             }
         );
     }

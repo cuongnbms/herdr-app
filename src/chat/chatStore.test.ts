@@ -14,9 +14,9 @@ describe("chat store", () => {
     expect(reduce(s, { type: "reset", items: [], total: 0 }).items).toEqual([]);
   });
   it("keeps the latest meta across resets", () => {
-    let s = reduce(emptyChat, { type: "meta", model: "m", effort: "high" });
-    expect(s.meta).toEqual({ model: "m", effort: "high" });
+    let s = reduce(emptyChat, { type: "meta", model: "m", effort: "high", context_tokens: 5 });
+    expect(s.meta).toEqual({ model: "m", effort: "high", context_tokens: 5 });
     s = reduce(s, { type: "reset", items: [], total: 0 });
-    expect(s.meta).toEqual({ model: "m", effort: "high" });
+    expect(s.meta).toEqual({ model: "m", effort: "high", context_tokens: 5 });
   });
 });
