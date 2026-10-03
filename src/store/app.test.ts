@@ -170,3 +170,49 @@ describe("layout pruning", () => {
     expect(kept()).toEqual([sessionKey("local", "x")]);
   });
 });
+
+describe("switching session", () => {
+  const s = machine.sessions[0];
+  const other = { ...s, name: "other", workspaces: [{ ...s.workspaces[0], workspace_id: "w2", tabs: [
+    { ...s.workspaces[0].tabs[0], tab_id: "w2:t1", panes: [
+      { ...s.workspaces[0].tabs[0].panes[0], pane_id: "w2:p1" },
+      { ...s.workspaces[0].tabs[0].panes[1], pane_id: "w2:p2" },
+    ] },
+  ] }] };
+  const empty = { ...s, name: "empty", workspaces: [] };
+  const two: MachineView = { ...machine, sessions: [s, other, empty] };
+  const pane = (session: string, pane_id: string) => ({ machine_id: "local", session, pane_id });
+  beforeEach(() => useApp.setState({ machines: { local: two }, order: ["local"], selected: null, viewed: null, lastPane: {} }));
+
+  it("opens the pane last selected in that session", () => {
+    useApp.getState().select(pane("other", "w2:p2"));
+    useApp.getState().select(pane("default", "w1:p1"));
+    useApp.getState().view({ machine_id: "local", session: "other" });
+    expect(useApp.getState().selected).toEqual(pane("other", "w2:p2"));
+  });
+
+  it("opens the session's first pane when none was selected there", () => {
+    useApp.getState().select(pane("default", "w1:p2"));
+    useApp.getState().view({ machine_id: "local", session: "other" });
+    expect(useApp.getState().selected).toEqual(pane("other", "w2:p1"));
+  });
+
+  it("opens the first pane when the remembered one is gone", () => {
+    useApp.setState({ lastPane: { "local/other": pane("other", "w2:p9") } });
+    useApp.getState().view({ machine_id: "local", session: "other" });
+    expect(useApp.getState().selected).toEqual(pane("other", "w2:p1"));
+  });
+
+  it("keeps the selection for a session without panes", () => {
+    useApp.getState().select(pane("default", "w1:p1"));
+    useApp.getState().view({ machine_id: "local", session: "empty" });
+    expect(useApp.getState().selected).toEqual(pane("default", "w1:p1"));
+    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "empty" });
+  });
+
+  it("keeps the selection when viewing its own session", () => {
+    useApp.getState().select(pane("default", "w1:p2"));
+    useApp.getState().view({ machine_id: "local", session: "default" });
+    expect(useApp.getState().selected).toEqual(pane("default", "w1:p2"));
+  });
+});

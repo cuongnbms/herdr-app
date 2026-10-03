@@ -45,6 +45,8 @@ export interface AppState {
   selected: PaneRef | null;
   /** The session listed in the Agents column. Selecting a pane views its session. Not persisted. */
   viewed: SessionRef | null;
+  /** The pane last selected in each session (by sessionKey), opened again when the session is viewed. Not persisted. */
+  lastPane: Record<string, PaneRef>;
   lens: Record<string, Lens>;
   expanded: Record<string, boolean>;
   /** One-line notes shown in the Terminal lens, e.g. after a Chat lens fallback. Not persisted. */
@@ -73,6 +75,7 @@ export const useApp = create<AppState>((set, get) => ({
   order: [],
   selected: null,
   viewed: null,
+  lastPane: {},
   lensNote: {},
   lensOverride: {},
   dashboardOpen: false,
@@ -126,9 +129,19 @@ export const useApp = create<AppState>((set, get) => ({
       selected: ref,
       dashboardOpen: ref ? false : s.dashboardOpen,
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
+      lastPane: ref ? { ...s.lastPane, [sessionKey(ref.machine_id, ref.session)]: ref } : s.lastPane,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
     })),
-  view: (ref) => set({ viewed: ref }),
+  // Viewing another session also opens its pane: the one last selected there, else its first.
+  view: (ref) => {
+    const s = get();
+    const sel = s.selected;
+    if (!ref || (sel && sel.machine_id === ref.machine_id && sel.session === ref.session)) return set({ viewed: ref });
+    const last = s.lastPane[sessionKey(ref.machine_id, ref.session)];
+    const pane = last && findPane(s.machines, last) ? last : firstPane(s.machines, ref);
+    if (pane) s.select(pane);
+    else set({ viewed: ref });
+  },
   setLensOverride: (key, lens) =>
     set((s) => {
       const { [key]: _old, ...rest } = s.lensOverride;
@@ -158,6 +171,17 @@ function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView
     }
   }
   return undefined;
+}
+
+function firstPane(machines: Record<string, MachineView>, ref: SessionRef): PaneRef | null {
+  const session = machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session);
+  for (const ws of session?.workspaces ?? []) {
+    for (const tab of ws.tabs) {
+      const pane = tab.panes[0];
+      if (pane) return { machine_id: ref.machine_id, session: ref.session, pane_id: pane.pane_id };
+    }
+  }
+  return null;
 }
 
 /** This machine's seen marks after a snapshot: only panes still done keep theirs, and the
