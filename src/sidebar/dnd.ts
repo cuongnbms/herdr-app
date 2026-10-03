@@ -29,3 +29,20 @@ export interface DragState {
 }
 export const DragContext = createContext<DragState | null>(null);
 export const useDragState = () => useContext(DragContext);
+
+/**
+ * With Tauri's native drag-drop off, WebKit loads a file dropped anywhere the page did not
+ * handle it. Accept only file drags at the document so they are swallowed; other drags keep
+ * their per-target accept/refuse behaviour.
+ */
+export function guardFileDrops(doc: Document = document): () => void {
+  const swallow = (e: DragEvent) => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+  };
+  doc.addEventListener("dragover", swallow);
+  doc.addEventListener("drop", swallow);
+  return () => {
+    doc.removeEventListener("dragover", swallow);
+    doc.removeEventListener("drop", swallow);
+  };
+}
