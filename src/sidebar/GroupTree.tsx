@@ -5,6 +5,8 @@ import { useActions } from "./actions";
 import { addGroup, deleteGroup, renameGroup, resolve, useLayout } from "./groups";
 import type { RGroup, RNode } from "./groups";
 import { Chevron, SessionRow } from "./Sidebar";
+import { useDragState } from "./dnd";
+import { indicatorClass, useTreeEndDnd, useTreeRowDnd } from "./useRowDnd";
 import { FolderIcon, PlusIcon } from "../ui/icons";
 
 function GroupRow({ group }: { group: RGroup }) {
@@ -12,6 +14,9 @@ function GroupRow({ group }: { group: RGroup }) {
   const open = useApp((s) => s.expanded[key] ?? true);
   const toggle = useApp((s) => s.toggle);
   const a = useActions();
+  const drag = useDragState();
+  const id = `group:${group.id}`;
+  const dnd = useTreeRowDnd({ kind: "group", id: group.id }, id, { open, hasChildren: group.children.length > 0 });
   const onMenu = (e: MouseEvent) =>
     a?.menu(e, [
       {
@@ -32,7 +37,13 @@ function GroupRow({ group }: { group: RGroup }) {
     ]);
   return (
     <li className="group">
-      <button className="row" aria-expanded={open} onClick={() => toggle(key, open)} onContextMenu={onMenu}>
+      <button
+        {...dnd}
+        className={"row" + indicatorClass(drag, id)}
+        aria-expanded={open}
+        onClick={() => toggle(key, open)}
+        onContextMenu={onMenu}
+      >
         <Chevron open={open} />
         <FolderIcon className="icon group-icon" />
         <span className="label">{group.label}</span>
@@ -56,11 +67,14 @@ export function GroupTree() {
   const layout = useLayout((s) => s.layout);
   const tree = useMemo(() => resolve(layout, machines, order).tree, [layout, machines, order]);
   const a = useActions();
+  const endDnd = useTreeEndDnd();
+  const drag = useDragState();
   return (
     <>
       <ul className="tree">
         {tree.map((n) => (n.kind === "group" ? <GroupRow key={n.id} group={n} /> : <SessionRow key={n.key} node={n} />))}
       </ul>
+      <div className={"tree-end" + indicatorClass(drag, "tree-end")} {...endDnd} />
       <button
         className="add-group"
         onClick={() => a?.rename("New group", "", async (label) => useLayout.getState().update((l) => addGroup(l, null, label).layout), "Create")}

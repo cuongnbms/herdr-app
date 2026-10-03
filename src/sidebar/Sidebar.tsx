@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import { DragContext, useDragState } from "./dnd";
+import type { Drag, Indicator } from "./dnd";
+import { indicatorClass, useBookmarkRowDnd, useBookmarksDropDnd, useTreeRowDnd } from "./useRowDnd";
 import type { MouseEvent } from "react";
 import {
   machineDisconnect,
@@ -27,13 +30,17 @@ export function Chevron({ open }: { open: boolean }) {
   return <ChevronIcon className={"icon chev" + (open ? " open" : "")} />;
 }
 
-export function SessionRow({ node, bookmark }: { node: RSession; bookmark?: boolean }) {
+export function SessionRow({ node, bookmark, nextKey = null }: { node: RSession; bookmark?: boolean; nextKey?: string | null }) {
   const { machine, session, key } = node;
   const machineId = machine.id;
   const viewed = useApp((s) => s.viewed?.machine_id === machineId && s.viewed.session === session.name);
   const view = useApp((s) => s.view);
   const bookmarked = useLayout((s) => s.layout.bookmarks.includes(key));
   const a = useActions();
+  const drag = useDragState();
+  const treeDnd = useTreeRowDnd({ kind: "session", key }, `session:${key}`);
+  const bookmarkDnd = useBookmarkRowDnd(key, nextKey);
+  const dnd = bookmark ? bookmarkDnd : treeDnd;
   const online = machine.state === "connected";
   const bookmarkItem = {
     label: bookmarked ? "Unbookmark" : "Bookmark",
@@ -77,7 +84,8 @@ export function SessionRow({ node, bookmark }: { node: RSession; bookmark?: bool
   return (
     <li className={"session" + (session.running ? "" : " stopped") + (online ? "" : " offline")}>
       <button
-        className={"row" + (viewed ? " active" : "") + hl(session.status)}
+        {...dnd}
+        className={"row" + (viewed ? " active" : "") + hl(session.status) + indicatorClass(drag, bookmark ? `bookmark:${key}` : `session:${key}`)}
         aria-label={session.running ? undefined : `Start ${session.name}`}
         aria-disabled={online ? undefined : true}
         onClick={onClick}
@@ -188,40 +196,53 @@ function SectionHeader({ id, label }: { id: string; label: string }) {
   );
 }
 
+function BookmarksSection({ bookmarks }: { bookmarks: RSession[] }) {
+  const open = useApp((s) => s.expanded["bookmarks"] ?? true);
+  const drag = useDragState();
+  const dnd = useBookmarksDropDnd();
+  return (
+    <section aria-label="Bookmarks" className={indicatorClass(drag, "bookmarks").trim()} {...dnd}>
+      <SectionHeader id="bookmarks" label="Bookmarks" />
+      {open && (
+        <ul className="tree">
+          {bookmarks.map((n, i) => <SessionRow key={n.key} node={n} bookmark nextKey={bookmarks[i + 1]?.key ?? null} />)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function Sidebar() {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
   const layout = useLayout((s) => s.layout);
   const bookmarks = useMemo(() => resolve(layout, machines, order).bookmarks, [layout, machines, order]);
-  const bookmarksOpen = useApp((s) => s.expanded["bookmarks"] ?? true);
   const machinesOpen = useApp((s) => s.expanded["machines"] ?? true);
+  const [dragging, setDragging] = useState<Drag | null>(null);
+  const [indicator, setIndicator] = useState<Indicator | null>(null);
+  const dragState = useMemo(() => ({ dragging, setDragging, indicator, setIndicator }), [dragging, indicator]);
+  // Empty Bookmarks stay hidden, except while a Session is dragged so a first Bookmark can be dropped.
+  const draggingSession = dragging?.kind === "node" && dragging.ref.kind === "session";
   return (
     <ActionsProvider>
-      <DashboardEntry />
-      {bookmarks.length > 0 && (
-        <section aria-label="Bookmarks">
-          <SectionHeader id="bookmarks" label="Bookmarks" />
-          {bookmarksOpen && (
-            <ul className="tree">
-              {bookmarks.map((n) => <SessionRow key={n.key} node={n} bookmark />)}
-            </ul>
+      <DragContext.Provider value={dragState}>
+        <DashboardEntry />
+        {(bookmarks.length > 0 || draggingSession) && <BookmarksSection bookmarks={bookmarks} />}
+        <section aria-label="Groups">
+          <GroupTree />
+        </section>
+        <section aria-label="Machines">
+          <SectionHeader id="machines" label="Machines" />
+          {machinesOpen && (
+            <>
+              <ul className="tree">
+                {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
+              </ul>
+              <AddMachine />
+            </>
           )}
         </section>
-      )}
-      <section aria-label="Groups">
-        <GroupTree />
-      </section>
-      <section aria-label="Machines">
-        <SectionHeader id="machines" label="Machines" />
-        {machinesOpen && (
-          <>
-            <ul className="tree">
-              {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
-            </ul>
-            <AddMachine />
-          </>
-        )}
-      </section>
+      </DragContext.Provider>
     </ActionsProvider>
   );
 }
