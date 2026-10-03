@@ -11,6 +11,7 @@ import { Banner } from "./Banner";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
+import { createKeyHandler } from "./keyHandler";
 import { initialLensState, lensReducer } from "./lensState";
 import { createOutputBuffer } from "./outputBuffer";
 import { claim, disposeIf, getOrCreate } from "./termCache";
@@ -35,7 +36,7 @@ function createEntry(key: string) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   applyUnicode11(term);
-  term.attachCustomKeyEventHandler((e) => !e.metaKey);
+  term.attachCustomKeyEventHandler(createKeyHandler((text) => term.input(text)));
   const unwatchFont = watchTermFont(term, fit);
   const unwatchTheme = watchTermTheme(term);
   const output = createOutputBuffer((data, onParsed) => term.write(data, onParsed));
