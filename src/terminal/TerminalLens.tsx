@@ -1,4 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -13,6 +14,7 @@ import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { createKeyHandler } from "./keyHandler";
 import { initialLensState, lensReducer } from "./lensState";
+import { applyOsc52 } from "./osc52";
 import { createOutputBuffer } from "./outputBuffer";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 import { applyUnicode11 } from "./unicode";
@@ -32,10 +34,13 @@ function createEntry(key: string) {
     // No smooth scroll: at 100ms trackpad scrolling lagged behind the fingers and felt rubbery.
     smoothScrollDuration: 0,
     allowProposedApi: true,
+    // herdr turns on mouse reporting, so a plain drag never selects; Option+drag selects for Cmd+C.
+    macOptionClickForcesSelection: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   applyUnicode11(term);
+  applyOsc52(term, (text) => void writeText(text).catch((e) => console.error("OSC 52 copy failed", e)));
   term.attachCustomKeyEventHandler(createKeyHandler((text) => term.input(text)));
   const unwatchFont = watchTermFont(term, fit);
   const unwatchTheme = watchTermTheme(term);
