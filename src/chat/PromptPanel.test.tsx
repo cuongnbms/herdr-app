@@ -115,3 +115,47 @@ describe("PromptPanel", () => {
     expect(screen.getByRole("button", { name: /T-LESS/ })).toBeTruthy();
   });
 });
+
+describe("PromptPanel without the fallback card", () => {
+  const idlePi = { status: "idle", agent: "pi", title: "pi" } as PaneView;
+  const picker = (cursor: 0 | 1) => `
+>
+
+${cursor === 0 ? "→" : " "} ✓ a-model [p] · default
+${cursor === 1 ? "→" : " "}   b-model [p]
+
+ Enter to select · Ctrl+S to set as default · Escape/Ctrl+C to cancel
+────────────────────────
+/tmp/app
+`;
+
+  it("shows pi's model picker as a card and moves the cursor before pressing Enter", async () => {
+    shown = picker(0);
+    vi.mocked(herdrCall).mockImplementation(async (_m, _s, method, params) => {
+      if (method === "pane.read") return { text: shown };
+      if ((params as { keys?: string[] }).keys?.[0] === "down") shown = picker(1);
+      return {};
+    });
+    render(<PromptPanel pane={pane} view={idlePi} fallback={false} />);
+    expect(await screen.findByText("Select model (currently a-model [p])")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /b-model/ }));
+    await waitFor(() =>
+      expect(sent()).toEqual([
+        ["agent.send_keys", { target: "w1:p1", keys: ["down"] }],
+        ["agent.send_keys", { target: "w1:p1", keys: ["enter"] }],
+      ]),
+    );
+  });
+
+  it("shows no fallback card for a screen no reader knows", async () => {
+    // the fallback card opens the screen mirror, whose terminal asks for matchMedia
+    window.matchMedia ??= ((query: string) =>
+      ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList);
+    shown = "Pick one\n\n❯ 1. One\n  2. Two\n\n Enter to select\n";
+    render(<PromptPanel pane={pane} view={idlePi} fallback={false} />);
+    await waitFor(() => expect(vi.mocked(herdrCall).mock.calls.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/Waiting for/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /One/ })).toBeNull();
+  });
+});

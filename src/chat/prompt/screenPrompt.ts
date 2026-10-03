@@ -1,7 +1,7 @@
 // Reads an agent's interactive prompt (Claude Code's AskUserQuestion, tool approvals, plan
-// approval, unnumbered menus) off a blocked pane's visible screen, and turns an answer into the
-// keys that pick it. Adapted from herdr-web-ui's server/prompt.ts (MIT, © 2026 devswha): only
-// Claude's readers and the fallback card are kept.
+// approval, unnumbered menus; pi's /model picker) off a pane's visible screen, and turns an
+// answer into the keys that pick it. Adapted from herdr-web-ui's server/prompt.ts (MIT, © 2026
+// devswha): only Claude's readers, pi's model picker and the fallback card are kept.
 
 const ANSI_RE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SELECTED_RE = /^[❯›>]\s*/;
@@ -57,6 +57,7 @@ type Responder =
   | "claude-approval"
   | "claude-plan"
   | "claude-confirm"
+  | "pi-model"
   | "fallback-menu"
   | "fallback-keys";
 
@@ -412,6 +413,107 @@ function parseClaudeConfirm(screen: string): ParsedPrompt | null {
   });
 }
 
+/**
+ * pi's `/model` picker: a filter line (`>`), the provider catalogue under it (every row names
+ * its provider in brackets, `→` on the cursor's row, `✓` on the model in use), and the hint
+ * `Enter to select · Ctrl+S to set as default · Escape/Ctrl+C to cancel`. The cursor starts on
+ * the model in use, so its position is read rather than assumed.
+ */
+const PI_MODEL_HINT_RE = /enter to select\s*·\s*ctrl\+s to set as default\s*·\s*escape\/ctrl\+c to cancel/i;
+/** The same hint told from the end, so lines that follow it cannot complete a match of their own. */
+const PI_MODEL_HINT_AT_END_RE = new RegExp(`${PI_MODEL_HINT_RE.source}$`, "i");
+/** pi's footer under the picker: the pane's folder, then its context meter. */
+const PI_FOOTER_LINES = 2;
+/** `/model` types a filter into this line, then lists what is left under it */
+const PI_MODEL_FILTER_RE = /^[\u203a>\u276f]\s*$/;
+/** pi ticks the model answering now, and marks the one it starts on with `· default` */
+const PI_MODEL_CURRENT_RE = /[\u2713\u2714]/;
+const PI_MODEL_DEFAULT_RE = /\s*\u00b7\s*default$/;
+/** a row: pi's cursor, an optional tick, then the label */
+const PI_ROW_RE = /^([\u2192\u276f\u279c])?\s*(?:[\u2713\u2714]\s+)?(\S.*)$/;
+/** a catalogue row names the provider serving the model, in brackets */
+const PI_MODEL_PROVIDER_RE = /\[[^\]]+\]/;
+/** the tail of a model's name a narrow pane wrapped onto its own line: only the provider's bracket */
+const PI_MODEL_TAIL_RE = /^\[[^\]]+\](\s*\u00b7\s*default)?$/;
+
+/**
+ * Whether a hint is the last thing before the agent's footer, allowing for a narrow pane
+ * wrapping it over two or three lines. Anchored to the end of the joined window, so a hint
+ * buried under later output no longer counts.
+ */
+function hintAtEnd(shown: string[], atEnd: RegExp, footerLines: number, span = 3): boolean {
+  for (let end = shown.length - 1; end >= Math.max(0, shown.length - 1 - footerLines); end -= 1) {
+    for (let size = 1; size <= span; size += 1) {
+      const from = end - size + 1;
+      if (from < 0) break;
+      if (atEnd.test(shown.slice(from, end + 1).join(" "))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The catalogue under the filter line. pi's own notes (`Model Name: …`, `Could not refresh …`)
+ * carry no bracket and end the list. A narrow pane wraps a long name and drops its bracket onto
+ * the next line at column zero: that tail is joined back first. A row cut inside its bracket is
+ * a list pi has not finished drawing, and voids the reading rather than invent a model.
+ */
+function piModelRows(lines: string[], startIndex: number): { label: string; cursor: boolean; current: boolean }[] | null {
+  const rows: { label: string; cursor: boolean; current: boolean }[] = [];
+  let start = startIndex;
+  while (start < lines.length && !cleanLine(lines[start]!)) start += 1;
+  const block: string[] = [];
+  for (let index = start; index < lines.length; index += 1) {
+    const raw = lines[index]!.replace(ANSI_RE, "");
+    const line = cleanLine(raw);
+    const previous = lastOf(block);
+    if (previous !== undefined && cleanLine(previous) && !PI_MODEL_PROVIDER_RE.test(cleanLine(previous))
+      && /^ {0,1}\S/.test(raw) && PI_MODEL_TAIL_RE.test(line)) {
+      block[block.length - 1] = `${previous} ${line}`;
+      continue;
+    }
+    block.push(raw);
+  }
+  const cutMidBracket = (line: string) => line.includes("[") && !PI_MODEL_PROVIDER_RE.test(line);
+  for (const raw of block) {
+    const line = cleanLine(raw);
+    if (!line || isDivider(line) || PI_MODEL_HINT_RE.test(line)) break;
+    const cursor = /^[\u2192\u276f\u279c]\s*\S/.test(line);
+    if (!cursor && !/^ {2,}/.test(raw)) break;
+    const label = line.match(PI_ROW_RE)?.[2]?.trim();
+    if (!label || !PI_MODEL_PROVIDER_RE.test(label) || /\s{2,}/.test(label)) {
+      if (cutMidBracket(line)) return null;
+      break;
+    }
+    rows.push({ label, cursor, current: PI_MODEL_CURRENT_RE.test(raw) });
+  }
+  return rows.length >= 2 && rows.some((row) => row.cursor) ? rows : null;
+}
+
+function parsePiModel(screen: string): ParsedPrompt | null {
+  const lines = screen.replace(ANSI_RE, "").split(/\r?\n/);
+  const hintIndex = findLastIndex(lines, (_, index) => PI_MODEL_HINT_RE.test(wrapped(lines, index)));
+  if (hintIndex < 0) return null;
+  // the filter line is the anchor: anything above it is what the pane showed before /model
+  const filterIndex = findLastIndex(lines.slice(0, hintIndex), (line) => PI_MODEL_FILTER_RE.test(cleanLine(line)));
+  if (filterIndex < 0) return null;
+  const rows = piModelRows(lines, filterIndex + 1);
+  if (rows === null) return null;
+  const current = rows.find((row) => row.current);
+  return finishPrompt("pi", {
+    kind: "question",
+    title: "Select model",
+    question: current ? `Select model (currently ${current.label.replace(PI_MODEL_DEFAULT_RE, "")})` : "Select model",
+    body: null,
+    options: rows.map((row) => ({ label: row.label, description: null })),
+    multi_select: false,
+    custom_option_index: null,
+  }, {
+    responder: "pi-model", selectedIndex: rows.findIndex((row) => row.cursor),
+    checkedOptionIndices: [], customMenuIndex: null,
+  });
+}
+
 function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
   const cleanLines = screen.replace(ANSI_RE, "").split(/\r?\n/).map(cleanLine);
   const shown = cleanLines.filter((line) => line && !isDivider(line));
@@ -426,6 +528,7 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
     case "claude-submit": return /^(?:[›>❯]\s*)?\d+\.\s+Cancel$/i.test(last);
     case "claude-approval": return ends(/esc to cancel.*(?:tab|ctrl\+e)|ctrl\+e to explain/i);
     case "claude-confirm": return ends(CLAUDE_CONFIRM_HINT_RE);
+    case "pi-model": return hintAtEnd(shown, PI_MODEL_HINT_AT_END_RE, PI_FOOTER_LINES);
     default: return ends(/ctrl\+g to edit|shift\+tab to approve with this feedback/i);
   }
 }
@@ -433,7 +536,7 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
 function parsePrompt(agent: string, screen: string): ParsedPrompt | null {
   const candidates = agent === "claude"
     ? [parseClaudeQuestion(screen), parseClaudeSubmit(screen), parseClaudeApproval(screen), parseClaudeConfirm(screen)]
-    : [];
+    : agent === "pi" ? [parsePiModel(screen)] : [];
   return candidates.find((candidate): candidate is ParsedPrompt => candidate !== null && promptTailIsActive(candidate, screen)) ?? null;
 }
 
@@ -444,6 +547,23 @@ export function parseInteractivePrompt(agent: string, screen: string): ScreenPro
 }
 
 export class InvalidAnswer extends Error {}
+
+/**
+ * The row the cursor must be on before the last key of `answer` (its Enter), or null when the
+ * keys need no check. pi's model picker has no numbers to aim at and scrolls its catalogue under
+ * the cursor, so a key typed in the terminal meanwhile would switch to the wrong model: what must
+ * hold is the model under the cursor, by name.
+ */
+export function cursorTarget(prompt: ScreenPrompt, answer: PromptAnswer): string | null {
+  if (parsedByPrompt.get(prompt)?.responder !== "pi-model" || answer.option_index === undefined) return null;
+  return prompt.options[answer.option_index]?.label ?? null;
+}
+
+/** The label under the cursor of a prompt `cursorTarget` checks; null for any other. */
+export function cursorLabel(prompt: ScreenPrompt | null): string | null {
+  const parsed = prompt ? parsedByPrompt.get(prompt) : undefined;
+  return parsed?.responder === "pi-model" ? (parsed.options[parsed.selectedIndex]?.label ?? null) : null;
+}
 
 function navigationKeys(delta: number): string[] {
   return Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? KEY.down : KEY.up));

@@ -37,6 +37,9 @@ export const IMAGE_SETTLE_MS = 300;
 // Agents whose Slash commands the Composer can list.
 const SLASH_AGENTS = new Set(["claude", "pi", "codex"]);
 
+// pi's /model opens a picker in the terminal; `/model <name>` may switch without one.
+const PI_MODEL_RE = /^\/model(\s|$)/;
+
 const bracketedPaste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const mention = (path: string) => (/[\s"]/.test(path) ? `@"${path}"` : `@${path}`);
 
@@ -51,7 +54,18 @@ const revoke = (a: Attachment) => {
   if (a.preview) URL.revokeObjectURL(a.preview);
 };
 
-export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string | null; status?: AgentStatus }) {
+export function Composer({
+  pane,
+  agent,
+  status,
+  onPiModel,
+}: {
+  pane: PaneRef;
+  agent: string | null;
+  status?: AgentStatus;
+  /** Called once `/model` has gone to pi, whose picker the Chat lens then shows as a card. */
+  onPiModel?: () => void;
+}) {
   const key = paneKey(pane);
   const [text, setText] = useState(() => readDraft(key));
   const [images, setImages] = useState<Attachment[]>([]);
@@ -178,7 +192,10 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
     // Optimistic clear; restore the draft if the prompt did not go through (unless the user typed meanwhile).
     submit(sent, sentImages.map((a) => a.path as string))
       .then(
-        () => sentImages.forEach(revoke),
+        () => {
+          sentImages.forEach(revoke);
+          if (agent === "pi" && PI_MODEL_RE.test(sent.trim())) onPiModel?.();
+        },
         () => {
           setText((cur) => (cur === "" ? sent : cur));
           setImages((cur) => (cur.length === 0 ? sentImages : (sentImages.forEach(revoke), cur)));

@@ -9,7 +9,7 @@ import { useApp } from "../store/app";
 import { watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { applyUnicode11 } from "../terminal/unicode";
-import { readPrompt, type PromptAnswer, type ScreenPrompt } from "./prompt/screenPrompt";
+import { parseInteractivePrompt, readPrompt, type PromptAnswer, type ScreenPrompt } from "./prompt/screenPrompt";
 import { sendAnswer, type PromptIo } from "./prompt/sendAnswer";
 
 const QUICK: { label: string; key: string }[] = [
@@ -192,9 +192,11 @@ function PromptCard({
 /**
  * What the Chat lens shows while the Agent is blocked: the prompt on its screen (a question,
  * an approval, a plan to accept) read into a card that answers it with the keys the TUI
- * expects, and the screen itself for whatever the card cannot read.
+ * expects, and the screen itself for whatever the card cannot read. With `fallback` off (a
+ * prompt the Agent waits on while idle, such as pi's model picker), only a known reader's card
+ * shows: a screen none of them reads keeps the last card rather than guess at keys.
  */
-export function PromptPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
+export function PromptPanel({ pane, view, fallback = true }: { pane: PaneRef; view: PaneView; fallback?: boolean }) {
   const agent = view.agent;
   const [screenText, setScreenText] = useState("");
   const [prompt, setPrompt] = useState<ScreenPrompt | null>(null);
@@ -221,12 +223,12 @@ export function PromptPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const show = useCallback(
     (text: string) => {
       if (!live.current) return;
-      const next = readPrompt(agent, text);
+      const next = fallback ? readPrompt(agent, text) : parseInteractivePrompt(agent ?? "", text);
       // the same prompt keeps its card (and what was ticked or typed on it)
-      setPrompt((cur) => (cur?.id === next.id ? cur : next));
+      setPrompt((cur) => (next === null || cur?.id === next.id ? cur : next));
       return next;
     },
-    [agent],
+    [agent, fallback],
   );
   const mirrorOn = useRef(false);
   const refresh = useCallback(
@@ -270,13 +272,14 @@ export function PromptPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
     busy.current = true;
     setPending(true);
     try {
-      const outcome = await sendAnswer(io, agent, prompt, a);
+      const outcome = await sendAnswer(io, agent, prompt, a, undefined, fallback);
       if (outcome.sent) {
         setError(null);
         await new Promise((r) => setTimeout(r, SETTLE_MS));
       } else {
         setError("The prompt changed on screen. Check it and answer again.");
-        setPrompt(outcome.fresh);
+        const fresh = outcome.fresh;
+        if (fresh) setPrompt(fresh);
       }
       await refresh();
     } catch (e) {

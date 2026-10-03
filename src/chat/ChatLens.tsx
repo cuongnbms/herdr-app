@@ -12,6 +12,7 @@ import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
 import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
+import { usePiModelPicker } from "./usePiModelPicker";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
@@ -37,6 +38,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const handle = useRef<{ close: () => void } | null>(null);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
+  // The Pane `/model` was sent to: pi waits on its picker idle, so the picker is looked for then.
+  const [modelFor, setModelFor] = useState<string | null>(null);
+  const picker = usePiModelPicker(pane, modelFor === key && view.agent === "pi", () => setModelFor(null));
+  useEffect(() => setModelFor(null), [key]);
 
   const open = useCallback(
     (path: string | null) => {
@@ -210,7 +215,11 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         </button>
       )}
       <WorkingIndicator status={view.status} />
-      {view.status === "blocked" ? <PromptPanel pane={pane} view={view} /> : <Composer pane={pane} agent={view.agent} status={view.status} />}
+      {view.status === "blocked" || picker.open ? (
+        <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} />
+      ) : (
+        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} />
+      )}
     </div>
   );
 }
