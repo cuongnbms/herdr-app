@@ -1,6 +1,9 @@
 // Pure layout model for sidebar Groups and Bookmarks.
 // Must not import from src/store/ (the store imports this file).
 
+import { create } from "zustand";
+import type { MachineView, SessionView } from "../lib/types";
+
 export type SessionKey = string;
 
 export const sessionKey = (machineId: string, session: string): SessionKey =>
@@ -267,4 +270,94 @@ export function groupPaths(layout: Layout): { id: string; path: string }[] {
   };
   walk(layout.tree, []);
   return out;
+}
+
+export const LAYOUT_KEY = "herdr-app:sidebar-layout";
+
+export function loadLayout(): Layout {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<Layout> | null;
+      if (p && Array.isArray(p.tree) && Array.isArray(p.bookmarks)) return { tree: p.tree, bookmarks: p.bookmarks };
+    }
+  } catch {
+    /* storage unavailable or corrupt */
+  }
+  return EMPTY_LAYOUT;
+}
+
+export function saveLayout(l: Layout): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ tree: l.tree, bookmarks: l.bookmarks }));
+  } catch {
+    /* ignore */
+  }
+}
+
+interface LayoutState {
+  layout: Layout;
+  update: (fn: (l: Layout) => Layout) => void;
+}
+
+export const useLayout = create<LayoutState>((set, get) => ({
+  layout: loadLayout(),
+  update: (fn) => {
+    const prev = get().layout;
+    const next = fn(prev);
+    if (next === prev) return;
+    set({ layout: next });
+    saveLayout(next);
+  },
+}));
+
+export type RSession = { kind: "session"; key: SessionKey; machine: MachineView; session: SessionView };
+export type RGroup = { kind: "group"; id: string; label: string; children: RNode[] };
+export type RNode = RGroup | RSession;
+
+/** Join the layout with live machines. Placed sessions that no longer exist are hidden (but stay
+ *  in storage); sessions the layout has not placed are appended to the root in `order`. */
+export function resolve(
+  layout: Layout,
+  machines: Record<string, MachineView>,
+  order: string[],
+): { tree: RNode[]; bookmarks: RSession[]; unplaced: SessionKey[] } {
+  const live = new Map<SessionKey, RSession>();
+  for (const id of order) {
+    const machine = machines[id];
+    if (!machine) continue;
+    for (const session of machine.sessions) {
+      const key = sessionKey(machine.id, session.name);
+      live.set(key, { kind: "session", key, machine, session });
+    }
+  }
+
+  const placed = new Set<SessionKey>();
+  const build = (nodes: LayoutNode[]): RNode[] => {
+    const out: RNode[] = [];
+    for (const n of nodes) {
+      if (n.kind === "group") {
+        out.push({ kind: "group", id: n.id, label: n.label, children: build(n.children) });
+      } else {
+        placed.add(n.key);
+        const r = live.get(n.key);
+        if (r) out.push(r);
+      }
+    }
+    return out;
+  };
+  const tree = build(layout.tree);
+
+  const unplaced: SessionKey[] = [];
+  for (const [key, r] of live) {
+    if (placed.has(key)) continue;
+    unplaced.push(key);
+    tree.push(r);
+  }
+
+  const bookmarks = layout.bookmarks.flatMap((k) => {
+    const r = live.get(k);
+    return r ? [r] : [];
+  });
+  return { tree, bookmarks, unplaced };
 }
