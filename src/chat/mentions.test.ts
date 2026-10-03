@@ -10,6 +10,13 @@ describe("activeTrigger", () => {
     expect(activeTrigger("see /co", 7)).toBeNull();
     expect(activeTrigger("/compact now", 12)).toBeNull();
   });
+  it("opens nothing with the caret before the trigger character", () => {
+    expect(activeTrigger("/compact now", 0)).toBeNull();
+    expect(activeTrigger("\n/foo", 0)).toBeNull();
+    expect(activeTrigger("hi\n/foo", 3)).toBeNull();
+    expect(activeTrigger("$foo", 0, { skills: true })).toBeNull();
+    expect(activeTrigger("@src", 0)).toBeNull();
+  });
   it("opens file completion after an @ that starts a word", () => {
     expect(activeTrigger("look at @src/a", 14)).toEqual({ kind: "file", query: "src/a", start: 8, end: 14 });
     expect(activeTrigger("@", 1)).toBeNull();

@@ -191,4 +191,63 @@ describe("Composer completion", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "see @sr" });
   });
+
+  it("closes a failed listing with Escape", async () => {
+    vi.mocked(completeFiles).mockRejectedValue({ code: "not_found", message: "machine devtuf is not connected" });
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox");
+    type(box, "see @sr");
+    await screen.findByText("Couldn't list files");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(herdrCall).not.toHaveBeenCalled();
+  });
+
+  it("closes a loading listing with Escape", async () => {
+    vi.mocked(completeCommands).mockReturnValue(new Promise(() => {}));
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox");
+    type(box, "/c");
+    expect(await screen.findByRole("listbox")).toBeTruthy();
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("leaves Shift+Enter a newline while the list is open", async () => {
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox");
+    type(box, "/c");
+    await screen.findByRole("option", { name: /\/clear/ });
+    const shiftEnter = fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    // Not prevented: the textarea inserts its newline.
+    expect(shiftEnter).toBe(true);
+    expect((box as HTMLTextAreaElement).value).toBe("/c");
+    expect(herdrCall).not.toHaveBeenCalled();
+  });
+
+  it("keeps showing an expired listing while it refetches", async () => {
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(1_000_000);
+      const first = render(<Composer pane={pane} agent="claude" />);
+      type(screen.getByRole("textbox"), "/c");
+      await screen.findByRole("option", { name: /\/clear/ });
+      first.unmount();
+
+      render(<Composer pane={pane} agent="claude" />);
+      const box = screen.getByRole("textbox");
+      type(box, "/c");
+      expect(screen.getByRole("option", { name: /\/clear/ })).toBeTruthy();
+      expect(completeCommands).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(1_031_000);
+      type(box, "/co");
+      expect(screen.getByRole("option", { name: /\/compact/ })).toBeTruthy();
+      expect(screen.queryByText(/Loading/)).toBeNull();
+      await waitFor(() => expect(completeCommands).toHaveBeenCalledTimes(2));
+      expect(await screen.findByRole("option", { name: /\/compact/ })).toBeTruthy();
+    } finally {
+      now.mockRestore();
+    }
+  });
 });

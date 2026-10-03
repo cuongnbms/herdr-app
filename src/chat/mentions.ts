@@ -25,22 +25,23 @@ function tokenEnd(text: string, from: number): number {
 export function activeTrigger(text: string, caret: number, options: { skills?: boolean } = {}): ActiveTrigger | null {
   if (!Number.isInteger(caret) || caret < 0 || caret > text.length) return null;
 
-  const lineStart = text.lastIndexOf("\n", Math.max(0, caret - 1)) + 1;
+  // Every trigger sits strictly before the caret: searching from `caret - 1` keeps it so.
+  const lineStart = caret === 0 ? 0 : text.lastIndexOf("\n", caret - 1) + 1;
   if (options.skills) {
-    const dollar = text.lastIndexOf("$", Math.max(0, caret - 1));
+    const dollar = caret === 0 ? -1 : text.lastIndexOf("$", caret - 1);
     const query = dollar >= lineStart ? text.slice(dollar + 1, caret) : "";
     if (dollar >= lineStart && (dollar === 0 || /\s/u.test(text[dollar - 1] ?? "")) && SLASH_QUERY.test(query)) {
       return { kind: "slash", prefix: "$", query, start: dollar, end: tokenEnd(text, caret) };
     }
   }
-  if (text[lineStart] === "/") {
+  if (caret > lineStart && text[lineStart] === "/") {
     const query = text.slice(lineStart + 1, caret);
     if (SLASH_QUERY.test(query)) {
       return { kind: "slash", query, start: lineStart, end: tokenEnd(text, caret) };
     }
   }
 
-  const at = text.lastIndexOf("@", Math.max(0, caret - 1));
+  const at = caret === 0 ? -1 : text.lastIndexOf("@", caret - 1);
   if (at < lineStart) return null;
   if (at > lineStart && !/\s/u.test(text[at - 1] ?? "")) return null;
   const query = text.slice(at + 1, caret);

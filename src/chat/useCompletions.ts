@@ -14,9 +14,10 @@ export function clearCompletionCache(): void {
   cache.clear();
 }
 
-const fresh = (key: string | null, kind: Kind | null) => {
-  const hit = key && kind ? cache.get(key) : undefined;
-  return hit && Date.now() - hit.at < TTL_MS[kind as Kind] ? hit.data : null;
+/** True when `key` has no cached listing or its listing has outlived the TTL. */
+const stale = (key: string, kind: Kind) => {
+  const hit = cache.get(key);
+  return !hit || Date.now() - hit.at >= TTL_MS[kind];
 };
 
 /** Lists a Pane's slash commands or files on its Machine, only while `kind` is set. */
@@ -27,8 +28,10 @@ export function useCompletions(
   const key = kind ? `${paneKey(pane)}|${kind}` : null;
   const [result, setResult] = useState<{ key: string; data: Listing | null } | null>(null);
 
+  // Stale-while-revalidate: a cached listing shows whatever its age; an old one is refetched.
+  const outdated = key !== null && kind !== null && stale(key, kind);
   useEffect(() => {
-    if (!key || !kind || fresh(key, kind)) return;
+    if (!key || !kind || !outdated) return;
     let live = true;
     const request = kind === "slash" ? completeCommands(pane) : completeFiles(pane);
     request.then(
@@ -46,9 +49,9 @@ export function useCompletions(
     };
     // `pane` is identified by `key`; a new object for the same Pane must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, outdated]);
 
-  const data = fresh(key, kind) ?? (result?.key === key ? result.data : null);
+  const data = (key ? cache.get(key)?.data : undefined) ?? (result?.key === key ? result.data : null);
   const failed = key !== null && data === null && result?.key === key;
   return {
     commands: kind === "slash" ? ((data as SlashCommand[] | null) ?? []) : [],

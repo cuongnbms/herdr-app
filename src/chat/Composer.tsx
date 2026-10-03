@@ -213,6 +213,11 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
             files.forEach((f) => void attach(f));
           }}
           onKeyDown={(e) => {
+            // Escape closes any open list, a loading or failed one included.
+            if (open && e.key === "Escape" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              return setDismissed(true);
+            }
             if (capturing && !e.nativeEvent.isComposing) {
               const move = (by: number) => {
                 e.preventDefault();
@@ -220,13 +225,10 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
               };
               if (e.key === "ArrowDown") return move(1);
               if (e.key === "ArrowUp") return move(-1);
-              if (e.key === "Enter" || e.key === "Tab") {
+              // Shift+Enter keeps its newline.
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
                 e.preventDefault();
                 return choose(current);
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                return setDismissed(true);
               }
             }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
