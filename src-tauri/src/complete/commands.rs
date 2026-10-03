@@ -411,7 +411,7 @@ for spec in "$@"; do
           head -c 4096 "$f"
         done ;;
       commands)
-        find "$dir" -type f -name '*.md' | while IFS= read -r f; do
+        find -H "$dir" -type f -name '*.md' | while IFS= read -r f; do
           printf '\036%s\037%s\n' "$idx" "${f#"$dir"/}"
           head -c 4096 "$f"
         done ;;
@@ -660,6 +660,23 @@ mod tests {
         assert_eq!(find(&codex, "doc").trigger, Some("$"));
         assert_eq!(find(&codex, "proj").trigger, Some("$"));
         assert_eq!(find(&codex, "diff").trigger, None);
+    }
+
+    #[tokio::test]
+    async fn follows_a_symlinked_commands_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write(&tmp.path().join("dotfiles/cmds/deploy.md"), "Ship it\n");
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        std::os::unix::fs::symlink(
+            tmp.path().join("dotfiles/cmds"),
+            home.join(".claude/commands"),
+        )
+        .unwrap();
+        let got = list_commands(&LocalTransport, "claude", &home.to_string_lossy(), None)
+            .await
+            .unwrap();
+        assert_eq!(find(&got, "deploy").source, "user");
     }
 
     #[tokio::test]
