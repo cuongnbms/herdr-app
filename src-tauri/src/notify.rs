@@ -31,7 +31,7 @@ mod mac {
         define_class, msg_send,
         rc::Retained,
         runtime::{AnyObject, ProtocolObject},
-        AnyThread, DefinedClass, MainThreadMarker,
+        AnyThread, ClassType, DefinedClass, MainThreadMarker,
     };
     use objc2_foundation::{
         NSDictionary, NSObject, NSObjectProtocol, NSString, NSUserNotification,
@@ -93,15 +93,24 @@ mod mac {
         })
     }
 
+    /// The default center, or `None` for an unbundled binary (`tauri dev`, `cargo test`): there
+    /// it returns nil, which the generated binding treats as a bug and panics on.
+    fn center() -> Option<Retained<NSUserNotificationCenter>> {
+        unsafe { msg_send![NSUserNotificationCenter::class(), defaultUserNotificationCenter] }
+    }
+
     /// Install the delegate. Must run on the main thread, before the first notification.
     pub fn init(app: &AppHandle) {
         if MainThreadMarker::new().is_none() {
             tracing::error!("notify::init called off the main thread");
             return;
         }
+        let Some(center) = center() else {
+            tracing::warn!("no notification center (unbundled app); notifications are off");
+            return;
+        };
         let this = Delegate::alloc().set_ivars(Ivars { app: app.clone() });
         let delegate: Retained<Delegate> = unsafe { msg_send![super(this), init] };
-        let center = NSUserNotificationCenter::defaultUserNotificationCenter();
         // SAFETY: the center does not retain its delegate; ours is leaked so it lives for the
         // whole process.
         unsafe { center.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
@@ -110,8 +119,10 @@ mod mac {
 
     /// Deliver one notification. Must run on the main thread.
     pub fn deliver(pane: &PaneRef, title: &str, body: &str) {
-        NSUserNotificationCenter::defaultUserNotificationCenter()
-            .deliverNotification(&build(pane, title, body));
+        match center() {
+            Some(center) => center.deliverNotification(&build(pane, title, body)),
+            None => tracing::debug!("no notification center; dropped \"{title}\""),
+        }
     }
 
     /// A notification whose `userInfo` carries `pane`, read back by [`pane_of`] on click.
@@ -144,6 +155,17 @@ mod mac {
             let n = build(&pane, "claude is blocked", "devtuf › my session › app");
             assert_eq!(pane_of(&n), Some(pane));
             assert_eq!(n.title().unwrap().to_string(), "claude is blocked");
+        }
+
+        /// `cargo test` runs unbundled, like `tauri dev`: there is no default center there.
+        #[test]
+        fn deliver_without_a_center_does_not_panic() {
+            let pane = PaneRef {
+                machine_id: "m".into(),
+                session: "s".into(),
+                pane_id: "p".into(),
+            };
+            deliver(&pane, "title", "body");
         }
 
         #[test]
