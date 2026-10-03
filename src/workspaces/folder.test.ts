@@ -70,6 +70,18 @@ describe("workspace folder", () => {
     expect(getFolder({ ...ref, workspace_id: "w5" })).toBe("/new");
   });
 
+  it("skips the storage scan when no workspace left since the previous view", () => {
+    setFolder({ ...ref, workspace_id: "w5" }, "/new");
+    const key = vi.spyOn(Storage.prototype, "key");
+    pruneFolders("local", session({}), session({}));
+    pruneFolders("local", session({ workspaces: [ws("w1", ["/a"]), ws("w2", ["/b"])] }), session({}));
+    expect(key).not.toHaveBeenCalled();
+    expect(getFolder({ ...ref, workspace_id: "w5" })).toBe("/new");
+    pruneFolders("local", session({}));
+    expect(key).toHaveBeenCalled();
+    expect(getFolder({ ...ref, workspace_id: "w5" })).toBeNull();
+  });
+
   it("does a full prune when the previous view is not a valid snapshot", () => {
     setFolder({ ...ref, workspace_id: "w5" }, "/new");
     pruneFolders("local", session({}), session({ running: false, workspaces: [] }));
