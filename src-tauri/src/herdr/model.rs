@@ -17,14 +17,11 @@ pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
         .workspaces
         .iter()
         .map(|w| {
-            let mut tab_infos: Vec<_> = snap
+            // Snapshot order is herdr's tab order; `number` survives tab.move, so it is no position.
+            let tabs: Vec<TabView> = snap
                 .tabs
                 .iter()
                 .filter(|t| t.workspace_id == w.workspace_id)
-                .collect();
-            tab_infos.sort_by_key(|t| t.number);
-            let tabs: Vec<TabView> = tab_infos
-                .into_iter()
                 .map(|t| {
                     let panes: Vec<PaneView> = snap
                         .panes
@@ -161,6 +158,23 @@ mod tests {
         );
         assert_eq!(w2.tabs[1].panes[0].title, "w2:p2");
         assert_eq!(w2.status, AgentStatus::Idle);
+    }
+    #[test]
+    fn tabs_follow_snapshot_order_not_number() {
+        // After tab.move herdr reorders its tab list but keeps each tab's number.
+        let mut s = fixture();
+        let i = s.tabs.iter().position(|t| t.tab_id == "w2:t1").unwrap();
+        let moved = s.tabs.remove(i);
+        s.tabs.push(moved);
+        let v = session_view("default", &s);
+        assert_eq!(
+            v.workspaces[1]
+                .tabs
+                .iter()
+                .map(|t| t.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            ["w2:t2", "w2:t1"]
+        );
     }
     #[test]
     fn pane_label_wins_over_terminal_title() {
