@@ -3,6 +3,7 @@ import { memo, type ComponentType } from "react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Render counts for one scripted sequence of machine views (the PR 4 measurement).
+// RENDER_TABLE=1 prints the table.
 const counts: Record<string, number> = {};
 const bump = (name: string) => (counts[name] = (counts[name] ?? 0) + 1);
 
@@ -89,11 +90,12 @@ function view({ other = "idle", selected = "idle", extraTab = false }: { other?:
 
 describe("render counts per machine view", () => {
   const results: Record<string, Record<string, number>> = {};
-  const step = async (label: string, v: MachineView) => {
+  const run = async (label: string, f: () => void) => {
     for (const k of Object.keys(counts)) counts[k] = 0;
-    await act(async () => useApp.getState().upsertMachine(v));
+    await act(async () => f());
     results[label] = { ...counts };
   };
+  const step = (label: string, v: MachineView) => run(label, () => useApp.getState().upsertMachine(v));
 
   beforeAll(async () => {
     useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false });
@@ -113,9 +115,13 @@ describe("render counts per machine view", () => {
     await step("other pane status", view({ other: "working" }));
     await step("selected pane status", view({ other: "working", selected: "working" }));
     await step("new tab", view({ other: "working", selected: "working", extraTab: true }));
+    // No view at all: only the selection moves, which the prop-less panels' memo must absorb.
+    await run("select another pane", () => useApp.getState().select({ machine_id: "local", session: "default", pane_id: "w2:p1" }));
   });
 
-  afterAll(() => console.table(results));
+  afterAll(() => {
+    if (process.env.RENDER_TABLE) console.table(results);
+  });
 
   const zero = { App: 0, Sidebar: 0, AgentList: 0, ChatLens: 0 };
   const of = (label: string) => ({ ...zero, ...results[label] });
@@ -134,5 +140,9 @@ describe("render counts per machine view", () => {
 
   it("a new tab elsewhere leaves App and ChatLens alone", () => {
     expect(of("new tab")).toMatchObject({ App: 0, ChatLens: 0 });
+  });
+
+  it("selecting another pane re-renders App but not the Sidebar", () => {
+    expect(of("select another pane")).toMatchObject({ App: 1, Sidebar: 0 });
   });
 });

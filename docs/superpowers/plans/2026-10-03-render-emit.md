@@ -61,7 +61,12 @@ Frontend, `src/renders.test.tsx`, renders per step as App / Sidebar / AgentList 
 | other pane's status | 1 / 1 / 1 / 1 | 0 / 1 / 1 / 0 |
 | selected pane's status | 1 / 1 / 1 / 1 | 1 / 1 / 1 / 1 |
 | new tab elsewhere | 1 / 1 / 1 / 1 | 0 / 1 / 1 / 0 |
-| total over the script | 24 | 8 |
+| total over the view steps | 24 | 8 |
+| select another pane (no view) | not measured | 1 / 0 / 1 / 4 |
+
+The last row checks the `memo` wraps: dropping `memo` from Sidebar turns it red (Sidebar 1).
+AgentList still renders there because `select` replaces `viewed`, which it reads; ChatLens
+remounts for the new pane.
 
 Not measured: how often herdr fires these events in practice, and the renders below ChatLens
 (work blocks keep their `memo` now that `onToggle` is stable; covered by the `WorkBlockView`
