@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
@@ -149,7 +150,8 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   );
 }
 
-export function AgentList() {
+// Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
+export const AgentList = memo(function AgentList() {
   const viewed = useApp((s) => s.viewed);
   const session = useApp((s) =>
     s.viewed ? s.machines[s.viewed.machine_id]?.sessions.find((x) => x.name === s.viewed!.session) : undefined,
@@ -178,4 +180,4 @@ export function AgentList() {
       )}
     </ActionsProvider>
   );
-}
+});

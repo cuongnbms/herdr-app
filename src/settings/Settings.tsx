@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, memo, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
@@ -232,7 +232,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function Settings() {
+// Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
+export const Settings = memo(function Settings() {
   const [open, setOpen] = useState(false);
   return (
     <div className="settings">
@@ -245,4 +246,4 @@ export function Settings() {
       </span>
     </div>
   );
-}
+});

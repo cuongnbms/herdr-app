@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import "./fonts/fonts.css";
 import "./styles.css";
 import { machinesList, onMachine, onNotifyActivate, onPaneStatus, sessionStart } from "./lib/ipc";
@@ -12,7 +12,6 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
-import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
 import { syncSeenToHerdr } from "./store/seenSync";
@@ -85,7 +84,9 @@ const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({
 
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
-  const sel = useApp(useShallow(selectedPane));
+  // Only the selected Pane and its ids: a change elsewhere on its Machine does not re-render App.
+  const selected = useApp((s) => s.selected);
+  const pane = useApp((s) => selectedPane(s)?.pane ?? null);
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
@@ -146,9 +147,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const ref = sel ? { machine_id: sel.machine.id, session: sel.session.name, pane_id: sel.pane.pane_id } : null;
+  const { machine_id, session, pane_id } = selected ?? {};
+  const selRef = useMemo(
+    () => (machine_id && session && pane_id ? { machine_id, session, pane_id } : null),
+    [machine_id, session, pane_id],
+  );
+  const ref = pane ? selRef : null;
   const key = ref ? paneKey(ref) : "";
-  useTranscriptProbe(ref, sel?.pane.status);
+  useTranscriptProbe(ref, pane?.status);
 
   return (
     <div className="app">
@@ -163,14 +169,14 @@ export default function App() {
         <AgentList />
       </aside>
       <main className="main">
-        {sel && ref ? (
+        {pane && ref ? (
           <>
             <Header />
             <Suspense fallback={null}>
-              {defaultLens(sel.pane, remembered) === "chat" ? (
-                <ChatLens key={key} pane={ref} view={sel.pane} />
+              {defaultLens(pane, remembered) === "chat" ? (
+                <ChatLens key={key} pane={ref} view={pane} />
               ) : (
-                <TerminalLens key={key} pane={ref} terminalId={sel.pane.terminal_id} />
+                <TerminalLens key={key} pane={ref} terminalId={pane.terminal_id} />
               )}
             </Suspense>
           </>
