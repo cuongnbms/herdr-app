@@ -104,7 +104,7 @@ const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 /// `herdr-paste-*` files older than 24 hours there: the app cannot know when an agent has
 /// read one, and a day is past any realistic use.
 const SAVE_IMAGE_SCRIPT: &str = r#"d="${2:-${TMPDIR:-/tmp}}"
-find "$d" -maxdepth 1 -type f -name 'herdr-paste-*' -user "$(id -u)" -mmin +1440 -exec rm -f {} + 2>/dev/null
+find -H "$d" -maxdepth 1 -type f -name 'herdr-paste-*' -user "$(id -u)" -mmin +1440 -exec rm -f {} + 2>/dev/null
 f="${d%/}/$1"
 umask 077
 set -C
@@ -611,6 +611,25 @@ broken               running  /only-one-path\n";
         assert!(!stale.exists(), "stale paste kept");
         assert!(fresh.exists(), "fresh paste removed");
         assert!(other.exists(), "non-paste file removed");
+        assert_eq!(std::fs::read(&path).unwrap(), b"img");
+    }
+
+    #[tokio::test]
+    async fn saving_an_image_sweeps_through_a_symlinked_directory() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let stale = real.join("herdr-paste-1-1-0.png");
+        let f = std::fs::File::create(&stale).unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(25 * 3600))
+            .unwrap();
+        let dir = link.to_string_lossy().into_owned();
+        let path = save_image_in(&local::LocalTransport, b"img", "png", Some(&dir))
+            .await
+            .unwrap();
+        assert!(!stale.exists(), "stale paste kept behind symlink");
         assert_eq!(std::fs::read(&path).unwrap(), b"img");
     }
 
