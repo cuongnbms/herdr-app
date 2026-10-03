@@ -55,6 +55,33 @@ describe("Composer", () => {
     expect(sendButton().disabled).toBe(false);
   });
 
+  it("keeps each pane's unsent text across remounts and clears it once sent", () => {
+    const other = { ...pane, pane_id: "w1:p2" };
+    const first = render(<Composer pane={pane} agent="claude" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "half a thought" } });
+    first.unmount();
+
+    const second = render(<Composer pane={other} agent="claude" />);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    second.unmount();
+
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(box.value).toBe("half a thought");
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(localStorage.getItem("herdr-app:draft:devtuf/default/w1:p1")).toBeNull();
+  });
+
+  it("restores the draft when the send fails", async () => {
+    vi.mocked(herdrCall).mockRejectedValueOnce({ code: "timeout", message: "timed out" });
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "try again" } });
+    await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
+    expect(box.value).toBe("try again");
+    expect(localStorage.getItem("herdr-app:draft:devtuf/default/w1:p1")).toBe("try again");
+  });
+
   it("saves a pasted image on the pane's machine and shows it as an attachment", async () => {
     render(<Composer pane={pane} agent="claude" />);
     paste(screen.getByRole("textbox"), [png()]);
@@ -244,6 +271,8 @@ describe("Composer completion", () => {
       type(screen.getByRole("textbox"), "/c");
       await screen.findByRole("option", { name: /\/clear/ });
       first.unmount();
+      // Start blank rather than from the "/c" draft, so typing it again is a change.
+      localStorage.removeItem("herdr-app:draft:devtuf/default/w1:p1");
 
       render(<Composer pane={pane} agent="claude" />);
       const box = screen.getByRole("textbox");

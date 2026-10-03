@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
-import type { AgentStatus, PaneRef, SlashCommand } from "../lib/types";
+import { paneKey, type AgentStatus, type PaneRef, type SlashCommand } from "../lib/types";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
+import { readDraft, writeDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { useCompletions } from "./useCompletions";
 
@@ -49,7 +50,8 @@ const revoke = (a: Attachment) => {
 };
 
 export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string | null; status?: AgentStatus }) {
-  const [text, setText] = useState("");
+  const key = paneKey(pane);
+  const [text, setText] = useState(() => readDraft(key));
   const [images, setImages] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
@@ -63,6 +65,8 @@ export function Composer({ pane, agent, status }: { pane: PaneRef; agent: string
   useEffect(() => () => live.current.forEach(revoke), []);
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
+  // Sending clears the text and a failed send restores it, so the draft follows both.
+  useEffect(() => writeDraft(key, text), [key, text]);
 
   const found = activeTrigger(text, caret, { skills: agent === "codex" });
   const trigger = found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
