@@ -59,8 +59,8 @@ least-recently-parked order.
 
 - `chat_close` moves the Pane's tail from open to parked. If more than **3** are parked, the
   oldest is dropped, which kills its `tail` as today. Open tails do not count toward the 3.
-- `chat_open` still runs `locate_pane`. If a parked tail exists for the same `PaneRef` **and** the
-  same path, and its tasks are still running, it is reattached: it moves back to open and gets the
+- `chat_open` still runs `locate_pane`. If a live tail of the Pane, open or parked, has the same
+  path and its reader is still running, it is reattached: it moves back to open and gets the
   new Channel as its sink (see "Reattach" below). Otherwise any parked tail of that Pane is
   dropped and a new tail is spawned.
 - A parked tail whose process exited (ssh dropped, file gone) is found on reattach by its finished
@@ -80,9 +80,9 @@ pi's branch tree) keep updating.
 4. reset `last_meta` to default and send `Meta` if the parser has one.
 
 If the first `Reset` of this tail has not been sent yet (parked mid-backlog), the reattach does
-nothing extra: the normal first-Reset rule (A) still sends it to the new sink. Reattach is a
-message to the parse thread (`Msg::Attach(Sink)`), so it serialises with lines and ticks and needs
-no extra lock on `State`.
+nothing extra: the normal first-Reset rule (A) still sends it to the new sink. Reattach puts the sink in
+a slot that the parse thread drains before each message, so it is ordered with lines and ticks;
+the 50 ms tick bounds the wait.
 
 **Image budget.** The open tail's store keeps 64 MiB. On park the store's budget drops to
 **16 MiB**, evicting oldest images first, and stays there while parked. Reattach restores 64 MiB.
@@ -126,7 +126,7 @@ The tail splits into two halves:
   `Msg::{Header(Option<u64>), Line(Vec<u8>), Bytes(usize), Tick, Eof}` over a bounded
   `tokio::sync::mpsc` channel (capacity 16; `send().await` gives backpressure).
 - **Parse thread** (one `std::thread` per tail, named `chat-parse`): owns `State`, loops on
-  `blocking_recv()`, runs `push_line`, `flush` and the sink. It also receives `Msg::Attach`.
+  `blocking_recv()`, runs `push_line`, `flush` and the sink. It also drains the attach slot (C).
   When the channel closes (the handle dropped and aborted the reader) the thread ends.
 - `Eof` flushes and sends the existing "transcript tail exited" error.
 
@@ -134,8 +134,8 @@ The tail splits into two halves:
 `ImageSink` impl). The store is locked only to insert them. `chat_image` no longer waits for a
 parse. The comment in `ChatManager::image` about the lock being held during a parse is updated.
 
-`TailHandle` holds the reader's `JoinHandle` (aborted on drop, as today), the message sender
-(for `Attach`), and the shared `items`, `images` and sink. "Still running" for reattach means the
+`TailHandle` holds the reader's `JoinHandle` (aborted on drop, as today) and the shared `items`,
+`images`, sink and attach slot. "Still running" for reattach means the
 reader task has not finished.
 
 ### B. Trimming in the webview
@@ -188,8 +188,8 @@ Rust, driving a real `tail` through `LocalTransport` and a tempfile, like the ex
 - A file of N lines: the first event is a `Reset` with N items; no `Append` before it.
 - A missing file: an empty `Reset` within 1 s; lines written later arrive as `Append`.
 - A file without a trailing `\n`: `Reset`, then an `Append` once the line completes.
-- A garbage header: `Reset` arrives through the inactivity rule. The inactivity limit is a field
-  of `State` (2 s in production), so the test sets it to 200 ms.
+- A garbage header: `Reset` arrives through the inactivity rule. The limit is 2 s, and 1 s under
+  `cfg!(test)`.
 - D: a parser blocked on a barrier inside `push_line`; `images().try_lock()` succeeds meanwhile.
 - C: close then open the same Pane and path → one `Reset` from the existing items, no new process;
   a different path → new tail; a fourth park evicts the oldest; `close_machine` drops parked
