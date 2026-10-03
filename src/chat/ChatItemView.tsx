@@ -4,6 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatItem } from "../lib/types";
 import { ChevronIcon } from "../ui/icons";
+import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
 function codeLanguage(node: unknown): string | null {
@@ -74,9 +75,44 @@ function diffsFor(input: Record<string, unknown>) {
   return null;
 }
 
+const MARK: Record<ChecklistRow["status"], string> = { completed: "☑", in_progress: "◐", pending: "☐" };
+
+function Checklist({ rows }: { rows: ChecklistRow[] }) {
+  return (
+    <ul className="chat-checklist" aria-label="Todos">
+      {rows.map((r, i) => (
+        <li key={i} className={r.status}>
+          <span className="chat-checklist-mark" aria-hidden="true">{MARK[r.status]}</span>
+          <span>{r.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_call" }>; result?: ToolResult }) {
   const [open, setOpen] = useState(false);
   const input = (item.input ?? {}) as Record<string, unknown>;
+  const todos = checklist(item.input);
+  if (todos) {
+    return (
+      <div className="chat-tool">
+        <button className="chat-tool-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <ChevronIcon className={"icon chev" + (open ? " open" : "")} />
+          <span className="chat-tool-name">{item.name}</span>
+          <span className="chat-tool-sep"> · </span>
+          <span className="chat-tool-summary">{checklistSummary(todos)}</span>
+        </button>
+        {open && (
+          <div className="chat-tool-body">
+            <Checklist rows={todos} />
+            {/* The list is the input; a successful answer only says so again. */}
+            {result?.is_error && <pre className="chat-result error">{result.output}</pre>}
+          </div>
+        )}
+      </div>
+    );
+  }
   const diffs = diffsFor(input);
   return (
     <div className="chat-tool">

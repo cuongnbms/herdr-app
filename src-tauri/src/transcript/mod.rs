@@ -20,27 +20,53 @@ pub use tail::{spawn_tail, TailHandle};
 pub enum ChatItem {
     User {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
     AssistantText {
         markdown: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
     Thinking {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
     ToolCall {
         id: String,
         name: String,
         input_summary: String,
         input: Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
     ToolResult {
         call_id: String,
         output: String,
         is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
     System {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
     },
+}
+
+impl ChatItem {
+    /// When the transcript record that produced this item was written (ISO 8601), if it says.
+    pub fn ts(&self) -> Option<&str> {
+        match self {
+            ChatItem::User { ts, .. }
+            | ChatItem::AssistantText { ts, .. }
+            | ChatItem::Thinking { ts, .. }
+            | ChatItem::ToolCall { ts, .. }
+            | ChatItem::ToolResult { ts, .. }
+            | ChatItem::System { ts, .. } => ts.as_deref(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -162,5 +188,21 @@ mod tests {
         chats.close_machine("a");
         assert!(chats.page(&pane("a"), 0, 1).is_none());
         assert!(chats.page(&pane("b"), 0, 1).is_some());
+    }
+
+    #[test]
+    fn serializes_ts_only_when_known() {
+        let with = serde_json::to_value(ChatItem::User {
+            text: "a".into(),
+            ts: Some("2026-10-03T00:00:00Z".into()),
+        })
+        .unwrap();
+        assert_eq!(with["ts"], "2026-10-03T00:00:00Z");
+        let without = serde_json::to_value(ChatItem::User {
+            text: "a".into(),
+            ts: None,
+        })
+        .unwrap();
+        assert!(without.get("ts").is_none());
     }
 }

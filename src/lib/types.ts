@@ -83,13 +83,15 @@ export type AttachEvent =
   | { type: "exited"; code: number | null }
   | { type: "detached" };
 
-export type ChatItem =
+/** `ts`: when the Transcript record was written (ISO 8601), if it says. */
+export type ChatItem = (
   | { kind: "user"; text: string }
   | { kind: "assistant_text"; markdown: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; id: string; name: string; input_summary: string; input: unknown }
   | { kind: "tool_result"; call_id: string; output: string; is_error: boolean }
-  | { kind: "system"; text: string };
+  | { kind: "system"; text: string }
+) & { ts?: string };
 
 export type ChatEvent =
   | { type: "reset"; items: ChatItem[]; total: number }

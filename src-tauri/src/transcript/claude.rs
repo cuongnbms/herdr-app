@@ -69,12 +69,20 @@ impl Parser for ClaudeParser {
             tracing::trace!(record_type = kind, reason, "skipping transcript record");
             return ParserOutput::None;
         }
+        let ts = v
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let content = v.get("message").and_then(|m| m.get("content"));
         // The CLI's own prompts to the agent (a background task finishing)
         // are not the user's words: show their summary as a system line.
         if v.get("promptSource").and_then(Value::as_str) == Some("system") {
-            return match content.and_then(Value::as_str).and_then(|s| tag(s, "summary")) {
+            return match content
+                .and_then(Value::as_str)
+                .and_then(|s| tag(s, "summary"))
+            {
                 Some(text) => ParserOutput::Append(vec![ChatItem::System {
+                    ts: ts.clone(),
                     text: text.to_string(),
                 }]),
                 None => ParserOutput::None,
@@ -84,7 +92,10 @@ impl Parser for ClaudeParser {
         match content {
             Some(Value::String(s)) if kind == "user" => {
                 if let Some(text) = user_text(s) {
-                    items.push(ChatItem::User { text });
+                    items.push(ChatItem::User {
+                        ts: ts.clone(),
+                        text,
+                    });
                 }
             }
             Some(Value::Array(blocks)) => {
@@ -95,10 +106,14 @@ impl Parser for ClaudeParser {
                             if let Some(text) =
                                 b.get("text").and_then(Value::as_str).and_then(user_text)
                             {
-                                items.push(ChatItem::User { text });
+                                items.push(ChatItem::User {
+                                    ts: ts.clone(),
+                                    text,
+                                });
                             }
                         }
                         ("user", "tool_result") => items.push(ChatItem::ToolResult {
+                            ts: ts.clone(),
                             call_id: b
                                 .get("tool_use_id")
                                 .and_then(Value::as_str)
@@ -110,6 +125,7 @@ impl Parser for ClaudeParser {
                         ("assistant", "text") => {
                             if let Some(t) = b.get("text").and_then(Value::as_str) {
                                 items.push(ChatItem::AssistantText {
+                                    ts: ts.clone(),
                                     markdown: t.to_string(),
                                 });
                             }
@@ -117,6 +133,7 @@ impl Parser for ClaudeParser {
                         ("assistant", "thinking") => {
                             if let Some(t) = b.get("thinking").and_then(Value::as_str) {
                                 items.push(ChatItem::Thinking {
+                                    ts: ts.clone(),
                                     text: t.to_string(),
                                 });
                             }
@@ -129,6 +146,7 @@ impl Parser for ClaudeParser {
                                 .to_string();
                             let input = b.get("input").cloned().unwrap_or(Value::Null);
                             items.push(ChatItem::ToolCall {
+                                ts: ts.clone(),
                                 id: b
                                     .get("id")
                                     .and_then(Value::as_str)
@@ -174,34 +192,42 @@ mod tests {
             items,
             vec![
                 User {
+                    ts: None,
                     text: "list files".into()
                 },
                 Thinking {
+                    ts: None,
                     text: "need ls".into()
                 },
                 AssistantText {
+                    ts: None,
                     markdown: "Listing **now**.".into()
                 },
                 ToolCall {
+                    ts: None,
                     id: "toolu_1".into(),
                     name: "Bash".into(),
                     input_summary: "ls".into(),
                     input: serde_json::json!({"command":"ls","description":"list"})
                 },
                 ToolResult {
+                    ts: None,
                     call_id: "toolu_1".into(),
                     output: "a.txt\nb.txt".into(),
                     is_error: false
                 },
                 ToolResult {
+                    ts: None,
                     call_id: "toolu_2".into(),
                     output: "boom".into(),
                     is_error: true
                 },
                 User {
+                    ts: None,
                     text: "/clear".into()
                 },
                 AssistantText {
+                    ts: None,
                     markdown: "Done.".into()
                 },
             ]
@@ -210,9 +236,21 @@ mod tests {
     #[test]
     fn skips_garbage_lines() {
         let items = run("{\"type\":\"user\",\"message\":{\"content\":\"a\"}}\n\u{FFFD}\u{FFFD}garbage\n{\"type\":\"user\",\"message\":{\"content\":\"b\"}");
-        assert_eq!(items, vec![User { text: "a".into() }]);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: None,
+                text: "a".into()
+            }]
+        );
         let more = run("{\"type\":\"user\",\"message\":{\"content\":\"b\"}}");
-        assert_eq!(more, vec![User { text: "b".into() }]);
+        assert_eq!(
+            more,
+            vec![User {
+                ts: None,
+                text: "b".into()
+            }]
+        );
     }
     #[test]
     fn shows_slash_commands_as_user_text() {
@@ -220,6 +258,7 @@ mod tests {
         assert_eq!(
             run(&line),
             vec![User {
+                ts: None,
                 text: "/working-time last 1 day".into()
             }]
         );
@@ -227,6 +266,7 @@ mod tests {
         assert_eq!(
             run(&bare),
             vec![User {
+                ts: None,
                 text: "/clear".into()
             }]
         );
@@ -239,13 +279,20 @@ mod tests {
         assert_eq!(
             run(&note),
             vec![System {
+                ts: None,
                 text: "Agent \"Research\" finished".into()
             }]
         );
         let bare = serde_json::json!({"type":"user","promptSource":"system","message":{"content":"<task-notification>\n<task-id>a1</task-id>\n</task-notification>"}}).to_string();
         assert_eq!(run(&bare), vec![]);
         let typed = serde_json::json!({"type":"user","promptSource":"typed","origin":{"kind":"human"},"message":{"content":"ok"}}).to_string();
-        assert_eq!(run(&typed), vec![User { text: "ok".into() }]);
+        assert_eq!(
+            run(&typed),
+            vec![User {
+                ts: None,
+                text: "ok".into()
+            }]
+        );
     }
     #[test]
     fn truncates_long_results() {
@@ -271,5 +318,15 @@ mod tests {
             }
             o => panic!("{o:?}"),
         }
+    }
+    #[test]
+    fn stamps_items_with_the_record_timestamp() {
+        let ts = "2026-10-03T00:49:32.966Z";
+        let line = serde_json::json!({"type":"assistant","timestamp":ts,"message":{"content":[{"type":"text","text":"a"},{"type":"tool_use","id":"t","name":"Bash","input":{"command":"ls"}}]}}).to_string();
+        let items = run(&line);
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|i| i.ts() == Some(ts)), "{items:?}");
+        let bare = run("{\"type\":\"user\",\"message\":{\"content\":\"a\"}}");
+        assert_eq!(bare[0].ts(), None);
     }
 }
