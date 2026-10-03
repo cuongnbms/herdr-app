@@ -29,4 +29,14 @@ describe("markdown images", () => {
     expect(container.querySelector("a")).toBeNull();
     expect(screen.getByText("diagram")).toBeTruthy();
   });
+
+  it("renders an image inside a link as text so there is a single link", () => {
+    const { container } = view("[![build](https://shields.io/b.svg)](https://ci.example)");
+    expect(container.querySelector("img")).toBeNull();
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("https://ci.example");
+    fireEvent.click(links[0]);
+    expect(openUrl).toHaveBeenLastCalledWith("https://ci.example");
+  });
 });

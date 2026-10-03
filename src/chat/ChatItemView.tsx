@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -44,6 +44,9 @@ function ExternalLink({ href, children, className, title }: { href?: string; chi
   );
 }
 
+/** True inside a markdown link, where an image must not become a second (nested) link. */
+const InLinkContext = createContext(false);
+
 const mdComponents: Components = {
   pre({ node, children }) {
     const lang = codeLanguage(node);
@@ -56,12 +59,18 @@ const mdComponents: Components = {
     );
   },
   a({ href, children }) {
-    return <ExternalLink href={href}>{children}</ExternalLink>;
+    return (
+      <InLinkContext.Provider value={true}>
+        <ExternalLink href={href}>{children}</ExternalLink>
+      </InLinkContext.Provider>
+    );
   },
   // Markdown images never become <img>: a remote one would load on render and leak to its host.
-  img({ src, alt }) {
+  img: function Img({ src, alt }) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const inLink = useContext(InLinkContext);
     const text = alt || src || "";
-    if (typeof src === "string" && /^https?:\/\//i.test(src)) {
+    if (!inLink && typeof src === "string" && /^https?:\/\//i.test(src)) {
       return (
         <ExternalLink href={src} className="chat-image-link" title={src}>
           {text}

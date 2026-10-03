@@ -66,4 +66,15 @@ describe("mermaid blocks", () => {
       expect.objectContaining({ dompurifyConfig: expect.objectContaining({ FORBID_TAGS: ["img"] }) }),
     );
   });
+
+  it("removes SVG <image> elements from the rendered diagram", async () => {
+    mermaid.render.mockResolvedValue({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.example/x.png"/><g data-testid="kept"><rect/></g></svg>',
+    });
+    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
+    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
+    const host = container.querySelector(".chat-mermaid-svg")!;
+    expect(host.querySelector("image")).toBeNull();
+    expect(host.querySelector("g[data-testid='kept'] rect")).not.toBeNull();
+  });
 });

@@ -8,6 +8,18 @@ const RENDER_DELAY_MS = 150;
 let loader: Promise<typeof import("mermaid").default> | null = null;
 const loadMermaid = () => (loader ??= import("mermaid").then((m) => m.default));
 
+/** Drop every SVG <image>: mermaid's final sanitize ignores dompurifyConfig, and the WebView would fetch the href. */
+function stripImages(svg: string): string {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  if (doc.querySelector("parsererror")) {
+    const html = new DOMParser().parseFromString(svg, "text/html");
+    html.querySelectorAll("image").forEach((el) => el.remove());
+    return html.body.innerHTML;
+  }
+  doc.querySelectorAll("image").forEach((el) => el.remove());
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
 /**
  * A ```mermaid fence drawn as a diagram. Until the source parses (mid-stream, or just wrong) or if
  * rendering fails, it shows the highlighted source like any other code block.
@@ -26,7 +38,7 @@ export function MermaidBlock({ source, children }: { source: string; children: R
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict", dompurifyConfig: { FORBID_TAGS: ["img"] }, suppressErrorRendering: true, theme: theme === "dark" ? "dark" : "default" });
         if (cancelled || !(await mermaid.parse(source, { suppressErrors: true }))) return;
         const out = await mermaid.render(id, source);
-        if (!cancelled) setSvg(out.svg);
+        if (!cancelled) setSvg(stripImages(out.svg));
       } catch (err) {
         console.warn("mermaid render failed", err);
         if (!cancelled) setSvg(null);
