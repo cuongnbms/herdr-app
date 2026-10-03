@@ -27,6 +27,7 @@ export const connectOpen = (
   events: Channel<AttachEvent>,
 ) => invoke<void>("connect_open", { machineId, cols, rows, data, events });
 export const connectWrite = (machineId: string, data: string) => invoke<void>("connect_write", { machineId, data });
+export const connectAck = (machineId: string, bytes: number) => invoke<void>("connect_ack", { machineId, bytes });
 export const connectResize = (machineId: string, cols: number, rows: number) =>
   invoke<void>("connect_resize", { machineId, cols, rows });
 export const connectClose = (machineId: string) => invoke<void>("connect_close", { machineId });

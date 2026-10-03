@@ -38,6 +38,7 @@ pub fn run() {
             commands::ssh_hosts,
             commands::connect_open,
             commands::connect_write,
+            commands::connect_ack,
             commands::connect_resize,
             commands::connect_close,
             commands::sessions_refresh,

@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import "../fonts/fonts.css";
 import {
+  connectAck,
   connectClose,
   connectOpen,
   connectResize,
@@ -15,6 +16,7 @@ import {
 import type { AttachEvent, MachineView } from "../lib/types";
 import { watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
+import { createAckBatcher } from "../terminal/ipcBatch";
 import { applyUnicode11 } from "../terminal/unicode";
 
 function toBytes(buf: unknown): Uint8Array | null {
@@ -60,10 +62,13 @@ export function ConnectDialog({ machine, onClose }: { machine: MachineView; onCl
       closeRef.current();
     };
 
+    // The master's PTY has the same flow control as a terminal: unacked output past 1 MiB
+    // pauses its reader, so ack once xterm has parsed it.
+    const acks = createAckBatcher((n) => connectAck(id, n));
     const data = new Channel<ArrayBuffer>();
     data.onmessage = (buf) => {
       const bytes = toBytes(buf);
-      if (bytes) term.write(bytes);
+      if (bytes) term.write(bytes, () => acks.add(bytes.byteLength));
     };
     const events = new Channel<AttachEvent>();
     events.onmessage = (ev) => {

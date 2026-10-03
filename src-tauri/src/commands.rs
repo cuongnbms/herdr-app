@@ -250,6 +250,12 @@ pub async fn connect_write(att: Att<'_>, machine_id: String, data: String) -> Re
 }
 
 #[tauri::command]
+pub async fn connect_ack(att: Att<'_>, machine_id: String, bytes: usize) -> Result<(), AppError> {
+    att.ack(&master_key(machine_id), bytes);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn connect_resize(
     att: Att<'_>,
     machine_id: String,
