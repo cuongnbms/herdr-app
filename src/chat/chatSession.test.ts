@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { onOpenFailure, openChat, watchMachine, type ChatDeps } from "./chatSession";
 
 const ch = {} as never;
-const loc = { agent: "claude", path: "/p", ambiguous: false, candidates: [] };
+const loc = { agent: "claude", path: "/p", ambiguous: false, candidates: [], pending: false };
 const flush = () => new Promise((r) => setTimeout(r, 0));
 function setup(id: string) {
   const pane = { machine_id: "m", session: "s", pane_id: id };
