@@ -188,8 +188,8 @@ Rust, driving a real `tail` through `LocalTransport` and a tempfile, like the ex
 - A file of N lines: the first event is a `Reset` with N items; no `Append` before it.
 - A missing file: an empty `Reset` within 1 s; lines written later arrive as `Append`.
 - A file without a trailing `\n`: `Reset`, then an `Append` once the line completes.
-- A garbage header (unit test of header parsing and the 2 s rule with a fake clock or short
-  constant): `Reset` arrives through the inactivity rule.
+- A garbage header: `Reset` arrives through the inactivity rule. The inactivity limit is a field
+  of `State` (2 s in production), so the test sets it to 200 ms.
 - D: a parser blocked on a barrier inside `push_line`; `images().try_lock()` succeeds meanwhile.
 - C: close then open the same Pane and path → one `Reset` from the existing items, no new process;
   a different path → new tail; a fourth park evicts the oldest; `close_machine` drops parked
