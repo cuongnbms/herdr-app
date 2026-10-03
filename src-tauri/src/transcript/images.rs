@@ -4,6 +4,8 @@ use std::collections::{HashMap, VecDeque};
 
 /// Decoded bytes kept per tail before the oldest images are evicted.
 pub const IMAGE_BUDGET: usize = 64 * 1024 * 1024;
+/// The budget of a parked tail's store: nobody is looking, so keep less.
+pub const PARKED_IMAGE_BUDGET: usize = 16 * 1024 * 1024;
 
 /// Where a parser puts the decoded bytes of an image it found.
 pub trait ImageSink {
@@ -37,6 +39,23 @@ impl ImageStore {
     pub fn get(&self, r: &str) -> Option<(String, Vec<u8>)> {
         self.map.get(r).cloned()
     }
+
+    /// Sets the budget, evicting oldest first down to it.
+    pub fn set_budget(&mut self, budget: usize) {
+        self.budget = budget;
+        self.evict();
+    }
+
+    fn evict(&mut self) {
+        while self.used > self.budget {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some((_, b)) = self.map.remove(&oldest) {
+                self.used -= b.len();
+            }
+        }
+    }
 }
 
 impl ImageSink for ImageStore {
@@ -51,14 +70,7 @@ impl ImageSink for ImageStore {
         self.used += bytes.len();
         self.order.push_back(r.clone());
         self.map.insert(r, (media_type, bytes));
-        while self.used > self.budget {
-            let Some(oldest) = self.order.pop_front() else {
-                break;
-            };
-            if let Some((_, b)) = self.map.remove(&oldest) {
-                self.used -= b.len();
-            }
-        }
+        self.evict();
     }
 }
 
@@ -82,6 +94,18 @@ mod tests {
         assert!(s.get("a").is_none());
         assert_eq!(s.get("b"), Some(("image/png".into(), vec![1; 4])));
         assert_eq!(s.get("c"), Some(("image/png".into(), vec![2; 4])));
+    }
+    #[test]
+    fn shrinking_the_budget_evicts_oldest_first() {
+        let mut s = ImageStore::new(10);
+        s.put("a".into(), "image/png".into(), vec![0; 4]);
+        s.put("b".into(), "image/png".into(), vec![1; 4]);
+        s.set_budget(5);
+        assert_eq!(s.get("a"), None);
+        assert!(s.get("b").is_some());
+        s.set_budget(10);
+        s.put("c".into(), "image/png".into(), vec![2; 4]);
+        assert!(s.get("b").is_some() && s.get("c").is_some());
     }
     #[test]
     fn skips_an_image_larger_than_the_budget() {

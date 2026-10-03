@@ -1,5 +1,5 @@
 //! Stream a transcript file with `tail -F` on the Machine and feed a parser.
-use super::images::{ImageSink, ImageStore, IMAGE_BUDGET};
+use super::images::{ImageSink, ImageStore, IMAGE_BUDGET, PARKED_IMAGE_BUDGET};
 use super::{ChatEvent, ChatItem, ChatMeta, Parser, ParserOutput};
 use crate::error::AppError;
 use crate::transport::Transport;
@@ -16,12 +16,30 @@ const RESET_ITEMS: usize = 500;
 const QUIET: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2) };
 const MAX_LINE: usize = 32 * 1024 * 1024;
 
-type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
+pub type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
+
+/// Where a tail's events go. `sink` is None while the tail is parked; `attach` leaves the
+/// new sink in `pending` for the parse thread to adopt, so attaching never blocks.
+struct Link {
+    sink: Option<Sink>,
+    pending: Option<Sink>,
+}
+
+type SharedLink = Arc<Mutex<Link>>;
+
+/// Sends `ev` to the current sink, if any. The sink is cloned out so it runs unlocked.
+fn emit(link: &SharedLink, ev: ChatEvent) {
+    let sink = link.lock().unwrap().sink.clone();
+    if let Some(sink) = sink {
+        sink(ev);
+    }
+}
 
 /// A running tail. Dropping it ends the `tail` process.
 pub struct TailHandle {
     items: Arc<Mutex<Vec<ChatItem>>>,
     images: Arc<Mutex<ImageStore>>,
+    link: SharedLink,
     task: JoinHandle<()>,
 }
 
@@ -31,6 +49,28 @@ impl TailHandle {
         let items = self.items.lock().unwrap();
         let end = before.min(items.len());
         items[end.saturating_sub(limit)..end].to_vec()
+    }
+
+    /// Parks the tail: it keeps reading but emits nothing, and keeps fewer images.
+    pub fn detach(&self) {
+        {
+            let mut link = self.link.lock().unwrap();
+            link.sink = None;
+            link.pending = None;
+        }
+        self.images.lock().unwrap().set_budget(PARKED_IMAGE_BUDGET);
+    }
+
+    /// Sends later events to `sink`, starting with a Reset of what the tail kept. The
+    /// parse thread takes it over within a tick (50 ms).
+    pub fn attach(&self, sink: Sink) {
+        self.images.lock().unwrap().set_budget(IMAGE_BUDGET);
+        self.link.lock().unwrap().pending = Some(sink);
+    }
+
+    /// Whether the reader task has not finished (the `tail` process is still up).
+    pub fn is_running(&self) -> bool {
+        !self.task.is_finished()
     }
 
     /// The tail's image store, shared: lock it after letting go of any other lock.
@@ -52,7 +92,7 @@ struct State {
     /// The Model and Reasoning effort last sent to the sink.
     last_meta: ChatMeta,
     parser: Box<dyn Parser>,
-    sink: Sink,
+    link: SharedLink,
     /// Events of the current batch, in order.
     events: Vec<ChatEvent>,
     /// Items appended since the last event was queued.
@@ -121,7 +161,7 @@ impl State {
             self.events.clear();
             self.appended.clear();
             self.sent_first = true;
-            (self.sink)(ev);
+            emit(&self.link, ev);
             self.send_meta_if_changed();
             return;
         }
@@ -131,7 +171,7 @@ impl State {
             });
         }
         for ev in self.events.drain(..) {
-            (self.sink)(ev);
+            emit(&self.link, ev);
         }
         self.send_meta_if_changed();
     }
@@ -140,11 +180,33 @@ impl State {
         let meta = self.parser.meta();
         if meta != self.last_meta {
             self.last_meta = meta.clone();
-            (self.sink)(ChatEvent::Meta {
-                model: meta.model,
-                effort: meta.effort,
-                context_tokens: meta.context_tokens,
-            });
+            emit(
+                &self.link,
+                ChatEvent::Meta {
+                    model: meta.model,
+                    effort: meta.effort,
+                    context_tokens: meta.context_tokens,
+                },
+            );
+        }
+    }
+
+    /// Moves a pending sink in. What was queued for the old sink is dropped: the Reset
+    /// below covers it. Before the first Reset there is nothing more to do, as that
+    /// Reset goes to the new sink.
+    fn adopt_pending(&mut self) {
+        {
+            let mut link = self.link.lock().unwrap();
+            let Some(s) = link.pending.take() else { return };
+            link.sink = Some(s);
+        }
+        self.events.clear();
+        self.appended.clear();
+        if self.sent_first {
+            let ev = Self::reset_event(&self.items.lock().unwrap());
+            emit(&self.link, ev);
+            self.last_meta = ChatMeta::default();
+            self.send_meta_if_changed();
         }
     }
 }
@@ -162,7 +224,7 @@ pub fn spawn_tail(
         images: images.clone(),
         last_meta: ChatMeta::default(),
         parser,
-        sink,
+        link: Arc::new(Mutex::new(Link { sink: Some(sink), pending: None })),
         events: Vec::new(),
         appended: Vec::new(),
         sent_first: false,
@@ -170,7 +232,7 @@ pub fn spawn_tail(
         consumed: 0,
         last_byte: None,
     };
-    let sink = state.sink.clone();
+    let link = state.link.clone();
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     // Parsing is CPU-bound (lines reach 32 MiB), so it gets a thread of its own. It ends
     // when the reader is aborted and the channel closes.
@@ -178,12 +240,13 @@ pub fn spawn_tail(
         .name("chat-parse".into())
         .spawn(move || parse_loop(state, rx));
     if let Err(e) = spawned {
-        sink(ChatEvent::Error { error: AppError::new("io", e.to_string()) });
+        emit(&link, ChatEvent::Error { error: AppError::new("io", e.to_string()) });
     }
-    let task = tokio::spawn(read(t, path, sink, tx));
+    let task = tokio::spawn(read(t, path, link.clone(), tx));
     TailHandle {
         items,
         images,
+        link,
         task,
     }
 }
@@ -203,6 +266,7 @@ enum Msg {
 
 fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
     while let Some(m) = rx.blocking_recv() {
+        st.adopt_pending();
         match m {
             Msg::Header(size) => {
                 st.size = size;
@@ -221,9 +285,12 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
             Msg::Tick => st.flush(),
             Msg::Eof => {
                 st.flush();
-                (st.sink)(ChatEvent::Error {
-                    error: AppError::new("io", "transcript tail exited"),
-                });
+                emit(
+                    &st.link,
+                    ChatEvent::Error {
+                        error: AppError::new("io", "transcript tail exited"),
+                    },
+                );
                 return;
             }
         }
@@ -233,7 +300,7 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
 async fn read(
     t: Arc<dyn Transport>,
     path: String,
-    sink: Sink,
+    link: SharedLink,
     tx: tokio::sync::mpsc::Sender<Msg>,
 ) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
@@ -252,7 +319,7 @@ async fn read(
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
-            sink(ChatEvent::Error { error: e.into() });
+            emit(&link, ChatEvent::Error { error: e.into() });
             return;
         }
     };
