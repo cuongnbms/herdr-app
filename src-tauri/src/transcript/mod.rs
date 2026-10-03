@@ -194,6 +194,18 @@ impl ChatManager {
             .map(|h| h.page(before, limit))
     }
 
+    /// The bytes of the image `r` in the Pane's open chat.
+    pub fn image(&self, pane: &PaneRef, r: &str) -> Result<Vec<u8>, AppError> {
+        let map = self.handles.lock().unwrap();
+        let handle = map
+            .get(pane)
+            .ok_or_else(|| AppError::new("not_found", "no open chat for this pane"))?;
+        handle
+            .image(r)
+            .map(|(_, bytes)| bytes)
+            .ok_or_else(|| AppError::new("not_found", "image not available"))
+    }
+
     /// End every tail of the Machine (it was disconnected or removed).
     pub fn close_machine(&self, machine_id: &str) {
         let gone: Vec<TailHandle> = {
@@ -219,6 +231,49 @@ mod tests {
         fn push_line(&mut self, _: &str, _: &mut dyn ImageSink) -> ParserOutput {
             ParserOutput::None
         }
+    }
+
+    #[tokio::test]
+    async fn image_lookup_through_chat_manager() {
+        struct OneImage;
+        impl Parser for OneImage {
+            fn push_line(&mut self, _: &str, images: &mut dyn images::ImageSink) -> ParserOutput {
+                images.put("u:0".into(), "image/png".into(), vec![1, 2, 3]);
+                ParserOutput::None
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "x\n").unwrap();
+        let chats = ChatManager::default();
+        let pane = PaneRef {
+            machine_id: "a".into(),
+            session: "default".into(),
+            pane_id: "w1:p1".into(),
+        };
+        chats.insert(
+            pane.clone(),
+            spawn_tail(
+                Arc::new(crate::transport::local::LocalTransport),
+                p.to_string_lossy().into(),
+                Box::new(OneImage),
+                Arc::new(|_| {}),
+            ),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert_eq!(chats.image(&pane, "u:0").unwrap(), vec![1, 2, 3]);
+        assert_eq!(
+            chats.image(&pane, "u:9").unwrap_err().message,
+            "image not available"
+        );
+        let other = PaneRef {
+            pane_id: "w1:p2".into(),
+            ..pane
+        };
+        assert_eq!(
+            chats.image(&other, "u:0").unwrap_err().message,
+            "no open chat for this pane"
+        );
     }
 
     #[tokio::test]

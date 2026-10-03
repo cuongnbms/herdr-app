@@ -536,6 +536,26 @@ pub async fn chat_page(
 }
 
 #[tauri::command]
+pub async fn chat_image(
+    chats: Chats<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+    r#ref: String,
+) -> Result<tauri::ipc::Response, AppError> {
+    chats
+        .image(
+            &PaneRef {
+                machine_id,
+                session,
+                pane_id,
+            },
+            &r#ref,
+        )
+        .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
 pub async fn chat_close(
     chats: Chats<'_>,
     machine_id: String,
