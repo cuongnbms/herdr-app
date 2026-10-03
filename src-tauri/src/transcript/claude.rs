@@ -50,6 +50,36 @@ fn user_text(text: &str) -> Option<String> {
     Some(text.to_string())
 }
 
+/// A model id from its display name, as `/model` reports it: `Sonnet 5.5` → `claude-sonnet-5-5`.
+/// Parenthesised notes such as `(1M context)` are dropped.
+fn model_id(display: &str) -> Option<String> {
+    let name = display.split(" (").next()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let slug = name.to_lowercase().replace([' ', '.'], "-");
+    meta_label(&format!("claude-{slug}"))
+}
+
+impl ClaudeParser {
+    /// `/model` and `/effort` take effect before the next reply, so read them from the
+    /// command's output instead of waiting for the next assistant record.
+    fn read_command_output(&mut self, text: &str) {
+        let Some(out) = tag(text, "local-command-stdout") else {
+            return;
+        };
+        if let Some(rest) = out.strip_prefix("Set model to `") {
+            if let Some(model) = rest.split('`').next().and_then(model_id) {
+                self.meta.model = Some(model);
+            }
+        } else if let Some(rest) = out.strip_prefix("Set effort level to ") {
+            if let Some(effort) = rest.split_whitespace().next().and_then(meta_label) {
+                self.meta.effort = Some(effort);
+            }
+        }
+    }
+}
+
 impl Parser for ClaudeParser {
     fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput {
         let v: Value = match serde_json::from_str(line) {
@@ -113,6 +143,7 @@ impl Parser for ClaudeParser {
         let mut items = vec![];
         match content {
             Some(Value::String(s)) if kind == "user" => {
+                self.read_command_output(s);
                 if let Some(text) = user_text(s) {
                     items.push(ChatItem::User {
                         images: vec![],
@@ -541,6 +572,36 @@ mod tests {
         .join("\n");
         let (_, _, p) = run_with(&lines);
         assert_eq!(p.meta().context_tokens, Some(329));
+    }
+    #[test]
+    fn reads_model_and_effort_from_slash_command_output() {
+        let lines = [
+            serde_json::json!({"type":"assistant","effort":"medium","message":{"model":"claude-opus-5-5","content":[]}}),
+            serde_json::json!({"type":"user","message":{"content":"<local-command-stdout>Set model to `Sonnet 5.5` and saved as your default for new sessions</local-command-stdout>"}}),
+            serde_json::json!({"type":"user","message":{"content":"<local-command-stdout>Set effort level to xhigh (saved as your default for new sessions): Deeper reasoning than high, just below maximum (on supported models)</local-command-stdout>"}}),
+        ]
+        .map(|v| v.to_string())
+        .join("\n");
+        let (items, _, p) = run_with(&lines);
+        assert_eq!(items, vec![]);
+        assert_eq!(
+            p.meta(),
+            ChatMeta {
+                model: Some("claude-sonnet-5-5".into()),
+                effort: Some("xhigh".into()),
+                context_tokens: None,
+            }
+        );
+    }
+    #[test]
+    fn model_ids_from_display_names() {
+        assert_eq!(model_id("Fable 5.1").as_deref(), Some("claude-fable-5-1"));
+        assert_eq!(
+            model_id("Opus 5 (1M context) (default)").as_deref(),
+            Some("claude-opus-5")
+        );
+        assert_eq!(model_id("Haiku 4.5").as_deref(), Some("claude-haiku-4-5"));
+        assert_eq!(model_id(""), None);
     }
     #[test]
     fn no_effort_field_leaves_it_unset() {

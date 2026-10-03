@@ -4,7 +4,7 @@ import type { ChatMeta } from "../lib/types";
 
 // Claude Code's `/model` aliases and `/effort` levels (2.1.288); each takes its argument
 // without opening a picker in the terminal.
-export const CLAUDE_MODELS = ["opus", "sonnet", "haiku"];
+export const CLAUDE_MODELS = ["fable", "opus", "sonnet", "haiku"];
 export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 /**

@@ -483,6 +483,7 @@ describe("Composer model menu", () => {
     render(<Composer pane={pane} agent="claude" status="idle" meta={meta} />);
     openMenu();
     expect(screen.getByRole("menuitemradio", { name: "opus" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("menuitemradio", { name: "fable" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByRole("menuitemradio", { name: "high" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("menuitemradio", { name: "sonnet" }).getAttribute("aria-checked")).toBe("false");
   });
