@@ -132,8 +132,11 @@ impl State {
         match out {
             ParserOutput::None => {}
             ParserOutput::Append(v) => {
-                self.items.lock().unwrap().extend(v.iter().cloned());
-                self.appended.extend(v);
+                // Before the first Reset, `items` is all that is needed: that Reset snapshots it.
+                if self.sent_first {
+                    self.appended.extend(v.iter().cloned());
+                }
+                self.items.lock().unwrap().extend(v);
             }
             ParserOutput::Reset(v) => {
                 if !self.appended.is_empty() {
@@ -681,6 +684,34 @@ mod tests {
         let g = got.clone();
         let h = spawn_tail(t, p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
         (h, got)
+    }
+
+    fn state(parser: Box<dyn Parser>) -> State {
+        State {
+            items: Arc::default(),
+            images: Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET))),
+            last_meta: ChatMeta::default(),
+            parser,
+            link: Arc::new(Mutex::new(Link { sink: None, pending: None })),
+            events: Vec::new(),
+            appended: Vec::new(),
+            sent_first: false,
+            size: None,
+            consumed: 0,
+            last_byte: None,
+        }
+    }
+
+    #[test]
+    fn the_backlog_is_not_queued_twice_before_the_first_reset() {
+        let mut st = state(Box::new(Lines));
+        st.line("a");
+        st.line("b");
+        assert_eq!(st.items.lock().unwrap().len(), 2);
+        assert!(st.appended.is_empty(), "the first Reset already carries the backlog");
+        st.sent_first = true;
+        st.line("c");
+        assert_eq!(st.appended.len(), 1);
     }
 
     #[test]
