@@ -3,6 +3,7 @@ import * as ipc from "../lib/ipc";
 import { paneKey, type AgentStatus, type Located, type PaneRef } from "../lib/types";
 import { useLensSettings } from "../settings/lens";
 import { useApp } from "../store/app";
+import { showToast } from "../ui/Toast";
 
 /**
  * A pane that fell back to the Terminal lens because its agent had no transcript yet (Claude
@@ -33,9 +34,8 @@ export function useTranscriptProbe(
             if (retry) timer = setTimeout(() => void probe(false), retryMs);
             return;
           }
-          const { setLensOverride, setLensNote } = useApp.getState();
-          setLensNote(key, null);
-          setLensOverride(key, null);
+          useApp.getState().setLensOverride(key, null);
+          showToast("Switched to Chat", { alert: false });
         },
         () => {
           if (!cancelled && retry) timer = setTimeout(() => void probe(false), retryMs);

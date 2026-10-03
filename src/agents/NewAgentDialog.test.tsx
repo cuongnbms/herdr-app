@@ -26,7 +26,7 @@ const open = (onError = vi.fn()) => {
 };
 
 describe("NewAgentDialog", () => {
-  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); useApp.setState({ selected: null, lensOverride: {}, lensNote: {} }); });
+  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); useApp.setState({ selected: null, lensOverride: {} }); });
   const newKey = paneKey({ machine_id: "local", session: "default", pane_id: "w1:p7" });
 
   it("opens a new agent's pane in the Terminal lens, without a note, until its transcript exists", async () => {
@@ -40,7 +40,6 @@ describe("NewAgentDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(lensWhenSelected).toBe("terminal");
-    expect(useApp.getState().lensNote[newKey]).toBeUndefined();
   });
 
   it("opens a plain shell tab without starting an agent", async () => {

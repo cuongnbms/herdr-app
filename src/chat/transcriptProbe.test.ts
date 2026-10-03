@@ -4,6 +4,9 @@ import { paneKey, type AgentStatus, type PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { useLensSettings } from "../settings/lens";
 import { useTranscriptProbe } from "./transcriptProbe";
+import { showToast } from "../ui/Toast";
+
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
 
 const pane: PaneRef = { machine_id: "local", session: "default", pane_id: "w1:p1" };
 const key = paneKey(pane);
@@ -12,7 +15,8 @@ const notFound = { code: "not_found", message: "no transcript yet" };
 
 describe("useTranscriptProbe", () => {
   beforeEach(() => {
-    useApp.setState({ lensOverride: { [key]: "terminal" }, lensNote: { [key]: "No conversation transcript" } });
+    useApp.setState({ lensOverride: { [key]: "terminal" } });
+    vi.mocked(showToast).mockClear();
     useLensSettings.setState({ chatAfterFirstPrompt: true });
   });
 
@@ -35,7 +39,7 @@ describe("useTranscriptProbe", () => {
 
     rerender({ status: "working" });
     await waitFor(() => expect(useApp.getState().lensOverride[key]).toBeUndefined());
-    expect(useApp.getState().lensNote[key]).toBeUndefined();
+    expect(showToast).toHaveBeenCalledWith("Switched to Chat", { alert: false });
   });
 
   it("looks once more shortly after a miss, for a file written just after the status change", async () => {
@@ -51,6 +55,7 @@ describe("useTranscriptProbe", () => {
     renderHook(() => useTranscriptProbe(pane, "idle", locate, 10));
     await waitFor(() => expect(locate).toHaveBeenCalledTimes(2));
     expect(useApp.getState().lensOverride[key]).toBe("terminal");
+    expect(showToast).not.toHaveBeenCalled();
   });
 
   it("does nothing for a pane without a fallback", async () => {

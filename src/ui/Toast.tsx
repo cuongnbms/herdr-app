@@ -4,6 +4,8 @@ import { AlertIcon } from "./icons";
 export interface ToastItem {
   id: number;
   text: string;
+  /** A warning shows the alert icon; plain information does not. */
+  alert: boolean;
 }
 
 const DISMISS_MS = 5000;
@@ -19,9 +21,9 @@ export function dismissToast(id: number) {
 }
 
 /** Show a toast that dismisses itself after 5 s. */
-export function showToast(text: string) {
+export function showToast(text: string, { alert = true }: { alert?: boolean } = {}) {
   const id = nextId++;
-  items = [...items, { id, text }];
+  items = [...items, { id, text, alert }];
   emit();
   setTimeout(() => dismissToast(id), DISMISS_MS);
 }
@@ -41,7 +43,7 @@ export function Toasts() {
     <div className="toasts" role="status" aria-live="polite">
       {list.map((t) => (
         <div key={t.id} className="toast">
-          <AlertIcon />
+          {t.alert && <AlertIcon />}
           <span>{t.text}</span>
         </div>
       ))}

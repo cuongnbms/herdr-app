@@ -455,7 +455,6 @@ kbd {
 .term-banner::before, .chat-notice::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
 .term-banner.neutral { background: var(--surface-1); border-bottom-color: var(--line); }
 .term-banner.neutral::before { background: var(--grey); }
-.lens-note { padding: 8px 16px; font-size: 12px; color: var(--fg-2); background: var(--surface-1); border-bottom: 1px solid var(--line); }
 
 /* ---------- Settings ---------- */
 .settings {
@@ -913,7 +912,7 @@ kbd {
 .toast .icon { color: var(--err); margin-top: 1px; }
 
 /* Messages people may want to copy. */
-.toast, .error, .chat-notice, .dialog p, .lens-note { user-select: text; -webkit-user-select: text; }
+.toast, .error, .chat-notice, .dialog p { user-select: text; -webkit-user-select: text; }
 
 /* ---------- Motion ---------- */
 @keyframes fade-in { from { opacity: 0; } }

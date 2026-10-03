@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { chosenLens, useApp, selectedPane } from "./app";
+import { paneKey } from "../lib/types";
 import type { MachineView } from "../lib/types";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { EMPTY_LAYOUT, sessionKey, useLayout } from "../sidebar/groups";
@@ -214,5 +215,39 @@ describe("switching session", () => {
     useApp.getState().select(pane("default", "w1:p2"));
     useApp.getState().view({ machine_id: "local", session: "default" });
     expect(useApp.getState().selected).toEqual(pane("default", "w1:p2"));
+  });
+});
+
+describe("an agent showing up in the selected pane", () => {
+  const s = machine.sessions[0];
+  const withAgent = (agent: string | null): MachineView => ({
+    ...machine,
+    sessions: [{ ...s, workspaces: [{ ...s.workspaces[0], tabs: [{ ...s.workspaces[0].tabs[0], panes: [
+      { ...s.workspaces[0].tabs[0].panes[0], agent },
+    ] }] }] }],
+  });
+  const ref = { machine_id: "local", session: "default", pane_id: "w1:p1" };
+  const key = paneKey(ref);
+  beforeEach(() => {
+    useApp.setState({ machines: {}, order: [], selected: null, lens: {}, lensOverride: {} });
+    useApp.getState().upsertMachine(withAgent(null));
+    useApp.getState().select(ref);
+  });
+
+  it("keeps a shell pane on the Terminal lens when Claude starts in it", () => {
+    useApp.getState().upsertMachine(withAgent("claude"));
+    expect(chosenLens(useApp.getState(), key)).toBe("terminal");
+  });
+
+  it("leaves a lens the user picked", () => {
+    useApp.getState().setLens(key, "chat");
+    useApp.getState().upsertMachine(withAgent("claude"));
+    expect(chosenLens(useApp.getState(), key)).toBe("chat");
+  });
+
+  it("does not touch panes that are not selected", () => {
+    useApp.getState().select(null);
+    useApp.getState().upsertMachine(withAgent("claude"));
+    expect(chosenLens(useApp.getState(), key)).toBeUndefined();
   });
 });

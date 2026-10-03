@@ -87,7 +87,6 @@ export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   const sel = useApp(useShallow(selectedPane));
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
-  const note = useApp((s) => (s.selected ? s.lensNote[paneKey(s.selected)] : undefined));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
   const chatFontSize = useSettings((s) => s.chatFontSize);
@@ -171,10 +170,7 @@ export default function App() {
               {defaultLens(sel.pane, remembered) === "chat" ? (
                 <ChatLens key={key} pane={ref} view={sel.pane} />
               ) : (
-                <>
-                  {note && <div className="lens-note">{note}</div>}
-                  <TerminalLens key={key} pane={ref} terminalId={sel.pane.terminal_id} />
-                </>
+                <TerminalLens key={key} pane={ref} terminalId={sel.pane.terminal_id} />
               )}
             </Suspense>
           </>

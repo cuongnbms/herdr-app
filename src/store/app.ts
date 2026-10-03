@@ -49,9 +49,6 @@ export interface AppState {
   lastPane: Record<string, PaneRef>;
   lens: Record<string, Lens>;
   expanded: Record<string, boolean>;
-  /** One-line notes shown in the Terminal lens, e.g. after a Chat lens fallback. Not persisted. */
-  lensNote: Record<string, string>;
-  setLensNote: (key: string, note: string | null) => void;
   /** Automatic lens choices (the Chat lens falling back to Terminal). Not persisted; they win
    *  over `lens` until the user picks a lens again. */
   lensOverride: Record<string, Lens>;
@@ -76,7 +73,6 @@ export const useApp = create<AppState>((set, get) => ({
   selected: null,
   viewed: null,
   lastPane: {},
-  lensNote: {},
   lensOverride: {},
   dashboardOpen: false,
   doneSeen: {},
@@ -90,11 +86,6 @@ export const useApp = create<AppState>((set, get) => ({
           ? { ...s.doneSeen, [paneKey(s.selected)]: true }
           : s.doneSeen,
     })),
-  setLensNote: (key, note) =>
-    set((s) => {
-      const { [key]: _old, ...rest } = s.lensNote;
-      return { lensNote: note ? { ...rest, [key]: note } : rest };
-    }),
   upsertMachine: (v) => {
     // Prune by diff against the previous view so a folder saved for a
     // just-created Workspace survives until the snapshot lists it.
@@ -107,6 +98,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
     set((s) => ({
       machines: { ...s.machines, [v.id]: v },
+      lensOverride: claudeStarted(s, v) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
       order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
       // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
       doneSeen: seenAfterSnapshot(s.doneSeen, v, s.dashboardOpen ? null : s.selected),
@@ -171,6 +163,16 @@ function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView
     }
   }
   return undefined;
+}
+
+/** Claude started in the selected pane, shown on the Terminal with no lens chosen: it has no
+ *  transcript until the first prompt, so stay on the Terminal the user is typing in rather than
+ *  flip to Chat and back. useTranscriptProbe switches to Chat once the transcript exists. */
+function claudeStarted(s: Pick<AppState, "machines" | "selected" | "lens" | "lensOverride">, v: MachineView): boolean {
+  const sel = s.selected;
+  if (!sel || sel.machine_id !== v.id || chosenLens(s, paneKey(sel))) return false;
+  const before = findPane(s.machines, sel);
+  return !!before && before.agent !== "claude" && findPane({ [v.id]: v }, sel)?.agent === "claude";
 }
 
 function firstPane(machines: Record<string, MachineView>, ref: SessionRef): PaneRef | null {
