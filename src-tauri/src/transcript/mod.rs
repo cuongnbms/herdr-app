@@ -148,17 +148,35 @@ pub(crate) fn meta_label(s: &str) -> Option<String> {
 }
 
 const MAX_RESULT_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_INPUT_STRING_BYTES: usize = 64 * 1024;
 
-/// Truncates a tool result to at most 16 KiB on a char boundary, marking the cut.
-pub(crate) fn truncate_result(s: String) -> String {
-    if s.len() <= MAX_RESULT_BYTES {
+/// Cuts `s` to at most `max` bytes on a char boundary, marking the cut.
+fn cut(s: String, max: usize) -> String {
+    if s.len() <= max {
         return s;
     }
-    let mut end = MAX_RESULT_BYTES;
+    let mut end = max;
     while !s.is_char_boundary(end) {
         end -= 1;
     }
     format!("{}\n… (truncated)", &s[..end])
+}
+
+/// Truncates a tool result to at most 16 KiB on a char boundary, marking the cut.
+pub(crate) fn truncate_result(s: String) -> String {
+    cut(s, MAX_RESULT_BYTES)
+}
+
+/// Caps every string in a tool input at 64 KiB, keeping all fields, so a huge Write
+/// or Edit can't bloat the Chat.
+pub(crate) fn cap_input(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::String(s) => Value::String(cut(s, MAX_INPUT_STRING_BYTES)),
+        Value::Array(a) => Value::Array(a.into_iter().map(cap_input).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, cap_input(v))).collect()),
+        other => other,
+    }
 }
 
 /// The transcript parser for an agent.
@@ -232,6 +250,19 @@ impl ChatManager {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn caps_each_input_string_and_keeps_every_field() {
+        let big = format!("a{}", "é".repeat(40 * 1024)); // 80 KiB; the leading byte makes a 2-byte char straddle the cut
+        let v = serde_json::json!({"file_path": "/a", "edits": [{"old_string": big, "new_string": "x"}], "n": 3});
+        let out = cap_input(v);
+        let old = out["edits"][0]["old_string"].as_str().unwrap();
+        assert!(old.ends_with("\n… (truncated)"));
+        assert!(old.len() <= MAX_INPUT_STRING_BYTES + "\n… (truncated)".len());
+        assert_eq!(out["edits"][0]["new_string"], "x");
+        assert_eq!(out["file_path"], "/a");
+        assert_eq!(out["n"], 3);
+    }
 
     struct NoItems;
     impl Parser for NoItems {

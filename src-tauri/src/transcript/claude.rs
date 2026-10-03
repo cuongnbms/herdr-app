@@ -2,7 +2,7 @@
 use super::images::{decode_image, ImageSink};
 use super::locate::input_summary;
 use super::{
-    meta_label, truncate_result as truncate, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput,
+    cap_input, meta_label, truncate_result as truncate, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput,
 };
 use serde_json::Value;
 
@@ -183,7 +183,7 @@ impl Parser for ClaudeParser {
                                     .to_string(),
                                 input_summary: input_summary(&name, &input),
                                 name,
-                                input,
+                                input: cap_input(input),
                             });
                         }
                         ("user", "image") => {
@@ -258,6 +258,22 @@ fn context_tokens(usage: Option<&Value>) -> Option<u64> {
 mod tests {
     use super::*;
     use crate::transcript::{ChatItem::*, Parser, ParserOutput};
+    #[test]
+    fn caps_a_huge_write_but_summarises_the_whole_input() {
+        let content = "x".repeat(1024 * 1024);
+        let line = serde_json::json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Write","input":{"file_path":"/src/a.rs","content":content}}]}}).to_string();
+        let full = input_summary("Write", &serde_json::json!({"file_path":"/src/a.rs","content":content}));
+        match ClaudeParser::default().push_line(&line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
+            ParserOutput::Append(v) => match &v[0] {
+                ChatItem::ToolCall { input, input_summary, .. } => {
+                    assert!(input["content"].as_str().unwrap().len() < 70 * 1024);
+                    assert_eq!(input_summary, &full);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
     fn run(text: &str) -> Vec<ChatItem> {
         let mut p = ClaudeParser::default();
         let mut out = vec![];

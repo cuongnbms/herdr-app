@@ -3,7 +3,7 @@
 use super::images::{decode_image, ImageSink};
 use super::locate::input_summary;
 use super::skill_prompt::parse_skill_prompt;
-use super::{meta_label, truncate_result, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput};
+use super::{cap_input, meta_label, truncate_result, ChatItem, ChatMeta, ImageRef, Parser, ParserOutput};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -226,7 +226,7 @@ fn message_items(entry_id: &str, entry: &Value, sink: &mut dyn ImageSink) -> Vec
                             id: str_of(b, &["toolCallId", "id", "callId"]).to_string(),
                             input_summary: input_summary(&name, &input),
                             name,
-                            input,
+                            input: cap_input(input),
                         });
                     }
                     _ => {}
@@ -357,6 +357,23 @@ mod tests {
                 ParserOutput::None => vec![],
             })
             .collect()
+    }
+
+    #[test]
+    fn caps_a_huge_write_but_summarises_the_whole_input() {
+        let content = "x".repeat(1024 * 1024);
+        let line = serde_json::json!({"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"t","name":"write","arguments":{"path":"/src/a.rs","content":content}}]}}).to_string();
+        let full = input_summary("write", &serde_json::json!({"path":"/src/a.rs","content":content}));
+        match PiParser::default().push_line(&line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
+            ParserOutput::Append(v) | ParserOutput::Reset(v) => match &v[0] {
+                ChatItem::ToolCall { input, input_summary, .. } => {
+                    assert!(input["content"].as_str().unwrap().len() < 70 * 1024);
+                    assert_eq!(input_summary, &full);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
