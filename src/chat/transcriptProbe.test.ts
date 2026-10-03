@@ -42,6 +42,22 @@ describe("useTranscriptProbe", () => {
     expect(showToast).toHaveBeenCalledWith("Switched to Chat", { alert: false });
   });
 
+  it("looks again only when the agent starts or finishes work", async () => {
+    const locate = vi.fn().mockRejectedValue(notFound);
+    const { rerender } = renderHook(
+      ({ status }: { status: AgentStatus }) => useTranscriptProbe(pane, status, locate, 10_000),
+      { initialProps: { status: "idle" as AgentStatus } },
+    );
+    await waitFor(() => expect(locate).toHaveBeenCalledTimes(1));
+    for (const status of ["blocked", "idle", "unknown"] as AgentStatus[]) rerender({ status });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(locate).toHaveBeenCalledTimes(1);
+    rerender({ status: "working" });
+    await waitFor(() => expect(locate).toHaveBeenCalledTimes(2));
+    rerender({ status: "done" });
+    await waitFor(() => expect(locate).toHaveBeenCalledTimes(3));
+  });
+
   it("looks once more shortly after a miss, for a file written just after the status change", async () => {
     const locate = vi.fn().mockRejectedValueOnce(notFound).mockResolvedValueOnce(located);
     renderHook(() => useTranscriptProbe(pane, "working", locate, 10));
