@@ -453,7 +453,53 @@ describe("Composer model label", () => {
     expect(label.textContent).toBe("claude-opus-5-5 · high · 48.6k");
   });
   it("shows nothing when neither is known", () => {
-    render(<Composer pane={pane} agent="claude" meta={{ model: null, effort: null, context_tokens: null }} />);
+    render(<Composer pane={pane} agent="pi" meta={{ model: null, effort: null, context_tokens: null }} />);
     expect(screen.queryByTitle("Model · reasoning effort · context tokens")).toBeNull();
+  });
+  it("stays plain text for agents other than Claude", () => {
+    render(<Composer pane={pane} agent="pi" meta={{ model: "gpt-5", effort: null, context_tokens: null }} />);
+    expect(screen.getByTitle("Model · reasoning effort · context tokens").tagName).toBe("SPAN");
+  });
+});
+
+describe("Composer model menu", () => {
+  const meta = { model: "claude-opus-5-5", effort: "high", context_tokens: null };
+  const openMenu = () => fireEvent.click(screen.getByRole("button", { name: /claude-opus-5-5 · high/ }));
+
+  it("switches Claude's model with /model", () => {
+    render(<Composer pane={pane} agent="claude" status="idle" meta={meta} />);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "sonnet" }));
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "/model sonnet" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+  it("sets Claude's effort with /effort", () => {
+    render(<Composer pane={pane} agent="claude" status="idle" meta={meta} />);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "max" }));
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "/effort max" });
+  });
+  it("checks the current model and effort", () => {
+    render(<Composer pane={pane} agent="claude" status="idle" meta={meta} />);
+    openMenu();
+    expect(screen.getByRole("menuitemradio", { name: "opus" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("menuitemradio", { name: "high" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("menuitemradio", { name: "sonnet" }).getAttribute("aria-checked")).toBe("false");
+  });
+  it("closes on Escape without sending", () => {
+    render(<Composer pane={pane} agent="claude" status="idle" meta={meta} />);
+    openMenu();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(herdrCall).not.toHaveBeenCalledWith("devtuf", "default", "agent.prompt", expect.anything());
+  });
+  it("offers the menu before the Transcript names a model", () => {
+    render(<Composer pane={pane} agent="claude" status="idle" />);
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+  });
+  it("is unavailable while Claude works", () => {
+    render(<Composer pane={pane} agent="claude" status="working" meta={meta} />);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: /claude-opus-5-5 · high/ }).disabled).toBe(true);
   });
 });

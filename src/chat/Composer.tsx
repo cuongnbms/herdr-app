@@ -8,6 +8,7 @@ import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
 import { readDraft, writeDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { modelLabel } from "./modelLabel";
+import { ModelMenu } from "./ModelMenu";
 import { useClaudeSuggestion } from "./useClaudeSuggestion";
 import { useCompletions } from "./useCompletions";
 
@@ -93,6 +94,8 @@ export function Composer({
   const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending);
   const offered = text === "" ? suggestion : null;
   const label = modelLabel(meta);
+  // Where the model menu opens from; null while it is closed.
+  const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
   const showQuick = useQuickReplies((s) => s.show);
   const quickReplies = quickReplyButtons(useQuickReplies((s) => s.replies));
 
@@ -320,10 +323,24 @@ export function Composer({
               </button>
             ))}
           </div>
-          {label && (
-            <span className="composer-model" title="Model · reasoning effort · context tokens">
-              {label}
-            </span>
+          {agent === "claude" ? (
+            // Claude takes /model and /effort with an argument; while it works they would queue.
+            <button
+              className="composer-model"
+              title="Model · reasoning effort · context tokens"
+              aria-haspopup="menu"
+              aria-expanded={menuAt !== null}
+              disabled={status === "working"}
+              onClick={(e) => setMenuAt(e.currentTarget.getBoundingClientRect())}
+            >
+              {label ?? "Model"}
+            </button>
+          ) : (
+            label && (
+              <span className="composer-model" title="Model · reasoning effort · context tokens">
+                {label}
+              </span>
+            )
           )}
           {/* Esc interrupts the agent's turn without killing it the way Ctrl+C can. Send stays
               usable beside it: the agent queues text sent while it works. */}
@@ -335,6 +352,15 @@ export function Composer({
           <button className="send" aria-label="Send" disabled={!canSend} onClick={send}>
             <SendIcon />
           </button>
+          {/* After Send, so the label's sibling rules above still match while it is open. */}
+          {menuAt && (
+            <ModelMenu
+              anchor={menuAt}
+              meta={meta}
+              onPick={(command) => call("agent.prompt", { target: pane.pane_id, text: command }).catch(() => {})}
+              onClose={() => setMenuAt(null)}
+            />
+          )}
         </div>
       </div>
       {error && <div className="chat-error composer-error" role="alert">{error}</div>}
