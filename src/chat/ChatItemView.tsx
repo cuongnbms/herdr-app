@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -27,6 +27,26 @@ function nodeText(node: unknown): string {
   return (n?.children ?? []).map(nodeText).join("");
 }
 
+function ExternalLink({ href, children, className, title }: { href?: string; children?: ReactNode; className?: string; title?: string }) {
+  const external = !!href && /^https?:\/\//i.test(href);
+  return (
+    <a
+      href={href}
+      className={className}
+      title={title}
+      onClick={(e) => {
+        e.preventDefault();
+        if (external) void openUrl(href).catch((err) => console.error("openUrl failed", err));
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** True inside a markdown link, where an image must not become a second (nested) link. */
+const InLinkContext = createContext(false);
+
 const mdComponents: Components = {
   pre({ node, children }) {
     const lang = codeLanguage(node);
@@ -39,18 +59,24 @@ const mdComponents: Components = {
     );
   },
   a({ href, children }) {
-    const external = !!href && /^https?:\/\//i.test(href);
     return (
-      <a
-        href={href}
-        onClick={(e) => {
-          e.preventDefault();
-          if (external) void openUrl(href).catch((err) => console.error("openUrl failed", err));
-        }}
-      >
-        {children}
-      </a>
+      <InLinkContext.Provider value={true}>
+        <ExternalLink href={href}>{children}</ExternalLink>
+      </InLinkContext.Provider>
     );
+  },
+  // Markdown images never become <img>: a remote one would load on render and leak to its host.
+  img: function Img({ src, alt }) {
+    const inLink = useContext(InLinkContext);
+    const text = alt || src || "";
+    if (!inLink && typeof src === "string" && /^https?:\/\//i.test(src)) {
+      return (
+        <ExternalLink href={src} className="chat-image-link" title={src}>
+          {text}
+        </ExternalLink>
+      );
+    }
+    return <span className="chat-image-link">{text}</span>;
   },
 };
 const remarkPlugins = [remarkGfm];

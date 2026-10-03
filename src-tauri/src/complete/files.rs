@@ -17,8 +17,13 @@ const SKIP: &[&str] = &[
 const MAX_DEPTH: usize = 6;
 const MAX_FILES: usize = 5000;
 
-/// Paths relative to `cwd`, `/`-separated and sorted; empty when `cwd` is missing.
-pub async fn list_files(t: &dyn Transport, cwd: &str) -> AppResult<Vec<String>> {
+/// Paths relative to `cwd`, `/`-separated and sorted; empty when `cwd` is missing or
+/// is the home folder, which would scan `~/Library` and trigger macOS privacy prompts.
+pub async fn list_files(t: &dyn Transport, home: &str, cwd: &str) -> AppResult<Vec<String>> {
+    // The home folder holds no project files, so skip it before running anything.
+    if cwd.trim_end_matches('/') == home.trim_end_matches('/') {
+        return Ok(Vec::new());
+    }
     let skip = SKIP
         .iter()
         .map(|n| format!("-name {n}"))
@@ -75,9 +80,13 @@ mod tests {
             std::fs::create_dir_all(f.parent().unwrap()).unwrap();
             std::fs::write(f, "").unwrap();
         }
-        let got = list_files(&LocalTransport, &root.to_string_lossy())
-            .await
-            .unwrap();
+        let got = list_files(
+            &LocalTransport,
+            "/nonexistent-home",
+            &root.to_string_lossy(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             got,
             vec![
@@ -94,9 +103,31 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_cwd_has_no_files() {
-        let got = list_files(&LocalTransport, "/nonexistent/herdr-app")
-            .await
-            .unwrap();
+        let got = list_files(
+            &LocalTransport,
+            "/nonexistent-home",
+            "/nonexistent/herdr-app",
+        )
+        .await
+        .unwrap();
         assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_home_folder_has_no_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(home.join("Library/Caches")).unwrap();
+        std::fs::write(home.join("Library/Caches/x"), "").unwrap();
+        std::fs::write(home.join("notes.md"), "").unwrap();
+        let h = home.to_string_lossy().into_owned();
+        for (home_arg, cwd) in [
+            (h.clone(), h.clone()),
+            (h.clone(), format!("{h}/")),
+            (format!("{h}/"), h.clone()),
+        ] {
+            let got = list_files(&LocalTransport, &home_arg, &cwd).await.unwrap();
+            assert!(got.is_empty(), "home={home_arg} cwd={cwd}: {got:?}");
+        }
     }
 }

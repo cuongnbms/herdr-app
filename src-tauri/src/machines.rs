@@ -129,7 +129,14 @@ pub fn slug(label: &str, taken: &[String]) -> String {
 
 /// Remove any forwarded-socket files (`<id>-<8 hex>.sock`) left in the runtime dir.
 fn sweep_sockets(id: &str) {
-    let Ok(rd) = std::fs::read_dir(crate::transport::runtime_dir()) else {
+    let dir = match crate::transport::secure_runtime_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("not sweeping sockets, runtime dir is not secure: {e}");
+            return;
+        }
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
     let prefix = format!("{id}-");
@@ -790,7 +797,7 @@ impl MachineManager {
             // Every Session, running or not: one that stopped outside the app may still hold a forward.
             for e in entries {
                 if let Err(err) = t.release_socket(&e).await {
-                    tracing::warn!("release_socket {id}/{}: {err}", e.name);
+                    tracing::error!("release_socket {id}/{}: {err}", e.name);
                 }
             }
         }
@@ -1164,7 +1171,7 @@ impl MachineManager {
             Err(e) => return Err(e),
         }
         if let Err(e) = t.release_socket(&entry).await {
-            tracing::warn!("release_socket {id}/{name}: {e}");
+            tracing::error!("release_socket {id}/{name}: {e}");
         }
         self.refresh_sessions(id).await
     }

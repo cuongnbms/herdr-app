@@ -487,8 +487,9 @@ pub async fn complete_files(
     let Some(cwd) = foreground_cwd(&mgr, &pane_ref).await.or(pane.cwd) else {
         return Ok(Vec::new());
     };
+    let info = mgr.info(&pane_ref.machine_id)?;
     let transport = mgr.transport(&pane_ref.machine_id)?;
-    complete::list_files(&*transport, &cwd).await
+    complete::list_files(&*transport, &info.home, &cwd).await
 }
 
 #[tauri::command]
