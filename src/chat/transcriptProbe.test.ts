@@ -2,6 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { paneKey, type AgentStatus, type PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
+import { useLensSettings } from "../settings/lens";
 import { useTranscriptProbe } from "./transcriptProbe";
 
 const pane: PaneRef = { machine_id: "local", session: "default", pane_id: "w1:p1" };
@@ -12,6 +13,16 @@ const notFound = { code: "not_found", message: "no transcript yet" };
 describe("useTranscriptProbe", () => {
   beforeEach(() => {
     useApp.setState({ lensOverride: { [key]: "terminal" }, lensNote: { [key]: "No conversation transcript" } });
+    useLensSettings.setState({ chatAfterFirstPrompt: true });
+  });
+
+  it("stays on the Terminal lens when switching to Chat after the first prompt is turned off", async () => {
+    useLensSettings.setState({ chatAfterFirstPrompt: false });
+    const locate = vi.fn().mockResolvedValue(located);
+    renderHook(() => useTranscriptProbe(pane, "working", locate));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(locate).not.toHaveBeenCalled();
+    expect(useApp.getState().lensOverride[key]).toBe("terminal");
   });
 
   it("returns to the Chat lens once the fallen-back pane's transcript exists", async () => {

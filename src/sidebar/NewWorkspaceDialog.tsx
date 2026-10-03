@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
+import { paneKey } from "../lib/types";
+import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { AgentChoice } from "../agents/AgentChoice";
 import { startAgent } from "../agents/startAgent";
@@ -41,6 +43,8 @@ export function NewWorkspaceDialog({
         setFolder({ machine_id: machineId, session, workspace_id: workspaceId }, cwd);
       }
       if (agent !== "none") {
+        // No transcript until the first prompt: open on the Terminal rather than fall back to it.
+        useApp.getState().setLensOverride(paneKey({ machine_id: machineId, session, pane_id: res.root_pane.pane_id }), "terminal");
         await startAgent((m, p) => herdrCall(machineId, session, m, p), {
           name: agent,
           kind: agent,

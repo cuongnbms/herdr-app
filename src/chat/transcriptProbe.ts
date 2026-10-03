@@ -1,13 +1,15 @@
 import { useEffect } from "react";
 import * as ipc from "../lib/ipc";
 import { paneKey, type AgentStatus, type Located, type PaneRef } from "../lib/types";
+import { useLensSettings } from "../settings/lens";
 import { useApp } from "../store/app";
 
 /**
  * A pane that fell back to the Terminal lens because its agent had no transcript yet (Claude
  * writes it on the first prompt) returns to the Chat lens once the transcript exists. Looks
  * again when the pane is shown and whenever its agent changes status, then once more after
- * `retryMs`, since the status can change just before the file is written.
+ * `retryMs`, since the status can change just before the file is written. Off when the user
+ * turned off switching to Chat after the first prompt.
  */
 export function useTranscriptProbe(
   pane: PaneRef | null,
@@ -17,8 +19,9 @@ export function useTranscriptProbe(
 ) {
   const key = pane ? paneKey(pane) : "";
   const fallenBack = useApp((s) => (key ? s.lensOverride[key] === "terminal" : false));
+  const enabled = useLensSettings((s) => s.chatAfterFirstPrompt);
   useEffect(() => {
-    if (!pane || !fallenBack) return;
+    if (!pane || !fallenBack || !enabled) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = (retry: boolean) =>
@@ -39,5 +42,5 @@ export function useTranscriptProbe(
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, status, fallenBack]);
+  }, [key, status, fallenBack, enabled]);
 }

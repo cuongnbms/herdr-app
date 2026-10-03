@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { AgentIcon } from "./AgentIcon";
 
-/** Agent picker as a segmented radio group; "none" shows the plain-shell prompt. */
+/** Agent picker as a segmented radio group; "none" and "shell" show the plain-shell prompt. */
 export function AgentChoice<T extends string>({
   options,
   value,
@@ -29,7 +29,7 @@ export function AgentChoice<T extends string>({
               autoFocus={autoFocus && value === a}
               onChange={() => onChange(a)}
             />
-            <span aria-hidden="true"><AgentIcon agent={a === "none" ? null : a} /></span>
+            <span aria-hidden="true"><AgentIcon agent={a === "none" || a === "shell" ? null : a} /></span>
             {a}
           </label>
         ))}

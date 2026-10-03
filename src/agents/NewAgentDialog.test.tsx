@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
+import { paneKey } from "../lib/types";
 import { useApp } from "../store/app";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { NewAgentDialog } from "./NewAgentDialog";
@@ -25,7 +26,35 @@ const open = (onError = vi.fn()) => {
 };
 
 describe("NewAgentDialog", () => {
-  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); useApp.setState({ selected: null }); });
+  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); useApp.setState({ selected: null, lensOverride: {}, lensNote: {} }); });
+  const newKey = paneKey({ machine_id: "local", session: "default", pane_id: "w1:p7" });
+
+  it("opens a new agent's pane in the Terminal lens, without a note, until its transcript exists", async () => {
+    setFolder(ref, "/home/me/api");
+    let lensWhenSelected: unknown;
+    useApp.subscribe((s, prev) => {
+      if (s.selected && !prev.selected) lensWhenSelected = s.lensOverride[newKey];
+    });
+    respond();
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
+    expect(lensWhenSelected).toBe("terminal");
+    expect(useApp.getState().lensNote[newKey]).toBeUndefined();
+  });
+
+  it("opens a plain shell tab without starting an agent", async () => {
+    setFolder(ref, "/home/me/api");
+    respond();
+    const { onError } = open();
+    fireEvent.click(screen.getByRole("radio", { name: "shell" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(useApp.getState().selected?.pane_id).toBe("w1:p7"));
+    expect(herdrCall).toHaveBeenCalledTimes(1);
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", { workspace_id: "w1", cwd: "/home/me/api", label: "shell", focus: false });
+    expect(useApp.getState().lensOverride[newKey]).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+  });
 
   it("asks for the folder the first time, prefilled from the first pane, and remembers it", async () => {
     respond();

@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
+import { useLensSettings } from "./lens";
 import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
@@ -109,6 +110,7 @@ function FontSettings() {
 
 function ChatSettings() {
   const q = useQuickReplies();
+  const lens = useLensSettings();
   const list = useRef<HTMLDivElement>(null);
   const added = useRef(false);
   // Focus the row just added, so typing goes straight into it.
@@ -120,6 +122,16 @@ function ChatSettings() {
   const isDefault = q.replies.length === DEFAULT_QUICK_REPLIES.length && q.replies.every((r, i) => r === DEFAULT_QUICK_REPLIES[i]);
   return (
     <>
+      <label className="switch">
+        <span>Switch to Chat after the first prompt</span>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={lens.chatAfterFirstPrompt}
+          onChange={(e) => lens.setChatAfterFirstPrompt(e.target.checked)}
+        />
+      </label>
+      <p className="note">A new agent opens on the Terminal. When on, it turns to Chat once its conversation starts; when off, it stays on the Terminal until you switch.</p>
       <label className="switch">
         <span>Quick replies</span>
         <input type="checkbox" role="switch" checked={q.show} onChange={(e) => q.setShow(e.target.checked)} />

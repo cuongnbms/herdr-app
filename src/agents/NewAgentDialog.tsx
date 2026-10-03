@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
-import type { WorkspaceView } from "../lib/types";
+import { paneKey, type WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { getFolder, setFolder, suggestFolder } from "../workspaces/folder";
 import { AgentChoice } from "./AgentChoice";
 import { startAgent } from "./startAgent";
 
-type Agent = "claude" | "pi";
-const AGENTS: readonly Agent[] = ["claude", "pi"];
+type Agent = "claude" | "pi" | "shell";
+const AGENTS: readonly Agent[] = ["claude", "pi", "shell"];
 
 interface TabCreated {
   root_pane: { pane_id: string };
@@ -42,9 +42,16 @@ export function NewAgentDialog({
         label: agent,
         focus: false,
       });
-      const paneId = res.root_pane.pane_id;
-      useApp.getState().select({ machine_id: machineId, session, pane_id: paneId });
-      await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: paneId });
+      const pane = { machine_id: machineId, session, pane_id: res.root_pane.pane_id };
+      // A fresh agent has no transcript until its first prompt: show the Terminal from the start
+      // instead of a Chat lens that falls back to it a few seconds later.
+      if (agent === "shell") {
+        useApp.getState().select(pane);
+        return;
+      }
+      useApp.getState().setLensOverride(paneKey(pane), "terminal");
+      useApp.getState().select(pane);
+      await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: pane.pane_id });
     } catch (e) {
       onError((e as { message?: string }).message ?? String(e));
     }

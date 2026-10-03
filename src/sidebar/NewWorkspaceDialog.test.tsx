@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
+import { paneKey } from "../lib/types";
+import { useApp } from "../store/app";
 import { getFolder } from "../workspaces/folder";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
 
@@ -32,5 +34,6 @@ describe("NewWorkspaceDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "claude", kind: "claude", pane_id: "w8:p1" }));
     expect(onError).not.toHaveBeenCalled();
+    expect(useApp.getState().lensOverride[paneKey({ machine_id: "local", session: "default", pane_id: "w8:p1" })]).toBe("terminal");
   });
 });

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({
   systemFonts: vi.fn(async () => ["CaskaydiaCove Nerd Font Mono", "Lilex", "Menlo"]),
 }));
+import { loadLensSettings, useLensSettings } from "./lens";
 import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, useQuickReplies } from "./quickReplies";
 import { Settings } from "./Settings";
 import { DEFAULTS, loadFonts, useSettings } from "./store";
@@ -70,6 +71,16 @@ describe("Settings quick replies", () => {
     expect(sw.checked).toBe(true);
     fireEvent.click(sw);
     expect(useQuickReplies.getState().show).toBe(false);
+  });
+
+  it("turns off switching to Chat after the first prompt, and remembers it", () => {
+    useLensSettings.setState({ chatAfterFirstPrompt: true });
+    openChat();
+    const sw = screen.getByRole<HTMLInputElement>("switch", { name: "Switch to Chat after the first prompt" });
+    expect(sw.checked).toBe(true);
+    fireEvent.click(sw);
+    expect(useLensSettings.getState().chatAfterFirstPrompt).toBe(false);
+    expect(loadLensSettings().chatAfterFirstPrompt).toBe(false);
   });
 
   it("edits, removes, adds and resets replies", () => {
