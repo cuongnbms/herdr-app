@@ -32,6 +32,20 @@ describe("showWebgl", () => {
     expect(addons[2].dispose).not.toHaveBeenCalled();
     expect(lossesOf("k0")).toEqual([]);
   });
+  it("frees an evicted context only after disposing the addon", () => {
+    const loseContext = vi.fn();
+    const t = term();
+    t.loadAddon.mockImplementation(() => {
+      const canvas = document.createElement("canvas");
+      canvas.getContext = (() => ({ getExtension: () => ({ loseContext }) })) as any;
+      t.element.appendChild(canvas);
+    });
+    const a = fakeAddon();
+    showWebgl("k0", t, () => a);
+    keys.slice(1, WEBGL_CONTEXTS + 1).forEach((k) => showWebgl(k, term(), fakeAddon));
+    expect(loseContext).toHaveBeenCalled();
+    expect(a.dispose.mock.invocationCallOrder[0]).toBeLessThan(loseContext.mock.invocationCallOrder[0]);
+  });
   it("reattaches an evicted terminal when it is shown again", () => {
     const t = term();
     keys.forEach((k) => showWebgl(k, k === "k0" ? t : term(), fakeAddon));
