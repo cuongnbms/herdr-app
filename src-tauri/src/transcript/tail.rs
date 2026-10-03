@@ -1,5 +1,5 @@
 //! Stream a transcript file with `tail -F` on the Machine and feed a parser.
-use super::images::{ImageStore, IMAGE_BUDGET};
+use super::images::{ImageSink, ImageStore, IMAGE_BUDGET};
 use super::{ChatEvent, ChatItem, ChatMeta, Parser, ParserOutput};
 use crate::error::AppError;
 use crate::transport::Transport;
@@ -80,10 +80,15 @@ impl State {
     }
 
     fn line(&mut self, line: &str) {
-        let out = {
+        // Parse into a local list so the store is locked only to put, never during a parse.
+        let mut found: Vec<(String, String, Vec<u8>)> = Vec::new();
+        let out = self.parser.push_line(line, &mut found);
+        if !found.is_empty() {
             let mut images = self.images.lock().unwrap();
-            self.parser.push_line(line, &mut *images)
-        };
+            for (r, media_type, bytes) in found {
+                images.put(r, media_type, bytes);
+            }
+        }
         match out {
             ParserOutput::None => {}
             ParserOutput::Append(v) => {
@@ -165,7 +170,17 @@ pub fn spawn_tail(
         consumed: 0,
         last_byte: None,
     };
-    let task = tokio::spawn(run(t, path, state));
+    let sink = state.sink.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    // Parsing is CPU-bound (lines reach 32 MiB), so it gets a thread of its own. It ends
+    // when the reader is aborted and the channel closes.
+    let spawned = std::thread::Builder::new()
+        .name("chat-parse".into())
+        .spawn(move || parse_loop(state, rx));
+    if let Err(e) = spawned {
+        sink(ChatEvent::Error { error: AppError::new("io", e.to_string()) });
+    }
+    let task = tokio::spawn(read(t, path, sink, tx));
     TailHandle {
         items,
         images,
@@ -173,7 +188,54 @@ pub fn spawn_tail(
     }
 }
 
-async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
+/// What the reader tells the parse thread.
+enum Msg {
+    /// The size header line, parsed.
+    Header(Option<u64>),
+    /// One line, without its newline.
+    Line(Vec<u8>),
+    /// Raw bytes read after the header, sent once the chunk's lines are.
+    Bytes(usize),
+    Tick,
+    /// The tail's output ended.
+    Eof,
+}
+
+fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
+    while let Some(m) = rx.blocking_recv() {
+        match m {
+            Msg::Header(size) => {
+                st.size = size;
+                st.last_byte = Some(Instant::now());
+            }
+            Msg::Line(mut bytes) => {
+                if bytes.last() == Some(&b'\r') {
+                    bytes.pop();
+                }
+                st.line(&String::from_utf8_lossy(&bytes));
+            }
+            Msg::Bytes(n) => {
+                st.consumed += n as u64;
+                st.last_byte = Some(Instant::now());
+            }
+            Msg::Tick => st.flush(),
+            Msg::Eof => {
+                st.flush();
+                (st.sink)(ChatEvent::Error {
+                    error: AppError::new("io", "transcript tail exited"),
+                });
+                return;
+            }
+        }
+    }
+}
+
+async fn read(
+    t: Arc<dyn Transport>,
+    path: String,
+    sink: Sink,
+    tx: tokio::sync::mpsc::Sender<Msg>,
+) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
     // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
     let script = r#"wc -c < "$1" 2>/dev/null || echo 0; tail -c +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
@@ -190,7 +252,7 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
-            (st.sink)(ChatEvent::Error { error: e.into() });
+            sink(ChatEvent::Error { error: e.into() });
             return;
         }
     };
@@ -206,19 +268,21 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
                 let n = match n { Ok(0) | Err(_) => break, Ok(n) => n };
-                st.last_byte = Some(Instant::now());
+                // Header bytes are not counted: they are not part of the file.
+                let mut raw = 0usize;
                 for part in chunk[..n].split_inclusive(|b| *b == b'\n') {
                     let complete = part.ends_with(b"\n");
                     if header {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
                         if complete {
-                            st.size = parse_header(&buf);
+                            let size = parse_header(&buf);
                             buf.clear();
                             header = false;
+                            if tx.send(Msg::Header(size)).await.is_err() { return; }
                         }
                         continue;
                     }
-                    st.consumed += part.len() as u64;
+                    raw += part.len();
                     if !dropping {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
                         if buf.len() > MAX_LINE {
@@ -227,23 +291,22 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
                         }
                     }
                     if complete {
-                        if !dropping {
-                            let mut bytes = std::mem::take(&mut buf);
-                            if bytes.last() == Some(&b'\r') { bytes.pop(); }
-                            st.line(&String::from_utf8_lossy(&bytes));
+                        if !dropping && tx.send(Msg::Line(std::mem::take(&mut buf))).await.is_err() {
+                            return;
                         }
                         dropping = false;
                         buf.clear();
                     }
                 }
+                // Sent even when 0, so a header still arriving starts the quiet clock.
+                if tx.send(Msg::Bytes(raw)).await.is_err() { return; }
             }
-            _ = tick.tick() => st.flush(),
+            _ = tick.tick() => {
+                if tx.send(Msg::Tick).await.is_err() { return; }
+            }
         }
     }
-    st.flush();
-    (st.sink)(ChatEvent::Error {
-        error: AppError::new("io", "transcript tail exited"),
-    });
+    let _ = tx.send(Msg::Eof).await;
 }
 
 #[cfg(test)]
@@ -295,6 +358,42 @@ mod tests {
                 ..Default::default()
             }
         }
+    }
+
+    /// Blocks inside `push_line` until released, reporting when it got there.
+    struct Stuck {
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl Parser for Stuck {
+        fn push_line(&mut self, _: &str, images: &mut dyn ImageSink) -> ParserOutput {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            images.put("r".into(), "image/png".into(), vec![1]);
+            ParserOutput::None
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_image_store_is_free_while_a_line_parses() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(Stuck { entered: entered_tx, release: release_rx }),
+            Arc::new(|_| {}),
+        );
+        let store = h.images();
+        tokio::task::spawn_blocking(move || entered.recv_timeout(std::time::Duration::from_secs(3)))
+            .await.unwrap().expect("parser never ran");
+        assert!(store.try_lock().is_ok(), "the store is locked during the parse");
+        release.send(()).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(store.lock().unwrap().get("r"), Some(("image/png".to_string(), vec![1])));
     }
 
     #[tokio::test]

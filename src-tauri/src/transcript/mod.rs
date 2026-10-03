@@ -198,8 +198,8 @@ impl ChatManager {
 
     /// The bytes of the image `r` in the Pane's open chat.
     pub fn image(&self, pane: &PaneRef, r: &str) -> Result<Vec<u8>, AppError> {
-        // The tail holds the store lock while it parses a line (up to 32 MiB): wait on it
-        // without holding `handles`, which every other Pane's chat call needs.
+        // The tail locks the store only briefly, but `handles` must still not be held
+        // while locking it.
         let store = self
             .handles
             .lock()
