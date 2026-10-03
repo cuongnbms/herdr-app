@@ -120,7 +120,7 @@ describe("render counts per machine view", () => {
   });
 
   afterAll(() => {
-    if (process.env.RENDER_TABLE) console.table(results);
+    if (import.meta.env.RENDER_TABLE) console.table(results);
   });
 
   const zero = { App: 0, Sidebar: 0, AgentList: 0, ChatLens: 0 };
