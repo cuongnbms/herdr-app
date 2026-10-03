@@ -261,6 +261,8 @@ fn root(
 /// The folders an Agent reads commands from (plugins excluded).
 pub fn roots(agent: &str, home: &str, cwd: Option<&str>) -> Vec<Root> {
     use RootKind::*;
+    // A Pane working in the home folder has no project folders of its own.
+    let cwd = cwd.filter(|c| c.trim_end_matches('/') != home.trim_end_matches('/'));
     let mut out = Vec::new();
     match agent {
         "claude" => {
@@ -482,7 +484,14 @@ pub async fn list_commands(
             });
         }
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(b.source)));
+    out.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then(a.source.cmp(b.source))
+            .then(a.trigger.cmp(&b.trigger))
+    });
+    // A user and a project skill of one name are one row; the sort is stable, so the user's stays.
+    out.dedup_by(|b, a| a.name == b.name && a.source == b.source && a.trigger == b.trigger);
     Ok(out)
 }
 
@@ -677,6 +686,64 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(find(&got, "deploy").source, "user");
+    }
+
+    fn count(c: &[SlashCommand], name: &str) -> usize {
+        c.iter().filter(|x| x.name == name).count()
+    }
+
+    #[tokio::test]
+    async fn a_skill_in_both_user_and_project_folders_is_listed_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let cwd = tmp.path().join("proj");
+        write(
+            &home.join(".claude/skills/foo/SKILL.md"),
+            "---\ndescription: User foo\n---\n",
+        );
+        write(
+            &cwd.join(".claude/skills/foo/SKILL.md"),
+            "---\ndescription: Project foo\n---\n",
+        );
+        write(
+            &home.join(".codex/skills/bar/SKILL.md"),
+            "---\ndescription: User bar\n---\n",
+        );
+        write(
+            &cwd.join(".codex/skills/bar/SKILL.md"),
+            "---\ndescription: Project bar\n---\n",
+        );
+        let (h, c) = (home.to_string_lossy(), cwd.to_string_lossy());
+        let claude = list_commands(&LocalTransport, "claude", &h, Some(&c))
+            .await
+            .unwrap();
+        assert_eq!(count(&claude, "foo"), 1);
+        assert_eq!(find(&claude, "foo").description, "User foo");
+        let codex = list_commands(&LocalTransport, "codex", &h, Some(&c))
+            .await
+            .unwrap();
+        assert_eq!(count(&codex, "bar"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_pane_in_the_home_folder_lists_each_command_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write(&home.join(".claude/commands/deploy.md"), "Ship it\n");
+        write(
+            &home.join(".claude/skills/foo/SKILL.md"),
+            "---\ndescription: Foo\n---\n",
+        );
+        let h = home.to_string_lossy();
+        for cwd in [h.to_string(), format!("{h}/")] {
+            let got = list_commands(&LocalTransport, "claude", &h, Some(&cwd))
+                .await
+                .unwrap();
+            assert_eq!(count(&got, "deploy"), 1);
+            assert_eq!(find(&got, "deploy").source, "user");
+            assert_eq!(count(&got, "foo"), 1);
+            assert!(got.iter().all(|c| c.source != "project"));
+        }
     }
 
     #[tokio::test]

@@ -24,9 +24,10 @@ pub async fn list_files(t: &dyn Transport, cwd: &str) -> AppResult<Vec<String>> 
         .map(|n| format!("-name {n}"))
         .collect::<Vec<_>>()
         .join(" -o ");
+    // Only folders are pruned: a file named `build` is still listed.
     // -maxdepth goes first: GNU find warns when it follows other expressions.
     let script = format!(
-        "cd \"$1\" 2>/dev/null || exit 0; find . -maxdepth {MAX_DEPTH} \\( {skip} \\) -prune -o -type f -print | head -n {MAX_FILES}"
+        "cd \"$1\" 2>/dev/null || exit 0; find . -maxdepth {MAX_DEPTH} \\( -type d \\( {skip} \\) \\) -prune -o -type f -print | head -n {MAX_FILES}"
     );
     let argv = vec![
         "sh".to_string(),
@@ -67,6 +68,8 @@ mod tests {
             "a/b/c/d/e/f.txt",
             "a/b/c/d/e/f/g.txt",
             "has space/n.md",
+            "scripts/build",
+            "dist",
         ] {
             let f = root.join(p);
             std::fs::create_dir_all(f.parent().unwrap()).unwrap();
@@ -80,7 +83,9 @@ mod tests {
             vec![
                 "README.md",
                 "a/b/c/d/e/f.txt",
+                "dist",
                 "has space/n.md",
+                "scripts/build",
                 "src/a.ts",
                 "src/deep/b.ts"
             ]
