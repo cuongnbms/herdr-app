@@ -247,6 +247,25 @@ copies the item array and rebuilds every row in the webview.
 The tokio ticker was never more than 15 ms late. D therefore shows up as `chat_image` waiting on
 the store lock, not as stalled workers.
 
+### After (chat-loading branch)
+
+Same synthetic files and harness, three runs per case. The harness runs under `cargo test`, where
+`QUIET` is 1 s, so "First `Reset`" is bounded below by about 1 s here (2 s in the app).
+
+| Case | First `Reset` | Items in it (of total) | `Append` events | `Append` items | Settled | IPC | Reattach |
+|------|---------------|------------------------|-----------------|----------------|---------|-----|----------|
+| Claude, local | 1.0-1.06 s | 500 (of 57000) | 0 | 0 | 1.0-1.06 s | 0.2 MB | 32-45 ms |
+| pi, local | 0.90-0.95 s | 500 (of 42000) | 0 | 0 | 0.90-0.95 s | 0.2 MB | 32-38 ms |
+| Claude, devtuf | 0.98-1.28 s | 500 (of 57000) | 0 | 0 | 0.98-1.28 s | 0.2 MB | 23-44 ms |
+| pi, devtuf | 0.88-1.06 s | 500 (of 42000) | 0 | 0 | 0.88-1.06 s | 0.2 MB | 26-47 ms |
+
+Every first `Reset` carries the whole file's total with a 500-item window, and no `Append` arrives
+before settling. IPC drops from 13-23 MB to 0.2 MB. "Reattach" is the time from `close` plus
+`reattach` on a settled tail to the first `Reset` on the new sink. Max tokio stall was 2-30 ms.
+
+The first `Reset` now waits for the whole backlog (about 1 s of inactivity) instead of a 300 ms
+cap, in exchange for one correct total and no backlog replay through `Append`.
+
 Done means `pnpm test`, `pnpm typecheck` and `cargo test` pass, the numbers above exist before and
 after, and a manual check finds no regression in older paging, a pi branch switch, images, live
 appends, Edit/Write diffs, and switching between four Chat panes.
