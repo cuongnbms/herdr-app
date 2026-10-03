@@ -849,6 +849,16 @@ impl MachineManager {
         self.set_state(id, MachineState::Disconnected, None);
     }
 
+    /// App start: the local Machine and every enabled ssh Machine, all at once.
+    pub async fn connect_at_startup(self: &Arc<Self>) {
+        let local = async {
+            if let Err(e) = self.connect(LOCAL).await {
+                tracing::error!("connect local: {e}");
+            }
+        };
+        tokio::join!(local, self.connect_enabled_ssh());
+    }
+
     /// Connect every enabled ssh Machine concurrently (app start). Batch mode only: one
     /// that needs a password or passphrase ends in `ssh_auth` and offers Connect….
     pub async fn connect_enabled_ssh(self: &Arc<Self>) {
@@ -2346,6 +2356,57 @@ mod tests {
             emits[0].sessions[0].workspaces[1].status,
             crate::herdr::types::AgentStatus::Done
         );
+    }
+
+    /// Fake transport with no sessions whose every exec first sleeps `delay_s`.
+    struct SlowT {
+        delay_s: &'static str,
+    }
+    #[async_trait::async_trait]
+    impl Transport for SlowT {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let out = if argv.join(" ").contains("HERDR=") {
+                "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.9.3\nPROTOCOL=22\n"
+            } else {
+                "name status directory socket\n"
+            };
+            let script = format!("sleep {}; printf %s \"$1\"", self.delay_s);
+            vec!["sh".into(), "-c".into(), script, "sh".into(), out.into()]
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            Ok(s.socket.clone().into())
+        }
+        async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_does_not_wait_for_local() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("m.json");
+        let cfg = MachineConfig {
+            id: "box".into(),
+            label: "box".into(),
+            ssh_target: "box".into(),
+            herdr_path: None,
+            enabled: true,
+        };
+        save_registry(&p, &[cfg]).unwrap();
+        let mgr = MachineManager::new(p, Arc::new(|_| {}));
+        mgr.with_transport_factory(Arc::new(|c: &MachineConfig| {
+            let delay_s = if c.id == LOCAL { "1" } else { "0" };
+            Arc::new(SlowT { delay_s }) as Arc<dyn Transport>
+        }));
+        let state = |mgr: &MachineManager, id: &str| {
+            mgr.views().into_iter().find(|v| v.id == id).unwrap().state
+        };
+        let me = mgr.clone();
+        let startup = tokio::spawn(async move { me.connect_at_startup().await });
+        assert!(wait_for(|| state(&mgr, "box") == MachineState::Connected).await);
+        assert_ne!(state(&mgr, "local"), MachineState::Connected);
+        startup.await.unwrap();
+        assert_eq!(state(&mgr, "local"), MachineState::Connected);
     }
 
     #[tokio::test]
