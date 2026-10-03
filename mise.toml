@@ -20,6 +20,12 @@ description = "Build the release bundle and open it"
 depends = ["build"]
 run = "open $APP"
 
+# Replaces any previous copy so files removed from the bundle don't linger.
+[tasks."install:app"]
+description = "Build the release bundle and install it into /Applications"
+depends = ["build"]
+run = ["rm -rf /Applications/Herdr.app", "ditto $APP /Applications/Herdr.app"]
+
 [tasks.typecheck]
 description = "Type-check the frontend"
 run = "pnpm typecheck"
