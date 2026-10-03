@@ -21,6 +21,7 @@ import { createOutputBuffer } from "./outputBuffer";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 import { applyUnicode11 } from "./unicode";
 import { forgetWebgl, showWebgl } from "./webgl";
+import { applyWheelScroll } from "./wheel";
 
 const RESIZE_SETTLE_MS = 150;
 
@@ -44,6 +45,7 @@ function createEntry(key: string) {
   applyUnicode11(term);
   applyOsc52(term, (text) => void writeText(text).catch((e) => console.error("OSC 52 copy failed", e)));
   term.attachCustomKeyEventHandler(createKeyHandler((text) => term.input(text)));
+  applyWheelScroll(term);
   const unwatchFont = watchTermFont(term, fit);
   const unwatchTheme = watchTermTheme(term);
   const output = createOutputBuffer((data, onParsed) => term.write(data, onParsed));
