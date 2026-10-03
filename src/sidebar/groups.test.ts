@@ -118,3 +118,32 @@ describe("bookmarks and forgetting", () => {
     expect(r.bookmarks).toEqual([]);
   });
 });
+
+describe("no-ops return the same object", () => {
+  it("moveNode landing where the node already is", () => {
+    const l = L(s("x"), s("y"), g("a", s("z")));
+    expect(moveNode(l, S("x"), { kind: "before", ref: S("y") })).toBe(l);
+    expect(moveNode(l, S("y"), { kind: "after", ref: S("x") })).toBe(l);
+    expect(moveNode(l, G("a"), { kind: "into", groupId: null })).toBe(l);
+    expect(moveNode(l, S("x"), { kind: "into", groupId: null, first: true })).toBe(l);
+    expect(moveNode(l, S("z"), { kind: "into", groupId: "a" })).toBe(l);
+  });
+  it("renameGroup to the same label or an unknown id", () => {
+    const l = L(g("a"));
+    expect(renameGroup(l, "a", " A ")).toBe(l);
+    expect(renameGroup(l, "nope", "X")).toBe(l);
+  });
+  it("deleteGroup on an unknown id", () => {
+    const l = L(g("a"));
+    expect(deleteGroup(l, "nope")).toBe(l);
+  });
+  it("bookmark and forget no-ops", () => {
+    const l = { tree: [s("x")], bookmarks: ["x", "y"] };
+    expect(setBookmarked(l, "x", true)).toBe(l);
+    expect(setBookmarked(l, "z", false)).toBe(l);
+    expect(moveBookmark(l, "x", "y")).toBe(l);
+    expect(moveBookmark(l, "y", null)).toBe(l);
+    expect(forgetSessions(l, ["absent"])).toBe(l);
+    expect(forgetMachine(l, "nobody")).toBe(l);
+  });
+});

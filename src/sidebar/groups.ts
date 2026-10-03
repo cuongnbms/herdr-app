@@ -91,6 +91,18 @@ function insertInto(nodes: LayoutNode[], groupId: string, first: boolean, node: 
   return null;
 }
 
+function sameTree(a: LayoutNode[], b: LayoutNode[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((n, i) => {
+      const m = b[i];
+      if (n === m) return true;
+      if (n.kind === "session") return m.kind === "session" && n.key === m.key;
+      return m.kind === "group" && n.id === m.id && n.label === m.label && sameTree(n.children, m.children);
+    })
+  );
+}
+
 const refOfTarget = (t: Target): NodeRef | null =>
   t.kind === "into" ? (t.groupId === null ? null : { kind: "group", id: t.groupId }) : t.ref;
 
@@ -110,8 +122,12 @@ export function moveNode(layout: Layout, node: NodeRef, target: Target, unplaced
   if (ref && sameRef(node, ref)) return layout;
 
   const known = new Set<SessionKey>();
-  const collect = (nodes: LayoutNode[]) =>
-    nodes.forEach((n) => (n.kind === "session" ? known.add(n.key) : collect(n.children)));
+  const collect = (nodes: LayoutNode[]) => {
+    for (const n of nodes) {
+      if (n.kind === "session") known.add(n.key);
+      else collect(n.children);
+    }
+  };
   collect(layout.tree);
   const extra: SessionNode[] = [];
   for (const key of unplaced) {
@@ -134,7 +150,8 @@ export function moveNode(layout: Layout, node: NodeRef, target: Target, unplaced
   } else {
     tree = insertBeside(rest, target.ref, target.kind === "before" ? 0 : 1, moving);
   }
-  return tree ? { ...layout, tree } : layout;
+  if (!tree || (!extra.length && sameTree(tree, layout.tree))) return layout;
+  return { ...layout, tree };
 }
 
 export function addGroup(layout: Layout, parentId: string | null, label: string): { layout: Layout; id: string | null } {
@@ -172,6 +189,8 @@ function mapGroup(nodes: LayoutNode[], id: string, fn: (g: GroupNode) => LayoutN
 export function renameGroup(layout: Layout, id: string, label: string): Layout {
   const text = label.trim();
   if (!text) return layout;
+  const current = findGroup(layout.tree, id);
+  if (!current || current.label === text) return layout;
   const tree = mapGroup(layout.tree, id, (g) => [g.label === text ? g : { ...g, label: text }]);
   return tree === layout.tree ? layout : { ...layout, tree };
 }
