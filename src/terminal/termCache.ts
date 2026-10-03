@@ -13,8 +13,9 @@ const cache = new Map<string, Entry>();
 const owners = new Map<string, number>();
 let nextToken = 1;
 
-export function getOrCreate(key: string, factory: () => Entry): Entry {
-  let e = cache.get(key);
+/** Every entry under `key` must come from the same factory, which fixes its type. */
+export function getOrCreate<E extends Entry>(key: string, factory: () => E): E {
+  let e = cache.get(key) as E | undefined;
   if (!e) {
     e = factory();
     cache.set(key, e);

@@ -12,9 +12,12 @@ import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { initialLensState, lensReducer } from "./lensState";
+import { createOutputBuffer } from "./outputBuffer";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 import { applyUnicode11 } from "./unicode";
 import { forgetWebgl, showWebgl } from "./webgl";
+
+const RESIZE_SETTLE_MS = 150;
 
 interface Props {
   pane: PaneRef;
@@ -25,8 +28,8 @@ function createEntry(key: string) {
   const term = new Terminal({
     cursorBlink: true,
     scrollback: 5000,
-    // xterm scrolls in whole rows; animate through them instead of jumping.
-    smoothScrollDuration: 100,
+    // No smooth scroll: at 100ms trackpad scrolling lagged behind the fingers and felt rubbery.
+    smoothScrollDuration: 0,
     allowProposedApi: true,
   });
   const fit = new FitAddon();
@@ -35,10 +38,13 @@ function createEntry(key: string) {
   term.attachCustomKeyEventHandler((e) => !e.metaKey);
   const unwatchFont = watchTermFont(term, fit);
   const unwatchTheme = watchTermTheme(term);
+  const output = createOutputBuffer((data, onParsed) => term.write(data, onParsed));
   return {
     term,
     fit,
+    output,
     cleanup: () => {
+      output.dispose();
       forgetWebgl(key);
       unwatchFont();
       unwatchTheme();
@@ -72,7 +78,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
     if (!container) return;
     const key = { machine_id: pane.machine_id, session: pane.session, terminal_id: terminalId };
     let live = true;
-    const { term, fit } = getOrCreate(cacheKey, () => createEntry(cacheKey));
+    const { term, fit, output } = getOrCreate(cacheKey, () => createEntry(cacheKey));
     const revealed = !!term.element;
     if (revealed) container.appendChild(term.element!);
     else term.open(container);
@@ -81,6 +87,8 @@ export function TerminalLens({ pane, terminalId }: Props) {
     } catch {
       /* container not measurable yet */
     }
+    // Only the mounted terminal writes straight through; cached ones batch until shown again.
+    output.setVisible(true);
     let frame = 0;
     // The WebGL atlas rasterizes ASCII up front, so the font must be a web font first
     // (see ensureTermFont); the DOM renderer covers the wait.
@@ -114,7 +122,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
       data.onmessage = (buf) => {
         const bytes = toBytes(buf);
         if (!bytes || closed) return;
-        term.write(bytes, () => acks.add(bytes.byteLength));
+        output.write(bytes, () => acks.add(bytes.byteLength));
       };
       const events = new Channel<AttachEvent>();
       events.onmessage = (ev) => {
@@ -136,6 +144,8 @@ export function TerminalLens({ pane, terminalId }: Props) {
     const input = term.onData((d) => inputQueue.push(d));
     const resize = term.onResize(({ cols, rows }) => void termResize(key, cols, rows).catch(() => {}));
 
+    // Refit once a split or window drag settles: each grid change reflows the scrollback and
+    // makes herdr redraw the whole screen. fit() itself skips unchanged grids.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ro = new ResizeObserver(() => {
       clearTimeout(timer);
@@ -145,12 +155,13 @@ export function TerminalLens({ pane, terminalId }: Props) {
         } catch {
           /* ignore */
         }
-      }, 50);
+      }, RESIZE_SETTLE_MS);
     });
     ro.observe(container);
 
     return () => {
       live = false;
+      output.setVisible(false);
       cancelAnimationFrame(frame);
       clearTimeout(timer);
       inputQueue.dispose();
