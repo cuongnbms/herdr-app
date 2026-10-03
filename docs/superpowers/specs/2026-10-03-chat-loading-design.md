@@ -209,14 +209,41 @@ TypeScript (vitest):
 
 Before any code change, on `dev`, and again on this branch:
 
-- `tmp/chat-bench/gen.py` generates a Claude and a pi Transcript, about 50 MB and 20k items
-  each, with about 20 base64 images of ~500 KB and a few Write/Edit inputs of ~1 MB. Record
-  shapes come from the parser test fixtures. No real Transcripts are read.
-- A temporary `tracing` patch in `tail.rs`, not committed, logs: time from spawn to the first
-  `Reset`, items in it, and `Append` events and items until 1 s of quiet; after the change also
-  the time to reattach a parked tail.
-- Run locally, then over the `devtuf` Machine with the files copied there (`scp`), opening them
-  through the TranscriptPicker.
+- `gen.py`, kept outside the repo, generates a Claude and a pi Transcript of the record shapes in
+  the parser test fixtures, with base64 images and large Write inputs. No real Transcripts are read.
+- A temporary harness, `transcript/bench.rs`, is an `#[ignore]` test and is never committed. It
+  calls `spawn_tail` with the real parser on a 2-worker tokio runtime and counts the events the
+  webview would receive, until 1.5 s pass without one. It records:
+  - time to the first `Reset` and the items in it;
+  - the `Append` events and items;
+  - the IPC size, as the serialised JSON;
+  - the worst lateness of a 5 ms tokio ticker.
+
+  After the change it also times reattaching a parked tail.
+- It runs locally, and over SSH to `devtuf` through `SshTransport` and a ControlMaster, with the
+  files copied there with `scp`.
+- The in-app manual check below covers the webview side.
+
+### Baseline (dev at 7f4fa9c)
+
+Synthetic files:
+- Claude: 39 MiB, 38k lines, 57k items.
+- pi: 34 MiB, 28k lines, 42k items.
+
+Each has 20 images of 500 KB and 4 tool inputs of 1 MiB. Each case ran three times.
+
+| Case | First `Reset` | Items in it (of total so far) | `Append` events | `Append` items | Settled | IPC |
+|------|---------------|-------------------------------|-----------------|----------------|---------|-----|
+| Claude, local | 302 ms | 500 (of 14.3k) | 15–16 | 42.7k | 1.05–1.1 s | 19 MB |
+| pi, local | 302 ms | 500 (of 12.2–12.6k) | 12–13 | 29.4–29.8k | 0.9–0.95 s | 13 MB |
+| Claude, devtuf | 301–309 ms | 500 (of 2.5–8.6k) | 11–16 | 48.5–54.5k | 0.9–1.2 s | 21–23 MB |
+| pi, devtuf | 303–310 ms | 500 (of 3.2–4.6k) | 11–13 | 37.4–38.8k | 0.9–1.1 s | 17 MB |
+
+In every run, 75–96 % of the backlog reached the webview as `Append`. Each of those batches
+copies the item array and rebuilds every row in the webview.
+
+The tokio ticker was never more than 15 ms late. D therefore shows up as `chat_image` waiting on
+the store lock, not as stalled workers.
 
 Done means `pnpm test`, `pnpm typecheck` and `cargo test` pass, the numbers above exist before and
 after, and a manual check finds no regression in older paging, a pi branch switch, images, live
