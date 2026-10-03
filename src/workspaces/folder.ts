@@ -87,6 +87,8 @@ export function pruneFolders(machineId: string, session: SessionView, previous?:
   const prefix = PREFIX + encodeURIComponent(machineId) + "/" + encodeURIComponent(session.name) + "/";
   const live = new Set(session.workspaces.map((w) => w.workspace_id));
   const known = previous && isSnapshot(previous) ? new Set(previous.workspaces.map((w) => w.workspace_id)) : null;
+  // Pruning by diff removes only ids that left since `previous`; none did, so skip the scan.
+  if (known && [...known].every((id) => live.has(id))) return;
   let removed = false;
   try {
     const doomed: string[] = [];

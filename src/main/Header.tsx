@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { StatusDot } from "../sidebar/StatusDot";
 import { chosenLens, selectedPane, useApp } from "../store/app";
@@ -6,7 +7,8 @@ import { paneKey } from "../lib/types";
 import { defaultLens } from "../lens";
 import { ChatIcon, TerminalIcon } from "../ui/icons";
 
-export function Header() {
+// Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
+export const Header = memo(function Header() {
   const sel = useApp(useShallow(selectedPane));
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const setLens = useApp((s) => s.setLens);
@@ -39,4 +41,4 @@ export function Header() {
       </div>
     </header>
   );
-}
+});

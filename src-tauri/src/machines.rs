@@ -18,7 +18,7 @@ use crate::{
         },
         MachineInfo, SessionEntry, Transport,
     },
-    view::{MachineState, MachineView, PaneRef, PaneStatusEvent, SessionView},
+    view::{MachineState, MachineView, PaneRef, PaneStatusEvent, PaneView, SessionView},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -278,6 +278,8 @@ impl Drop for AbortOnDrop {
 struct Throttle {
     last: Option<Instant>,
     pending: bool,
+    /// The view last emitted; an equal one is not emitted (nor serialized) again.
+    sent: Option<MachineView>,
 }
 
 pub struct MachineManager {
@@ -466,6 +468,27 @@ impl MachineManager {
             .collect()
     }
 
+    /// One Pane as `views()` shows it, found under the lock without cloning any view.
+    pub fn pane_view(&self, r: &PaneRef) -> AppResult<PaneView> {
+        let ms = self.machines.lock().unwrap();
+        let sess = ms
+            .iter()
+            .find(|m| m.cfg.id == r.machine_id)
+            .and_then(|m| m.sessions.iter().find(|s| s.entry.name == r.session))
+            .ok_or_else(|| not_found(format!("unknown session {}/{}", r.machine_id, r.session)))?;
+        // `Machine::view` shows a stopped Session, or one not yet seen, with no Workspaces.
+        sess.view
+            .as_ref()
+            .filter(|_| sess.entry.running)
+            .into_iter()
+            .flat_map(|v| &v.workspaces)
+            .flat_map(|w| &w.tabs)
+            .flat_map(|t| &t.panes)
+            .find(|p| p.pane_id == r.pane_id)
+            .cloned()
+            .ok_or_else(|| not_found(format!("unknown pane {}", r.pane_id)))
+    }
+
     pub fn transport(&self, id: &str) -> AppResult<Arc<dyn Transport>> {
         self.with_machine(id, |m| m.transport.clone())?
             .ok_or_else(|| not_found(format!("machine {id} is not connected")))
@@ -496,9 +519,16 @@ impl MachineManager {
             .iter()
             .find(|m| m.cfg.id == id && !m.removing)
             .map(Machine::view);
-        if let Some(v) = view {
-            (self.emit)(UiEvent::Machine(v));
+        let Some(v) = view else { return };
+        {
+            let mut t = self.throttle.lock().unwrap();
+            let e = t.entry(id.to_string()).or_default();
+            if e.sent.as_ref() == Some(&v) {
+                return;
+            }
+            e.sent = Some(v.clone());
         }
+        (self.emit)(UiEvent::Machine(v));
     }
 
     /// Emit the Machine's view at most once per `EMIT_THROTTLE`; the latest state wins
@@ -2097,6 +2127,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unchanged_view_is_not_emitted_again() {
+        let states: Arc<Mutex<Vec<MachineState>>> = Arc::default();
+        let st = states.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    st.lock().unwrap().push(v.state)
+                }
+            }),
+        );
+        mgr.set_state("local", MachineState::Probing, None);
+        mgr.set_state("local", MachineState::Probing, None);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await; // past any trailing emit
+        mgr.set_state("local", MachineState::Probing, None);
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        mgr.set_state("local", MachineState::Connected, None);
+        assert_eq!(
+            *states.lock().unwrap(),
+            [MachineState::Probing, MachineState::Connected]
+        );
+    }
+
+    #[tokio::test]
     async fn remove_emits_nothing_for_the_removed_machine() {
         let ids: Arc<Mutex<Vec<String>>> = Arc::default();
         let rec = ids.clone();
@@ -2157,6 +2212,139 @@ mod tests {
             state("local"),
             Some((MachineState::Disconnected, None)),
             "local is connected separately"
+        );
+    }
+
+    /// `pane_view` answers exactly as a lookup through `views()` does, without cloning them.
+    #[tokio::test]
+    async fn pane_view_matches_a_lookup_through_views() {
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        assert!(
+            wait_for(|| mgr
+                .pane_view(&PaneRef {
+                    machine_id: "local".into(),
+                    session: "default".into(),
+                    pane_id: "w2:p1".into(),
+                })
+                .is_ok())
+            .await
+        );
+        let through_views = |r: &PaneRef| -> AppResult<PaneView> {
+            let views = mgr.views();
+            let session = views
+                .iter()
+                .find(|m| m.id == r.machine_id)
+                .and_then(|m| m.sessions.iter().find(|s| s.name == r.session))
+                .ok_or_else(|| {
+                    AppError::new(
+                        "not_found",
+                        format!("unknown session {}/{}", r.machine_id, r.session),
+                    )
+                })?;
+            session
+                .workspaces
+                .iter()
+                .flat_map(|w| &w.tabs)
+                .flat_map(|t| &t.panes)
+                .find(|p| p.pane_id == r.pane_id)
+                .cloned()
+                .ok_or_else(|| AppError::new("not_found", format!("unknown pane {}", r.pane_id)))
+        };
+        let cases = [
+            ("local", "default", "w1:p1"),
+            ("local", "default", "w2:p2"),
+            ("local", "default", "w9:p9"),
+            ("local", "old", "w1:p1"),
+            ("local", "nope", "w1:p1"),
+            ("ghost", "default", "w1:p1"),
+        ];
+        for (m, s, p) in cases {
+            let r = PaneRef {
+                machine_id: m.into(),
+                session: s.into(),
+                pane_id: p.into(),
+            };
+            let (a, b) = (mgr.pane_view(&r), through_views(&r));
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{m}/{s}/{p}");
+        }
+        assert!(mgr
+            .pane_view(&PaneRef {
+                machine_id: "local".into(),
+                session: "default".into(),
+                pane_id: "w1:p1".into(),
+            })
+            .is_ok());
+    }
+
+    /// Refetches of an unchanged snapshot emit nothing; a real change still does.
+    #[tokio::test]
+    async fn emits_only_changed_views() {
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
+        let emits: Arc<Mutex<Vec<MachineView>>> = Arc::default();
+        let ev = emits.clone();
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(
+            d.path().join("m.json"),
+            Arc::new(move |e| {
+                if let UiEvent::Machine(v) = e {
+                    ev.lock().unwrap().push(v)
+                }
+            }),
+        );
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        assert!(wait_for(|| f.calls_of("events.subscribe") >= 1).await);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        emits.lock().unwrap().clear();
+        for i in 0..5 {
+            let before = f.calls_of("session.snapshot");
+            mgr.call(
+                "local",
+                "default",
+                "pane.rename",
+                json!({"pane_id":"w1:p1","label":format!("x{i}")}),
+            )
+            .await
+            .unwrap();
+            assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+        f.emit(
+            "pane.agent_status_changed",
+            json!({"pane_id":"w2:p1","workspace_id":"w2","agent_status":"done"}),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let emits = emits.lock().unwrap();
+        assert_eq!(emits.len(), 1, "machine emits: {}", emits.len());
+        assert_eq!(
+            emits[0].sessions[0].workspaces[1].status,
+            crate::herdr::types::AgentStatus::Done
         );
     }
 

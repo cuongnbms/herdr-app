@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { DragContext, useDragState } from "./dnd";
 import type { Drag, Indicator } from "./dnd";
 import { indicatorClass, useBookmarkRowDnd, useBookmarksDropDnd, useTreeRowDnd } from "./useRowDnd";
@@ -216,7 +216,8 @@ function BookmarksSection({ bookmarks }: { bookmarks: RSession[] }) {
   );
 }
 
-export function Sidebar() {
+// Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
+export const Sidebar = memo(function Sidebar() {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
   const layout = useLayout((s) => s.layout);
@@ -273,4 +274,4 @@ export function Sidebar() {
       </DragContext.Provider>
     </ActionsProvider>
   );
-}
+});

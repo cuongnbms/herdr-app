@@ -234,7 +234,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                     block={row.block}
                     results={results}
                     open={chosenOpen.get(row.block.id) ?? row.last}
-                    onToggle={() => toggle(row.block.id, chosenOpen.get(row.block.id) ?? row.last)}
+                    onToggle={toggle}
                     live={live && row.last}
                   />
                 ) : (

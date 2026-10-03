@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
 import { pruneFolders } from "../workspaces/folder";
+import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 
 export interface SessionRef {
@@ -96,13 +97,18 @@ export const useApp = create<AppState>((set, get) => ({
       const gone = prev.filter((p) => !v.sessions.some((s) => s.name === p.name)).map((p) => sessionKey(v.id, p.name));
       if (gone.length) useLayout.getState().update((l) => forgetSessions(l, gone));
     }
-    set((s) => ({
-      machines: { ...s.machines, [v.id]: v },
-      lensOverride: claudeStarted(s, v) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
-      order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
+    set((s) => {
+      // Unchanged Panes, Tabs and Workspaces keep their objects, so their readers stay quiet.
+      const shared = s.machines[v.id] ? shareEqual(s.machines[v.id], v) : v;
       // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
-      doneSeen: seenAfterSnapshot(s.doneSeen, v, s.dashboardOpen ? null : s.selected),
-    }));
+      const doneSeen = seenAfterSnapshot(s.doneSeen, shared, s.dashboardOpen ? null : s.selected);
+      return {
+        machines: s.machines[v.id] === shared ? s.machines : { ...s.machines, [v.id]: shared },
+        lensOverride: claudeStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
+        order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
+        doneSeen: sameKeys(doneSeen, s.doneSeen) ? s.doneSeen : doneSeen,
+      };
+    });
   },
   removeMachine: (id) => {
     useLayout.getState().update((l) => forgetMachine(l, id));
@@ -202,6 +208,11 @@ function seenAfterSnapshot(prev: Record<string, true>, v: MachineView, selected:
           if (prev[k] || k === selKey) next[k] = true;
         }
   return next;
+}
+
+function sameKeys(a: Record<string, true>, b: Record<string, true>): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => k in b);
 }
 
 /** The lens chosen for a pane (automatic override first, then the remembered choice). */

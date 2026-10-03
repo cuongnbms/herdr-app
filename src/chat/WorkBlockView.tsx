@@ -18,7 +18,8 @@ export const WorkBlockView = memo(function WorkBlockView({
   block: WorkBlock;
   results: Map<string, ToolResult>;
   open: boolean;
-  onToggle: () => void;
+  /** Called with this block's id and its open state, so a stable callback keeps memo working. */
+  onToggle: (id: string, open: boolean) => void;
   live: boolean;
 }) {
   const duration = formatWorkDuration(block.start, block.end);
@@ -26,7 +27,7 @@ export const WorkBlockView = memo(function WorkBlockView({
   const summary = workSummary(block.items, results);
   return (
     <div className="chat-row chat-work">
-      <button className="chat-work-head" aria-expanded={open} onClick={onToggle}>
+      <button className="chat-work-head" aria-expanded={open} onClick={() => onToggle(block.id, open)}>
         <ChevronIcon className={"icon chev" + (open ? " open" : "")} />
         <span className="chat-work-title">{title}</span>
         {summary && (

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
 import { paneKey, type AgentStatus, type ChatMeta, type PaneRef, type SlashCommand } from "../lib/types";
 import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
-import { readDraft, writeDraft } from "./drafts";
+import { readDraft, useDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { modelLabel } from "./modelLabel";
 import { ModelMenu } from "./ModelMenu";
@@ -86,7 +86,7 @@ export function Composer({
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
   // Sending clears the text and a failed send restores it, so the draft follows both.
-  useEffect(() => writeDraft(key, text), [key, text]);
+  useDraft(key, text);
 
   const [sending, setSending] = useState(false);
   // Read only while the box is empty (that is when the suggestion shows, and Tab takes it), and
@@ -105,6 +105,8 @@ export function Composer({
   const kind = trigger?.kind ?? null;
   const prefix = trigger?.prefix ?? "/";
   const { commands, files, loading, error: listError } = useCompletions(pane, kind);
+  // Up to thousands of paths: rank them only when the list or the query changes.
+  const fileRows = useMemo(() => (kind === "file" ? rankFiles(files, query ?? "") : []), [kind, files, query]);
   const rows: (SlashCommand | string)[] =
     kind === "slash"
       ? rankCommands(
@@ -112,9 +114,7 @@ export function Composer({
           query ?? "",
           usage,
         )
-      : kind === "file"
-        ? rankFiles(files, query ?? "")
-        : [];
+      : fileRows;
   useEffect(() => setActive(0), [kind, prefix, query]);
   const open = trigger !== null && !dismissed && (loading || listError || rows.length > 0);
   const capturing = open && rows.length > 0;

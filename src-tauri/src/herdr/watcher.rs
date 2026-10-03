@@ -193,10 +193,9 @@ async fn run(
             Ok(s) => s,
             Err(e) => return Some(e),
         };
-        if tx
-            .send(WatchEvent::View(session_view(name, &fresh)))
-            .is_err()
-        {
+        // `snap` always mirrors the last view sent, so an unchanged refetch sends nothing.
+        let view = session_view(name, &fresh);
+        if view != session_view(name, &snap) && tx.send(WatchEvent::View(view)).is_err() {
             return None;
         }
         let changed = pane_ids(&fresh) != pane_ids(&snap);
@@ -270,6 +269,13 @@ mod tests {
         }
         false
     }
+    /// Nothing arrives for longer than the refetch debounce.
+    async fn assert_quiet(rx: &mut mpsc::UnboundedReceiver<WatchEvent>) {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        if let Ok(ev) = rx.try_recv() {
+            panic!("unexpected {ev:?}");
+        }
+    }
     async fn started(
         snap: Arc<Mutex<Value>>,
     ) -> (
@@ -299,7 +305,7 @@ mod tests {
             wait_snapshots(&f, 2).await,
             "malformed status should refetch"
         );
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
+        assert_quiet(&mut rx).await; // the refetched snapshot did not change
     }
     #[tokio::test]
     async fn unknown_pane_status_event_triggers_refetch() {
@@ -316,7 +322,7 @@ mod tests {
             wait_snapshots(&f, 2).await,
             "unknown pane status should refetch"
         );
-        assert!(matches!(next(&mut rx).await, WatchEvent::View(_)));
+        assert_quiet(&mut rx).await; // the refetched snapshot did not change
     }
     #[tokio::test]
     async fn emits_view_then_status_changes() {
@@ -437,6 +443,28 @@ mod tests {
             matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "renamed")
         );
         assert_eq!(f.calls_of("session.snapshot"), 2);
+    }
+    #[tokio::test]
+    async fn refetch_of_an_unchanged_snapshot_sends_nothing() {
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
+        let f = fake_with(snap.clone());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let refetch: Arc<tokio::sync::Notify> = Arc::default();
+        let _h = spawn_watcher("default".into(), f.path.clone(), tx, refetch.clone());
+        next(&mut rx).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        refetch.notify_one();
+        assert!(wait_snapshots(&f, 2).await);
+        assert_quiet(&mut rx).await;
+        // A later change is still sent.
+        snap.lock().unwrap()["panes"][0]["label"] = json!("renamed");
+        refetch.notify_one();
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "renamed")
+        );
     }
     #[tokio::test]
     async fn watcher_reports_closed_when_socket_closes() {
