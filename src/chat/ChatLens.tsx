@@ -14,6 +14,7 @@ import { buildRows } from "./workBlocks";
 import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { usePiModelPicker } from "./usePiModelPicker";
+import { usePendingTranscript } from "./pendingTranscript";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
@@ -98,6 +99,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
 
   useEffect(() => {
     setChosenOpen(new Map());
+    setLocated(null);
     open(rememberedTranscript(key));
     return () => {
       generation.current++;
@@ -107,6 +109,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+
+  // A new Claude has no transcript until its first prompt: chat with it on the expected path.
+  const pending = !!located?.pending && state.items.length === 0;
+  usePendingTranscript(pane, located, state.items.length === 0, view.status, () => open(null));
 
   const choose = (path: string) => {
     rememberTranscript(key, path);
@@ -199,6 +205,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     <div className="chat-lens">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
+      {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {

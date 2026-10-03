@@ -11,6 +11,8 @@ pub struct Located {
     pub path: String,
     pub ambiguous: bool,
     pub candidates: Vec<String>,
+    /// The file does not exist yet: Claude writes it on the first prompt, at `path`.
+    pub pending: bool,
 }
 
 fn java_string_hash(s: &str) -> i32 {
@@ -152,8 +154,9 @@ pub async fn locate(
 }
 
 /// Like `locate`, also trying the pane's `foreground_cwd`: an exact Claude session id in the
-/// `cwd` dir, then in the `foreground_cwd` dir, then in any project dir. Without a session from
-/// herdr, the newest file in each dir in turn, flagged as ambiguous.
+/// `cwd` dir, then in the `foreground_cwd` dir, then in any project dir, else where Claude will
+/// write it, flagged as pending. Without a session from herdr, the newest file in each dir in
+/// turn, flagged as ambiguous.
 pub async fn locate_in(
     t: &dyn Transport,
     info: &MachineInfo,
@@ -172,6 +175,7 @@ pub async fn locate_in(
         path,
         ambiguous,
         candidates,
+        pending: false,
     };
 
     if session["kind"] == "path" {
@@ -216,7 +220,15 @@ pub async fn locate_in(
                 return Ok(found(path.clone(), false, vec![path]));
             }
             // Claude writes its transcript only after the first prompt: the newest file in the
-            // directory would be another pane's conversation.
+            // directory would be another pane's conversation. Expect it in the dir of the last cwd,
+            // the `foreground_cwd` when given: the directory Claude runs in.
+            if let Some(dir) = dirs.last() {
+                let path = format!("{dir}/{id}.jsonl");
+                return Ok(Located {
+                    pending: true,
+                    ..found(path.clone(), false, vec![path])
+                });
+            }
             return Err(AppError::new(
                 "not_found",
                 format!("no transcript yet for claude session {id}"),
@@ -368,17 +380,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn known_session_without_its_file_is_not_found_not_another_panes_transcript() {
-        let (_home, info, pane) = claude_fixture();
-        let err = locate(
+    async fn known_session_without_its_file_is_pending_not_another_panes_transcript() {
+        let (home, info, pane) = claude_fixture();
+        let got = locate(
             &crate::transport::local::LocalTransport,
             &info,
             &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"fresh-id"}}}),
             &pane,
         )
         .await
-        .unwrap_err();
-        assert_eq!(err.code, "not_found");
+        .unwrap();
+        let want = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir("/w/app"))
+            .join("fresh-id.jsonl");
+        assert_eq!(got.path, want.to_string_lossy());
+        assert!(got.pending && !got.ambiguous);
+        assert_eq!(got.candidates, vec![got.path.clone()]);
+    }
+
+    #[tokio::test]
+    async fn pending_transcript_is_expected_in_the_foreground_cwd_dir() {
+        let (home, info, pane) = claude_fixture();
+        let got = locate_in(
+            &crate::transport::local::LocalTransport,
+            &info,
+            &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"fresh-id"}}}),
+            &pane,
+            Some("/w/app/sub"),
+        )
+        .await
+        .unwrap();
+        let want = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir("/w/app/sub"))
+            .join("fresh-id.jsonl");
+        assert_eq!(got.path, want.to_string_lossy());
+        assert!(got.pending);
+    }
+
+    #[tokio::test]
+    async fn an_existing_transcript_is_not_pending() {
+        let (_home, info, pane) = claude_fixture();
+        let got = locate(
+            &crate::transport::local::LocalTransport,
+            &info,
+            &json!({"agent":{"agent":"claude","agent_session":{"kind":"id","value":"other-pane"}}}),
+            &pane,
+        )
+        .await
+        .unwrap();
+        assert!(!got.pending);
     }
 
     #[tokio::test]

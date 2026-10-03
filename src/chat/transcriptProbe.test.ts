@@ -10,7 +10,7 @@ vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
 
 const pane: PaneRef = { machine_id: "local", session: "default", pane_id: "w1:p1" };
 const key = paneKey(pane);
-const located = { agent: "claude", path: "/p/fresh.jsonl", ambiguous: false, candidates: [] };
+const located = { agent: "claude", path: "/p/fresh.jsonl", ambiguous: false, candidates: [], pending: false };
 const notFound = { code: "not_found", message: "no transcript yet" };
 
 describe("useTranscriptProbe", () => {

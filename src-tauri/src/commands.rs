@@ -420,6 +420,7 @@ async fn locate_pane(
             path: p,
             ambiguous: false,
             candidates: Vec::new(),
+            pending: false,
         },
         None => {
             let info = mgr.info(machine_id)?;

@@ -4,12 +4,14 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), 
 vi.mock("../lib/ipc", () => ({
   herdrCall: vi.fn(),
   chatPage: vi.fn().mockResolvedValue([]),
+  chatLocate: vi.fn(() => opened),
   imageSaveTemp: vi.fn(),
   completeCommands: vi.fn().mockResolvedValue([]),
   completeFiles: vi.fn().mockResolvedValue([]),
 }));
+let opened: Promise<unknown> = new Promise(() => {});
 vi.mock("./chatSession", () => ({
-  openChat: () => ({ opened: new Promise(() => {}), close: () => {} }),
+  openChat: () => ({ opened, close: () => {} }),
   onOpenFailure: () => "error",
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
@@ -34,6 +36,7 @@ let shown = "";
 
 beforeEach(() => {
   localStorage.clear();
+  opened = new Promise(() => {});
   shown = "";
   vi.mocked(herdrCall)
     .mockReset()
@@ -44,6 +47,13 @@ beforeEach(() => {
 });
 
 describe("ChatLens", () => {
+  it("lets a new Claude be chatted with before its transcript exists", async () => {
+    opened = Promise.resolve({ agent: "claude", path: "/h/sid.jsonl", ambiguous: false, candidates: ["/h/sid.jsonl"], pending: true });
+    render(<ChatLens pane={pane} view={{ status: "idle", agent: "claude", title: "claude" } as PaneView} />);
+    expect(await screen.findByText(/first message/)).toBeTruthy();
+    expect(screen.getByRole("textbox")).toBeTruthy();
+  });
+
   it("shows pi's model picker as a card once /model is sent, though pi stays idle", async () => {
     render(<ChatLens pane={pane} view={idlePi} />);
     const box = screen.getByRole("textbox");

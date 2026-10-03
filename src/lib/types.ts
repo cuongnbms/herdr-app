@@ -109,6 +109,8 @@ export interface Located {
   path: string;
   ambiguous: boolean;
   candidates: string[];
+  /** The file does not exist yet: Claude writes it on the first prompt, at `path`. */
+  pending: boolean;
 }
 
 export interface SlashCommand {
