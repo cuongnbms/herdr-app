@@ -202,10 +202,14 @@ mod tests {
         fn push_line(&mut self, line: &str) -> ParserOutput {
             if line == "RESET" {
                 ParserOutput::Reset(vec![ChatItem::System {
+                    ts: None,
                     text: "reset".into(),
                 }])
             } else {
-                ParserOutput::Append(vec![ChatItem::User { text: line.into() }])
+                ParserOutput::Append(vec![ChatItem::User {
+                    ts: None,
+                    text: line.into(),
+                }])
             }
         }
     }
@@ -229,7 +233,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         let ev = got.lock().unwrap();
         assert!(matches!(&ev[0], ChatEvent::Reset { items, total: 2 } if items.len() == 2));
-        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { text: "c".into() }])));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into() }])));
         assert!(matches!(ev.last().unwrap(), ChatEvent::Reset { items, .. } if items.len() == 1));
         drop(ev);
         drop(h);
@@ -249,7 +253,7 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { text: "a".into() } && items[2] == ChatItem::User { text: "b".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into() } && items[2] == ChatItem::User { ts: None, text: "b".into() })
         );
     }
     #[tokio::test]
@@ -320,10 +324,16 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { text: "m200".into() })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into() })
         );
         let older = h.page(200, 200);
         assert_eq!(older.len(), 200);
-        assert_eq!(older[0], ChatItem::User { text: "m0".into() });
+        assert_eq!(
+            older[0],
+            ChatItem::User {
+                ts: None,
+                text: "m0".into()
+            }
+        );
     }
 }

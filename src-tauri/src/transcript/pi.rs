@@ -49,6 +49,7 @@ impl PiParser {
         self.too_large = true;
         self.entries.clear();
         ParserOutput::Reset(vec![ChatItem::System {
+            ts: None,
             text: TOO_LARGE.to_string(),
         }])
     }
@@ -80,11 +81,18 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
     if hidden(entry) || hidden(msg) {
         return vec![];
     }
+    let ts = entry
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let content = msg.get("content");
     match msg.get("role").and_then(Value::as_str).unwrap_or("") {
         "user" => text_blocks(content)
             .into_iter()
-            .map(|text| ChatItem::User { text })
+            .map(|text| ChatItem::User {
+                ts: ts.clone(),
+                text,
+            })
             .collect(),
         "assistant" => {
             let mut items = vec![];
@@ -96,6 +104,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
                     "text" => {
                         if let Some(t) = b.get("text").and_then(Value::as_str) {
                             items.push(ChatItem::AssistantText {
+                                ts: ts.clone(),
                                 markdown: t.to_string(),
                             });
                         }
@@ -103,6 +112,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
                     "thinking" => {
                         if let Some(t) = b.get("thinking").and_then(Value::as_str) {
                             items.push(ChatItem::Thinking {
+                                ts: ts.clone(),
                                 text: t.to_string(),
                             });
                         }
@@ -115,6 +125,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
                             .cloned()
                             .unwrap_or(Value::Null);
                         items.push(ChatItem::ToolCall {
+                            ts: ts.clone(),
                             id: str_of(b, &["toolCallId", "id", "callId"]).to_string(),
                             input_summary: input_summary(&name, &input),
                             name,
@@ -127,6 +138,7 @@ fn message_items(entry: &Value) -> Vec<ChatItem> {
             items
         }
         "toolResult" => vec![ChatItem::ToolResult {
+            ts: ts.clone(),
             call_id: str_of(msg, &["toolCallId", "callId"]).to_string(),
             output: truncate_result(text_blocks(content).join("\n")),
             is_error: msg.get("isError").and_then(Value::as_bool).unwrap_or(false),
@@ -249,20 +261,27 @@ mod tests {
         assert_eq!(
             items,
             vec![
-                User { text: "hi".into() },
+                User {
+                    ts: None,
+                    text: "hi".into()
+                },
                 Thinking {
+                    ts: None,
                     text: "greet".into()
                 },
                 AssistantText {
+                    ts: None,
                     markdown: "Hello!".into()
                 },
                 ToolCall {
+                    ts: None,
                     id: "c1".into(),
                     name: "bash".into(),
                     input_summary: "pwd".into(),
                     input: serde_json::json!({"command":"pwd"})
                 },
                 ToolResult {
+                    ts: None,
                     call_id: "c1".into(),
                     output: "/w/app".into(),
                     is_error: false
@@ -279,8 +298,12 @@ mod tests {
             ParserOutput::Reset(items) => assert_eq!(
                 items,
                 vec![
-                    User { text: "hi".into() },
                     User {
+                        ts: None,
+                        text: "hi".into()
+                    },
+                    User {
+                        ts: None,
                         text: "again".into()
                     }
                 ]
@@ -289,14 +312,16 @@ mod tests {
         }
         let next = p.push_line(r#"{"type":"message","id":"f","parentId":"e","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}"#);
         assert!(
-            matches!(next, ParserOutput::Append(v) if v == vec![AssistantText { markdown: "ok".into() }])
+            matches!(next, ParserOutput::Append(v) if v == vec![AssistantText { ts: None, markdown: "ok".into() }])
         );
     }
     #[test]
     fn unknown_parent_starts_branch_there() {
         let mut p = PiParser::default();
         let out = p.push_line(r#"{"type":"message","id":"x","parentId":"gone","message":{"role":"user","content":"hey"}}"#);
-        assert!(matches!(out, ParserOutput::Reset(v) if v == vec![User { text: "hey".into() }]));
+        assert!(
+            matches!(out, ParserOutput::Reset(v) if v == vec![User { ts: None, text: "hey".into() }])
+        );
     }
     #[test]
     fn truncates_long_results() {
@@ -327,11 +352,21 @@ mod tests {
             ParserOutput::Reset(v) => assert_eq!(
                 v,
                 vec![System {
+                    ts: None,
                     text: "Conversation too large to show; use the Terminal lens.".into()
                 }]
             ),
             o => panic!("{o:?}"),
         }
         assert!(matches!(p.push_line(l1), ParserOutput::None));
+    }
+    #[test]
+    fn stamps_items_with_the_entry_timestamp() {
+        let mut p = PiParser::default();
+        let line = r#"{"type":"message","id":"a","parentId":null,"timestamp":"2026-10-02T11:46:32.940Z","message":{"role":"user","content":"hi","timestamp":1790941592936}}"#;
+        match p.push_line(line) {
+            ParserOutput::Append(v) => assert_eq!(v[0].ts(), Some("2026-10-02T11:46:32.940Z")),
+            o => panic!("{o:?}"),
+        }
     }
 }

@@ -8,6 +8,8 @@ import { onOpenFailure, openChat, watchMachine } from "./chatSession";
 import { PromptPanel } from "./PromptPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
+import { WorkBlockView } from "./WorkBlockView";
+import { buildRows } from "./workBlocks";
 import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { ArrowDownIcon } from "../ui/icons";
@@ -15,8 +17,6 @@ import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptP
 
 type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
 const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a));
-
-type ToolResult = Extract<ChatItem, { kind: "tool_result" }>;
 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
@@ -35,6 +35,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const forceBottom = useRef(true);
   const generation = useRef(0);
   const handle = useRef<{ close: () => void } | null>(null);
+  // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
+  const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
 
   const open = useCallback(
     (path: string | null) => {
@@ -86,6 +88,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   }, [machineState]);
 
   useEffect(() => {
+    setChosenOpen(new Map());
     open(rememberedTranscript(key));
     return () => {
       generation.current++;
@@ -100,17 +103,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     open(path);
   };
 
-  // Tool results render inside their call; standalone only when no matching call is loaded.
-  const { rows, results } = useMemo(() => {
-    const calls = new Set<string>();
-    const results = new Map<string, ToolResult>();
-    for (const it of state.items) {
-      if (it.kind === "tool_call") calls.add(it.id);
-      else if (it.kind === "tool_result") results.set(it.call_id, it);
-    }
-    const rows = state.items.filter((it) => it.kind !== "tool_result" || !calls.has(it.call_id));
-    return { rows, results };
-  }, [state.items]);
+  // Tool results render inside their call; each turn's work folds into one row.
+  const { rows, results } = useMemo(() => buildRows(state.items), [state.items]);
+  const toggle = useCallback((id: string, wasOpen: boolean) => {
+    setChosenOpen((m) => new Map(m).set(id, !wasOpen));
+  }, []);
+  const live = view.status === "working" || view.status === "blocked";
 
   const virt = useVirtualizer({
     count: rows.length,
@@ -120,8 +118,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   });
 
   const prevRows = useRef(0);
+  const prevItems = useRef(0);
   useLayoutEffect(() => {
-    const grew = rows.length > prevRows.current;
+    // Items, not rows: a tool call joining the live work block grows that row, not the count.
+    const grew = state.items.length > prevItems.current;
     if (anchor.current !== null) {
       // Older items were prepended: keep the previously-first row in view.
       const added = rows.length - prevRows.current;
@@ -136,7 +136,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       setUnseen(true);
     }
     prevRows.current = rows.length;
-  }, [rows.length, virt]);
+    prevItems.current = state.items.length;
+  }, [rows.length, state.items.length, virt]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -175,7 +176,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {
-            const item = rows[v.index];
+            const row = rows[v.index];
             return (
               <div
                 key={v.key}
@@ -183,7 +184,20 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                 ref={virt.measureElement}
                 style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${v.start}px)` }}
               >
-                <ChatItemView item={item} result={item.kind === "tool_call" ? results.get(item.id) : undefined} />
+                {row.kind === "work" ? (
+                  <WorkBlockView
+                    block={row.block}
+                    results={results}
+                    open={chosenOpen.get(row.block.id) ?? row.last}
+                    onToggle={() => toggle(row.block.id, chosenOpen.get(row.block.id) ?? row.last)}
+                    live={live && row.last}
+                  />
+                ) : (
+                  <ChatItemView
+                    item={row.item}
+                    result={row.item.kind === "tool_call" ? results.get(row.item.id) : undefined}
+                  />
+                )}
               </div>
             );
           })}

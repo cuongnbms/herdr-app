@@ -1,0 +1,128 @@
+/**
+ * Chat lens rows. Adapted from herdr-web-ui's `workBlocks.ts`: everything an Agent did on the
+ * way through a turn (tool calls, thinking and the narration between them) folds under one
+ * "Worked for 7s · 1 edit" block, and only what it said after its last action stays open as
+ * the answer.
+ */
+import type { ChatItem } from "../lib/types";
+import { checklist } from "./checklist";
+
+type ToolCall = Extract<ChatItem, { kind: "tool_call" }>;
+export type ToolResult = Extract<ChatItem, { kind: "tool_result" }>;
+
+export interface WorkBlock {
+  /** The turn's opener ts, else the first call's id: open/closed must survive new and older items. */
+  id: string;
+  /** In order, without the results that render inside their call. */
+  items: ChatItem[];
+  start: string | null;
+  end: string | null;
+}
+
+export type ChatRow =
+  | { kind: "item"; item: ChatItem }
+  | { kind: "work"; block: WorkBlock; /** in the newest turn */ last: boolean };
+
+function blockId(items: ChatItem[]): string {
+  for (const it of items) {
+    if (it.kind === "tool_call") return it.id;
+    if (it.kind === "tool_result") return it.call_id;
+  }
+  const first = items[0];
+  return `${first.kind}:${first.ts ?? ""}:${first.kind === "thinking" ? first.text.slice(0, 64) : ""}`;
+}
+
+/** Splits loaded items into rows; a user or system item opens a turn. */
+export function buildRows(items: ChatItem[]): { rows: ChatRow[]; results: Map<string, ToolResult> } {
+  const calls = new Set<string>();
+  const results = new Map<string, ToolResult>();
+  for (const it of items) {
+    if (it.kind === "tool_call") calls.add(it.id);
+    else if (it.kind === "tool_result") results.set(it.call_id, it);
+  }
+
+  const rows: ChatRow[] = [];
+  let lastBlock = -1;
+  let opener: ChatItem | null = null;
+  let body: ChatItem[] = [];
+  const flush = () => {
+    let lastAction = -1;
+    body.forEach((it, i) => {
+      if (it.kind !== "assistant_text") lastAction = i;
+    });
+    const work = body.slice(0, lastAction + 1);
+    const shown = work.filter((it) => it.kind !== "tool_result" || !calls.has(it.call_id));
+    if (shown.length > 0) {
+      const end = [...work].reverse().find((it) => it.ts)?.ts ?? null;
+      const start = opener?.ts ?? work.find((it) => it.ts)?.ts ?? null;
+      // By turn when its opener is loaded, so a live block keeps its id as its first call lands.
+      const id = opener?.ts ? `turn:${opener.ts}` : blockId(shown);
+      lastBlock = rows.length;
+      rows.push({ kind: "work", block: { id, items: shown, start, end }, last: false });
+    }
+    for (const it of body.slice(lastAction + 1)) rows.push({ kind: "item", item: it });
+    body = [];
+  };
+  for (const it of items) {
+    if (it.kind === "user" || it.kind === "system") {
+      flush();
+      lastBlock = -1;
+      opener = it;
+      rows.push({ kind: "item", item: it });
+    } else {
+      body.push(it);
+    }
+  }
+  flush();
+  const tail = rows[lastBlock];
+  if (tail?.kind === "work") rows[lastBlock] = { ...tail, last: true };
+  return { rows, results };
+}
+
+type Category = "edit" | "read" | "command" | "other";
+const LABELS: Record<Category, [string, string]> = {
+  edit: ["edit", "edits"],
+  read: ["file read", "file reads"],
+  command: ["command", "commands"],
+  other: ["other tool", "other tools"],
+};
+
+function categorize(name: string): Category {
+  const lower = name.toLowerCase();
+  if (/edit|write|patch|create_file/.test(lower)) return "edit";
+  if (/^(read|glob|grep|ls|list|search|find|cat)/.test(lower)) return "read";
+  if (/bash|command|shell|exec|eval|run/.test(lower)) return "command";
+  return "other";
+}
+
+/** "1 edit · 2 file reads · 1 command · 1 failed": the block header after its title. */
+export function workSummary(items: ChatItem[], results: Map<string, ToolResult>): string {
+  const counts: Record<Category, number> = { edit: 0, read: 0, command: 0, other: 0 };
+  let failed = 0;
+  for (const it of items) {
+    if (it.kind === "tool_result" && it.is_error) failed++;
+    if (it.kind !== "tool_call") continue;
+    const call: ToolCall = it;
+    // A todo list is the plan, not an edit, though TodoWrite matches /write/.
+    if (checklist(call.input) === null) counts[categorize(call.name)]++;
+    if (results.get(call.id)?.is_error) failed++;
+  }
+  const parts = (Object.keys(counts) as Category[])
+    .filter((c) => counts[c] > 0)
+    .map((c) => `${counts[c]} ${LABELS[c][counts[c] === 1 ? 0 : 1]}`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  return parts.join(" · ");
+}
+
+/** "7s" / "1m 12s" / "1h 5m"; null when either time is unknown or the span is nonsense. */
+export function formatWorkDuration(start: string | null, end: string | null): string | null {
+  if (start === null || end === null) return null;
+  const ms = Date.parse(end) - Date.parse(start);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
