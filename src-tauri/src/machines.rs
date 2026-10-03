@@ -11,7 +11,7 @@ use crate::{
     transport::{
         drop_client_only, exec, herdr_argv,
         local::LocalTransport,
-        parse_probe, parse_session_list, probe_argv,
+        parse_probe, parse_session_list, probe_argv, split_probe,
         ssh::{
             classify_ssh_error, clear_stale_ctl, master_alive, master_exit, start_master,
             SshTransport,
@@ -150,6 +150,22 @@ fn sweep_sockets(id: &str) {
             let _ = std::fs::remove_file(f.path());
         }
     }
+}
+
+/// The Sessions from `herdr session list`'s exit status and output, client-only ones dropped.
+async fn session_entries(
+    t: &dyn Transport,
+    status: i32,
+    stdout: &str,
+    stderr: &str,
+) -> AppResult<Vec<SessionEntry>> {
+    if status != 0 {
+        return Err(AppError::new(
+            "herdr_error",
+            format!("session list failed: {}", stderr.trim()),
+        ));
+    }
+    Ok(drop_client_only(t, parse_session_list(stdout)).await)
 }
 
 /// Watcher retry delay: 1, 2, 4, 8, 16, 32, then 60 s.
@@ -756,12 +772,18 @@ impl MachineManager {
         let argv = probe_argv(cfg.herdr_path.as_deref(), known.as_deref());
         let out = exec(transport.as_ref(), &argv).await?;
         self.current(id, epoch)?;
-        let info = parse_probe(&out.stdout)?;
+        let (head, sessions) = split_probe(&out.stdout);
+        let info = parse_probe(head)?;
         self.with_machine(id, |m| {
             m.last_herdr = Some(info.herdr.clone());
             m.info = Some(info);
         })?;
-        let list = self.list_sessions(id).await?;
+        let list = match sessions {
+            Some((status, list)) => {
+                session_entries(transport.as_ref(), status, list, &out.stderr).await?
+            }
+            None => self.list_sessions(id).await?,
+        };
         self.current(id, epoch)?;
         Ok(self.apply_list(id, list)?)
     }
@@ -1065,13 +1087,7 @@ impl MachineManager {
             &herdr_argv(&info, "default", &["session", "list"]),
         )
         .await?;
-        if out.status != 0 {
-            return Err(AppError::new(
-                "herdr_error",
-                format!("session list failed: {}", out.stderr.trim()),
-            ));
-        }
-        Ok(drop_client_only(t.as_ref(), parse_session_list(&out.stdout)).await)
+        session_entries(t.as_ref(), out.status, &out.stdout, &out.stderr).await
     }
 
     /// Reconcile the Machine's sessions with `list`; start watchers for newly running ones.
@@ -1455,18 +1471,36 @@ mod tests {
         assert_eq!(slug("local", &[]), "local-2");
     }
 
+    const PROBE_HEAD: &str =
+        "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/h/.pi/agent/sessions\nVERSION=0.9.3\nPROTOCOL=22\n";
+
+    /// The probe's stdout when `herdr session list` printed `sessions`.
+    fn probe_reply(sessions: &str) -> String {
+        format!("{PROBE_HEAD}@@SESSIONS@@\n{sessions}@@SESSIONS_EXIT=0\n")
+    }
+
     /// Fake transport: probe/session-list answered by a script, socket = FakeHerdr.
     struct FakeT {
         sock: String,
+    }
+    impl FakeT {
+        fn list(&self) -> String {
+            format!(
+                "name status directory socket\ndefault running /x {}\nold stopped /y /y/herdr.sock\n",
+                self.sock
+            )
+        }
     }
     #[async_trait::async_trait]
     impl Transport for FakeT {
         fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
             let joined = argv.join(" ");
-            let out = if joined.contains("session list") {
-                format!("name status directory socket\ndefault running /x {}\nold stopped /y /y/herdr.sock\n", self.sock)
+            let out = if joined.contains("HERDR=") {
+                probe_reply(&self.list())
+            } else if joined.contains("session list") {
+                self.list()
             } else {
-                "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/h/.pi/agent/sessions\nVERSION=0.9.3\nPROTOCOL=22\n".to_string()
+                PROBE_HEAD.to_string()
             };
             vec!["printf".into(), "%s".into(), out]
         }
@@ -1707,7 +1741,8 @@ mod tests {
             .is_empty());
     }
 
-    /// `session list` fails on calls 1..=3 (call 0 is the connect); start_session must keep polling.
+    /// A separate `session list` fails on calls 0..=2 (the connect's list rides in the probe);
+    /// start_session must keep polling.
     struct FlakyT {
         inner: FakeT,
         lists: std::sync::atomic::AtomicU32,
@@ -1715,9 +1750,10 @@ mod tests {
     #[async_trait::async_trait]
     impl Transport for FlakyT {
         fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
-            if argv.join(" ").contains("session list") {
+            let joined = argv.join(" ");
+            if joined.contains("session list") && !joined.contains("HERDR=") {
                 let n = self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if (1..=3).contains(&n) {
+                if (0..=2).contains(&n) {
                     return vec!["sh".into(), "-c".into(), "echo boom >&2; exit 1".into()];
                 }
             }
@@ -1751,7 +1787,7 @@ mod tests {
                 lists: Default::default(),
             }) as Arc<dyn Transport>
         }));
-        // Initial connect would hit the failing list; the first call (count 0) passes.
+        // The connect lists through the probe, so every failing list hits start_session.
         mgr.connect("local").await.unwrap();
         mgr.start_session("local", "default").await.unwrap();
     }
@@ -2452,6 +2488,80 @@ mod tests {
                 p("", ""),
             ]
         );
+    }
+
+    /// Counts execs; the probe's session list exits `list_exit`.
+    struct CountT {
+        inner: FakeT,
+        execs: Arc<std::sync::atomic::AtomicU32>,
+        list_exit: i32,
+    }
+    #[async_trait::async_trait]
+    impl Transport for CountT {
+        fn wrap(&self, argv: &[String], tty: bool) -> Vec<String> {
+            self.execs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.list_exit != 0 && argv.join(" ").contains("HERDR=") {
+                let out = format!(
+                    "{PROBE_HEAD}@@SESSIONS@@\n@@SESSIONS_EXIT={}\n",
+                    self.list_exit
+                );
+                let script = "printf %s \"$1\"; echo 'no server' >&2".to_string();
+                return vec!["sh".into(), "-c".into(), script, "sh".into(), out];
+            }
+            self.inner.wrap(argv, tty)
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            self.inner.local_socket(s).await
+        }
+        async fn release_socket(&self, s: &SessionEntry) -> AppResult<()> {
+            self.inner.release_socket(s).await
+        }
+    }
+
+    fn count_mgr(
+        list_exit: i32,
+    ) -> (
+        Arc<MachineManager>,
+        Arc<std::sync::atomic::AtomicU32>,
+        tempfile::TempDir,
+    ) {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let execs: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        let e = execs.clone();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(CountT {
+                inner: FakeT {
+                    sock: "/nonexistent/herdr.sock".into(),
+                },
+                execs: e.clone(),
+                list_exit,
+            }) as Arc<dyn Transport>
+        }));
+        (mgr, execs, d)
+    }
+
+    #[tokio::test]
+    async fn connect_runs_one_exec_for_probe_and_sessions() {
+        let (mgr, execs, _d) = count_mgr(0);
+        mgr.connect("local").await.unwrap();
+        // The probe (with the session list) and the client-only check for `old`.
+        assert_eq!(execs.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let v = mgr.views().into_iter().find(|v| v.id == "local").unwrap();
+        let names: Vec<_> = v.sessions.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["default", "old"]);
+    }
+
+    #[tokio::test]
+    async fn failed_session_list_in_probe_fails_connect() {
+        let (mgr, _, _d) = count_mgr(1);
+        let e = mgr.connect("local").await.unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("herdr_error", "session list failed: no server")
+        );
+        let v = mgr.views().into_iter().find(|v| v.id == "local").unwrap();
+        assert_eq!(v.state, MachineState::Error);
     }
 
     #[tokio::test]

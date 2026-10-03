@@ -191,7 +191,27 @@ else echo "PI_DIR=$HOME/.pi/agent/sessions"; fi
 [ -n "$H" ] || exit 0
 echo "VERSION=$("$H" --version 2>/dev/null | sed 's/^herdr //')"
 echo "PROTOCOL=$("$H" api schema 2>/dev/null | sed -n 's/^protocol: //p')"
+echo "@@SESSIONS@@"
+"$H" session list
+echo "@@SESSIONS_EXIT=$?"
 "#;
+
+const SESSIONS_MARK: &str = "@@SESSIONS@@\n";
+const SESSIONS_EXIT: &str = "@@SESSIONS_EXIT=";
+
+/// Split the probe's stdout into its `KEY=value` head and, when the script got that far,
+/// `herdr session list`'s exit status and output.
+pub fn split_probe(stdout: &str) -> (&str, Option<(i32, &str)>) {
+    let Some(at) = stdout.find(SESSIONS_MARK) else {
+        return (stdout, None);
+    };
+    let (head, rest) = (&stdout[..at], &stdout[at + SESSIONS_MARK.len()..]);
+    let sessions = rest.rfind(SESSIONS_EXIT).and_then(|e| {
+        let exit = rest[e + SESSIONS_EXIT.len()..].trim().parse().ok()?;
+        Some((exit, &rest[..e]))
+    });
+    (head, sessions)
+}
 
 /// `$1` is the user's override (used as is); `$2` the herdr found last time, used while
 /// still executable so a reconnect skips the login-shell discovery.
@@ -607,6 +627,38 @@ broken               running  /only-one-path\n";
         let out = run_probe(d.path(), None, Some(&h));
         assert_eq!(line(&out, "HERDR="), h);
         assert_eq!(line(&out, "PROTOCOL="), "22");
+    }
+
+    #[test]
+    fn probe_lists_the_sessions_in_the_same_exec() {
+        let (d, h) = fake_herdr();
+        let out = run_probe(d.path(), Some(&h), None);
+        let (head, sessions) = split_probe(&out);
+        assert_eq!(parse_probe(head).unwrap().herdr, h);
+        let (exit, list) = sessions.expect("sessions section");
+        assert_eq!(exit, 0);
+        let names: Vec<_> = parse_session_list(list)
+            .into_iter()
+            .map(|s| (s.name, s.running))
+            .collect();
+        assert_eq!(names, [("default".to_string(), true)]);
+    }
+
+    #[test]
+    fn split_probe_sections() {
+        let head = "HOME=/h\nHERDR=/h/herdr\nPROTOCOL=22\n";
+        assert_eq!(split_probe(head), (head, None));
+        let ok = format!("{head}@@SESSIONS@@\nname status\nx running /d /d/s\n@@SESSIONS_EXIT=0\n");
+        assert_eq!(
+            split_probe(&ok),
+            (head, Some((0, "name status\nx running /d /d/s\n")))
+        );
+        // A list without a trailing newline, and a failed list.
+        let bare = format!("{head}@@SESSIONS@@\nname status@@SESSIONS_EXIT=3\n");
+        assert_eq!(split_probe(&bare), (head, Some((3, "name status"))));
+        // The marker without its exit line (the script was cut short): no sessions.
+        let cut = format!("{head}@@SESSIONS@@\nname status\n");
+        assert_eq!(split_probe(&cut), (head, None));
     }
 
     #[test]
