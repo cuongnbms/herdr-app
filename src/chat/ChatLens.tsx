@@ -114,7 +114,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   };
 
   // Tool results render inside their call; each turn's work folds into one row.
-  const { rows, results } = useMemo(() => buildRows(state.items), [state.items]);
+  const { rows, results } = useMemo(() => buildRows(state.items, state.total - state.items.length), [state.items, state.total]);
   const toggle = useCallback((id: string, wasOpen: boolean) => {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
@@ -125,6 +125,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 72,
     overscan: 8,
+    getItemKey: (i) => rows[i].key,
   });
 
   const prevRows = useRef(0);

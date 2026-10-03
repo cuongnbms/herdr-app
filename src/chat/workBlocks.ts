@@ -20,8 +20,8 @@ export interface WorkBlock {
 }
 
 export type ChatRow =
-  | { kind: "item"; item: ChatItem }
-  | { kind: "work"; block: WorkBlock; /** in the newest turn */ last: boolean };
+  | { kind: "item"; key: string; item: ChatItem }
+  | { kind: "work"; key: string; block: WorkBlock; /** in the newest turn */ last: boolean };
 
 function blockId(items: ChatItem[]): string {
   for (const it of items) {
@@ -32,8 +32,8 @@ function blockId(items: ChatItem[]): string {
   return `${first.kind}:${first.ts ?? ""}:${first.kind === "thinking" ? first.text.slice(0, 64) : ""}`;
 }
 
-/** Splits loaded items into rows; a user or system item opens a turn. */
-export function buildRows(items: ChatItem[]): { rows: ChatRow[]; results: Map<string, ToolResult> } {
+/** Splits loaded items into rows; a user or system item opens a turn. `offset` is the absolute index of `items[0]`, so item keys survive prepends and trims. */
+export function buildRows(items: ChatItem[], offset = 0): { rows: ChatRow[]; results: Map<string, ToolResult> } {
   const calls = new Set<string>();
   const results = new Map<string, ToolResult>();
   for (const it of items) {
@@ -45,6 +45,7 @@ export function buildRows(items: ChatItem[]): { rows: ChatRow[]; results: Map<st
   let lastBlock = -1;
   let opener: ChatItem | null = null;
   let body: ChatItem[] = [];
+  let bodyAt: number[] = [];
   const flush = () => {
     let lastAction = -1;
     body.forEach((it, i) => {
@@ -58,21 +59,23 @@ export function buildRows(items: ChatItem[]): { rows: ChatRow[]; results: Map<st
       // By turn when its opener is loaded, so a live block keeps its id as its first call lands.
       const id = opener?.ts ? `turn:${opener.ts}` : blockId(shown);
       lastBlock = rows.length;
-      rows.push({ kind: "work", block: { id, items: shown, start, end }, last: false });
+      rows.push({ kind: "work", key: `w:${id}`, block: { id, items: shown, start, end }, last: false });
     }
-    for (const it of body.slice(lastAction + 1)) rows.push({ kind: "item", item: it });
+    for (let i = lastAction + 1; i < body.length; i++) rows.push({ kind: "item", key: `i:${bodyAt[i]}`, item: body[i] });
     body = [];
+    bodyAt = [];
   };
-  for (const it of items) {
+  items.forEach((it, index) => {
     if (it.kind === "user" || it.kind === "system") {
       flush();
       lastBlock = -1;
       opener = it;
-      rows.push({ kind: "item", item: it });
+      rows.push({ kind: "item", key: `i:${offset + index}`, item: it });
     } else {
       body.push(it);
+      bodyAt.push(offset + index);
     }
-  }
+  });
   flush();
   const tail = rows[lastBlock];
   if (tail?.kind === "work") rows[lastBlock] = { ...tail, last: true };
