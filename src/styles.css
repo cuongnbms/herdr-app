@@ -453,8 +453,8 @@ kbd {
   border-bottom: 1px solid color-mix(in srgb, var(--amber) 22%, transparent);
 }
 .term-banner::before, .chat-notice::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex: none; }
-.term-banner.neutral { background: var(--surface-1); border-bottom-color: var(--line); }
-.term-banner.neutral::before { background: var(--grey); }
+.term-banner.neutral, .chat-notice.neutral { background: var(--surface-1); border-bottom-color: var(--line); }
+.term-banner.neutral::before, .chat-notice.neutral::before { background: var(--grey); }
 
 /* ---------- Settings ---------- */
 .settings {

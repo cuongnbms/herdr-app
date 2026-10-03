@@ -41,6 +41,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const handle = useRef<{ close: () => void } | null>(null);
   // Bumped on each `reset`: thumbnails that failed while the tail was gone ask again.
   const [opened, setOpened] = useState(0);
+  // The first Reset waits for the whole backlog (seconds over a slow ssh): say so meanwhile.
+  const [loaded, setLoaded] = useState(false);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
   // The Pane `/model` was sent to: pi waits on its picker idle, so the picker is looked for then.
@@ -52,9 +54,11 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     (path: string | null) => {
       const gen = ++generation.current;
       setOpenError(null);
+      setLoaded(false);
       const channel = new Channel<ChatEvent>();
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
+        if (ev.type === "reset" || ev.type === "error") setLoaded(true);
         if (ev.type === "reset") {
           forceBottom.current = true;
           setOpened((n) => n + 1);
@@ -206,6 +210,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     <div className="chat-lens">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
+      {!loaded && !err && <div className="chat-notice neutral">Loading transcript…</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {
