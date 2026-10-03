@@ -111,6 +111,17 @@ pub async fn herdr_call(
     mgr.call(&machine_id, &session, &method, params).await
 }
 
+/// Shows a desktop notification for `pane`; clicking it emits `notify://activate`.
+#[tauri::command]
+pub fn notify_pane(
+    app: tauri::AppHandle,
+    pane: crate::view::PaneRef,
+    title: String,
+    body: String,
+) -> Result<(), AppError> {
+    crate::notify::show(&app, pane, title, body)
+}
+
 /// Saves a pasted image on the Machine and returns its path there. The body is the raw
 /// image bytes; `x-machine-id` and `x-image-ext` headers name the Machine and file type.
 #[tauri::command]

@@ -1,4 +1,4 @@
-import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { notifyPane } from "./lib/ipc";
 import type { MachineView, PaneRef, PaneStatusEvent } from "./lib/types";
 import { paneKey } from "./lib/types";
 
@@ -40,31 +40,18 @@ export function shouldNotify(ev: PaneStatusEvent, selected: PaneRef | null, enab
   return true;
 }
 
-let permission: Promise<boolean> | null = null;
-
-/** Asks the OS for permission once, on the first notification that would be shown. */
-function ensurePermission(): Promise<boolean> {
-  permission ??= (async () => {
-    if (await isPermissionGranted()) return true;
-    return (await requestPermission()) === "granted";
-  })().catch(() => false);
-  return permission;
-}
-
 export async function notifyPaneStatus(
   ev: PaneStatusEvent,
   selected: PaneRef | null,
   machines: Record<string, MachineView>,
 ): Promise<void> {
   if (!shouldNotify(ev, selected, notificationsEnabled())) return;
-  if (!(await ensurePermission())) return;
   const pane = machines[ev.pane.machine_id]
     ?.sessions.find((s) => s.name === ev.pane.session)
     ?.workspaces.flatMap((w) => w.tabs.flatMap((t) => t.panes))
     .find((p) => p.pane_id === ev.pane.pane_id);
   const machine = machines[ev.pane.machine_id]?.label ?? ev.pane.machine_id;
-  sendNotification({
-    title: `${pane?.agent ?? ev.title} is ${ev.status}`,
-    body: `${machine} › ${ev.pane.session} › ${ev.title}`,
-  });
+  await notifyPane(ev.pane, `${pane?.agent ?? ev.title} is ${ev.status}`, `${machine} › ${ev.pane.session} › ${ev.title}`).catch(
+    (e: unknown) => console.warn("notify_pane failed", e),
+  );
 }

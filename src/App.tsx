@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import "./fonts/fonts.css";
 import "./styles.css";
-import { machinesList, onMachine, onPaneStatus, sessionStart } from "./lib/ipc";
+import { machinesList, onMachine, onNotifyActivate, onPaneStatus, sessionStart } from "./lib/ipc";
 import { notifyPaneStatus } from "./notify";
 import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
@@ -116,20 +116,22 @@ export default function App() {
     };
   }, [upsert]);
 
-  // Notifications: the permission prompt only happens lazily inside notifyPaneStatus.
+  // Notifications: show one per status change, and jump to its pane when clicked.
   useEffect(() => {
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
+    const unlisten: (() => void)[] = [];
+    const keep = (u: () => void) => {
+      if (cancelled) u();
+      else unlisten.push(u);
+    };
     void onPaneStatus((ev) => {
       const { selected, machines } = useApp.getState();
       void notifyPaneStatus(ev, selected, machines);
-    }).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
+    }).then(keep);
+    void onNotifyActivate((pane) => useApp.getState().select(pane)).then(keep);
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisten.forEach((u) => u());
     };
   }, []);
 

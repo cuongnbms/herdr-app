@@ -53,6 +53,11 @@ export const onMachine = (cb: (m: MachineView) => void): Promise<UnlistenFn> =>
   listen<MachineView>("sidebar://machine", (e) => cb(e.payload));
 export const onPaneStatus = (cb: (e: PaneStatusEvent) => void): Promise<UnlistenFn> =>
   listen<PaneStatusEvent>("pane://status", (e) => cb(e.payload));
+export const notifyPane = (pane: PaneRef, title: string, body: string) =>
+  invoke<void>("notify_pane", { pane, title, body });
+/** Fires with the pane of a desktop notification the user clicked. */
+export const onNotifyActivate = (cb: (pane: PaneRef) => void): Promise<UnlistenFn> =>
+  listen<PaneRef>("notify://activate", (e) => cb(e.payload));
 
 export interface AttachKey {
   machine_id: string;

@@ -6,6 +6,7 @@ pub mod fonts;
 pub mod herdr;
 pub mod layout;
 pub mod machines;
+pub mod notify;
 pub mod quota;
 pub mod sshconfig;
 pub mod transcript;
@@ -43,6 +44,7 @@ pub fn run() {
             commands::session_stop,
             commands::session_delete,
             commands::herdr_call,
+            commands::notify_pane,
             commands::image_save_temp,
             commands::term_open,
             commands::term_write,
@@ -66,6 +68,7 @@ pub fn run() {
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
             tracing::info!("herdr-app starting");
+            notify::init(app.handle());
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             app.manage(Arc::new(layout::LayoutStore::new(
