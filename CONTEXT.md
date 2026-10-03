@@ -36,6 +36,10 @@ An exclusive connection to a Terminal's stream; herdr allows only one at a time 
 **Agent**:
 A coding agent (Claude Code, pi, ...) that herdr detects running in a Pane, with an agent status of `working`, `blocked`, `done`, `idle` or `unknown`.
 
+**Slash command**:
+A command an Agent runs when a message starts with it (`/compact`, or `$name` for a Codex skill): a built-in, a user or project command, or a skill, including a plugin's.
+_Avoid_: shortcut, macro
+
 **Lens**:
 A way of viewing a Pane: the **Terminal lens** (the raw attached terminal) or the **Chat lens** (the Agent's Transcript as a conversation).
 _Avoid_: mode, view

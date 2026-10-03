@@ -105,6 +105,13 @@ export interface Located {
   candidates: string[];
 }
 
+export interface SlashCommand {
+  name: string;
+  description: string;
+  source: "builtin" | "user" | "project" | "skill" | "plugin";
+  trigger?: "$";
+}
+
 export type QuotaProvider = "claude" | "codex" | "opencodeGo" | "grok";
 export interface QuotaWindow {
   label: string;

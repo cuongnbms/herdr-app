@@ -4,7 +4,9 @@
 
 Transcript-parsing logic in `src-tauri/src/transcript/`, the screen-prompt reader in
 `src/chat/prompt/screenPrompt.ts` (and the screens in its tests), the Chat lens work blocks
-and todo checklists in `src/chat/workBlocks.ts` and `src/chat/checklist.ts`, and the agent marks in
+and todo checklists in `src/chat/workBlocks.ts` and `src/chat/checklist.ts`, the Composer's completion
+triggers in `src/chat/mentions.ts`, the file scoring in `src/chat/complete.ts`, the built-in Slash
+command tables and descriptions in `src-tauri/src/complete/commands.rs`, and the agent marks in
 `src/agents/AgentMark.tsx` and `src/agents/agentSvgMarks.ts` are adapted from
 [herdr-web-ui](https://github.com/devswha/herdr-web-ui). Several of those marks come from
 [lobe-icons](https://github.com/lobehub/lobe-icons) (MIT). The provider logos remain the

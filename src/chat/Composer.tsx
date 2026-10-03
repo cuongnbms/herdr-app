@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
-import type { PaneRef } from "../lib/types";
+import type { PaneRef, SlashCommand } from "../lib/types";
 import { CloseIcon, SendIcon } from "../ui/icons";
+import { CompletionMenu } from "./CompletionMenu";
+import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
+import { activeTrigger, applyCompletion } from "./mentions";
+import { useCompletions } from "./useCompletions";
 
 // Key names verified against herdr's key parser (pane.send_keys accepts esc, ctrl+c,
 // shift+tab, enter, up, down, 1; unknown names fail with `invalid_key`).
@@ -27,6 +31,9 @@ const PATH_PASTE_AGENTS = new Set(["claude", "codex", "gemini"]);
 // image (herdr likewise holds `agent.prompt`'s Enter back 300 ms behind its text).
 export const IMAGE_SETTLE_MS = 300;
 
+// Agents whose Slash commands the Composer can list.
+const SLASH_AGENTS = new Set(["claude", "pi", "codex"]);
+
 const bracketedPaste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const mention = (path: string) => (/[\s"]/.test(path) ? `@"${path}"` : `@${path}`);
 
@@ -45,10 +52,50 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
   const [text, setText] = useState("");
   const [images, setImages] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [active, setActive] = useState(0);
+  const [usage, setUsage] = useState<Record<string, number>>(() => (agent ? readUsage(agent) : {}));
+  const box = useRef<HTMLTextAreaElement>(null);
   const nextId = useRef(0);
   const live = useRef<Attachment[]>([]);
   live.current = images;
   useEffect(() => () => live.current.forEach(revoke), []);
+
+  useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
+
+  const found = activeTrigger(text, caret, { skills: agent === "codex" });
+  const trigger = found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
+  const query = trigger?.query;
+  const kind = trigger?.kind ?? null;
+  const prefix = trigger?.prefix ?? "/";
+  const { commands, files, loading, error: listError } = useCompletions(pane, kind);
+  const rows: (SlashCommand | string)[] =
+    kind === "slash"
+      ? rankCommands(
+          commands.filter((c) => (c.trigger === "$") === (prefix === "$")),
+          query ?? "",
+          usage,
+        )
+      : kind === "file"
+        ? rankFiles(files, query ?? "")
+        : [];
+  useEffect(() => setActive(0), [kind, prefix, query]);
+  const open = trigger !== null && !dismissed && (loading || listError || rows.length > 0);
+  const capturing = open && rows.length > 0;
+  const current = Math.min(active, Math.max(rows.length - 1, 0));
+
+  const choose = (i: number) => {
+    const row = rows[i];
+    if (!trigger || row === undefined) return;
+    const insert = typeof row === "string" ? mention(row) : `${prefix}${row.name}`;
+    const next = applyCompletion(text, trigger, `${insert} `);
+    setText(next.text);
+    setCaret(next.caret);
+    setDismissed(false);
+    if (typeof row !== "string" && agent) setUsage(recordUse(agent, row.name));
+    requestAnimationFrame(() => box.current?.setSelectionRange(next.caret, next.caret));
+  };
 
   const call = (method: string, params: unknown) =>
     herdrCall(pane.machine_id, pane.session, method, params).then(
@@ -136,11 +183,28 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
             ))}
           </div>
         )}
+        {open && trigger && kind && (
+          <CompletionMenu
+            kind={kind}
+            prefix={prefix}
+            items={rows}
+            active={current}
+            loading={loading}
+            error={listError}
+            onChoose={choose}
+          />
+        )}
         <textarea
+          ref={box}
           value={text}
           rows={2}
           placeholder="Message the agent…  (Enter to send, Shift+Enter for newline, paste images)"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setCaret(e.target.selectionStart);
+            setDismissed(false);
+          }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onPaste={(e) => {
             const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
             if (files.length === 0) return;
@@ -149,6 +213,24 @@ export function Composer({ pane, agent }: { pane: PaneRef; agent: string | null 
             files.forEach((f) => void attach(f));
           }}
           onKeyDown={(e) => {
+            // Escape closes any open list, a loading or failed one included.
+            if (open && e.key === "Escape" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              return setDismissed(true);
+            }
+            if (capturing && !e.nativeEvent.isComposing) {
+              const move = (by: number) => {
+                e.preventDefault();
+                setActive((current + by + rows.length) % rows.length);
+              };
+              if (e.key === "ArrowDown") return move(1);
+              if (e.key === "ArrowUp") return move(-1);
+              // Shift+Enter keeps its newline.
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                return choose(current);
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               send();

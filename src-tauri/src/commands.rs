@@ -1,6 +1,7 @@
 //! Tauri commands: thin wrappers over `MachineManager`.
 use crate::{
     attach::{attach_argv, AttachEvent, AttachKey, AttachManager, Sink},
+    complete::{self, SlashCommand},
     error::AppError,
     herdr::rpc,
     machines::MachineManager,
@@ -344,6 +345,23 @@ fn find_pane(mgr: &MachineManager, r: &PaneRef) -> Result<PaneView, AppError> {
 /// How long to wait for herdr to report a just-started Claude agent's session.
 const SESSION_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// The directory the agent in a Pane runs from, which may differ from the shell's cwd (best-effort).
+async fn foreground_cwd(mgr: &MachineManager, pane_ref: &PaneRef) -> Option<String> {
+    let PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    } = pane_ref;
+    let transport = mgr.transport(machine_id).ok()?;
+    let entry = mgr.session(machine_id, session).ok()?;
+    let socket = transport.local_socket(&entry).await.ok()?;
+    rpc::snapshot(&socket)
+        .await
+        .ok()
+        .and_then(|s| s.panes.into_iter().find(|p| p.pane_id == *pane_id))
+        .and_then(|p| p.foreground_cwd)
+}
+
 /// The transcript of the agent in a Pane: `path` when given (the user's choice), else located.
 async fn locate_pane(
     mgr: &MachineManager,
@@ -393,18 +411,7 @@ async fn locate_pane(
         },
         None => {
             let info = mgr.info(machine_id)?;
-            // The agent may run from a different directory than the shell's cwd (best-effort).
-            let fg = match mgr.session(machine_id, session) {
-                Ok(entry) => match transport.local_socket(&entry).await {
-                    Ok(socket) => rpc::snapshot(&socket)
-                        .await
-                        .ok()
-                        .and_then(|s| s.panes.into_iter().find(|p| p.pane_id == pane.pane_id))
-                        .and_then(|p| p.foreground_cwd),
-                    Err(_) => None,
-                },
-                Err(_) => None,
-            };
+            let fg = foreground_cwd(mgr, pane_ref).await;
             transcript::locate::locate_in(&*transport, &info, &agent_get, &pane, fg.as_deref())
                 .await?
         }
@@ -425,6 +432,51 @@ pub async fn chat_locate(
         pane_id,
     };
     locate_pane(&mgr, &pane_ref, None).await
+}
+
+/// The Slash commands the Agent in a Pane offers, read on the Pane's Machine.
+#[tauri::command]
+pub async fn complete_commands(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+) -> Result<Vec<SlashCommand>, AppError> {
+    let pane_ref = PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    };
+    let pane = find_pane(&mgr, &pane_ref)?;
+    let agent = pane.agent.clone().unwrap_or_default();
+    if agent.is_empty() {
+        return Ok(Vec::new());
+    }
+    let info = mgr.info(&pane_ref.machine_id)?;
+    let transport = mgr.transport(&pane_ref.machine_id)?;
+    let cwd = foreground_cwd(&mgr, &pane_ref).await.or(pane.cwd);
+    complete::list_commands(&*transport, &agent, &info.home, cwd.as_deref()).await
+}
+
+/// The files under a Pane's working directory, read on the Pane's Machine.
+#[tauri::command]
+pub async fn complete_files(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+) -> Result<Vec<String>, AppError> {
+    let pane_ref = PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    };
+    let pane = find_pane(&mgr, &pane_ref)?;
+    let Some(cwd) = foreground_cwd(&mgr, &pane_ref).await.or(pane.cwd) else {
+        return Ok(Vec::new());
+    };
+    let transport = mgr.transport(&pane_ref.machine_id)?;
+    complete::list_files(&*transport, &cwd).await
 }
 
 #[tauri::command]
@@ -511,8 +563,9 @@ pub async fn system_fonts() -> Result<Vec<String>, AppError> {
 #[tauri::command]
 pub async fn font_face(family: String, style: String) -> Result<tauri::ipc::Response, AppError> {
     tokio::task::spawn_blocking(move || {
-        let path = crate::fonts::face_file(&family, &style)
-            .ok_or_else(|| AppError::new("not_found", format!("no web-loadable {family} {style}")))?;
+        let path = crate::fonts::face_file(&family, &style).ok_or_else(|| {
+            AppError::new("not_found", format!("no web-loadable {family} {style}"))
+        })?;
         std::fs::read(&path)
             .map(tauri::ipc::Response::new)
             .map_err(|e| AppError::new("io", e.to_string()))
