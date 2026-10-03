@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULTS, applyChatFont, filterFonts, fontFamilies, loadFonts, termFontFamily, useSettings, watchTermFont } from "./store";
+import {
+  DEFAULTS,
+  applyChatFont,
+  ensureTermFont,
+  filterFonts,
+  fontFamilies,
+  loadFonts,
+  termFontFamily,
+  useSettings,
+  watchTermFont,
+} from "./store";
+
+const { fontFace } = vi.hoisted(() => ({ fontFace: vi.fn() }));
+vi.mock("../lib/ipc", () => ({ systemFonts: vi.fn(async () => []), fontFace }));
 
 const KEY = "herdr-app:settings";
 
@@ -78,6 +91,50 @@ describe("watchTermFont", () => {
     stop();
     useSettings.getState().set({ terminalFontSize: 18 });
     expect(term.options.fontSize).toBe(15);
+  });
+});
+
+describe("ensureTermFont", () => {
+  it("registers each face the backend returns as a web font, once per family", async () => {
+    const added: { family: string; descriptors: FontFaceDescriptors; loaded: boolean }[] = [];
+    vi.stubGlobal(
+      "FontFace",
+      class {
+        loaded = false;
+        constructor(
+          public family: string,
+          _src: ArrayBuffer,
+          public descriptors: FontFaceDescriptors = {},
+        ) {}
+        async load() {
+          this.loaded = true;
+          return this;
+        }
+      },
+    );
+    const add = vi.fn((f: (typeof added)[number]) => added.push(f));
+    Object.defineProperty(document, "fonts", { configurable: true, value: { add } });
+    fontFace.mockImplementation(async (_family: string, style: string) => {
+      if (style === "Italic") throw { code: "not_found" };
+      return new ArrayBuffer(8);
+    });
+
+    await ensureTermFont("Lilex");
+    await ensureTermFont("Lilex");
+
+    expect(fontFace).toHaveBeenCalledTimes(4);
+    expect(added.map((f) => [f.family, f.descriptors, f.loaded])).toEqual([
+      ["Lilex", {}, true],
+      ["Lilex", { weight: "700" }, true],
+      ["Lilex", { weight: "700", style: "italic" }, true],
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves the bundled font alone", async () => {
+    fontFace.mockClear();
+    await ensureTermFont("JetBrains Mono");
+    expect(fontFace).not.toHaveBeenCalled();
   });
 });
 

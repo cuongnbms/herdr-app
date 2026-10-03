@@ -9,7 +9,7 @@ import { attachKeyString, termAck, termOpen, termRelease, termResize, termWrite 
 import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { Banner } from "./Banner";
-import { watchTermFont } from "../settings/store";
+import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
@@ -71,16 +71,20 @@ export function TerminalLens({ pane, terminalId }: Props) {
     const { term, fit } = getOrCreate(cacheKey, createEntry);
     if (!term.element) {
       term.open(container);
-      try {
-        const gl = new WebglAddon();
-        gl.onContextLoss(() => {
-          console.warn("xterm WebGL context lost; falling back to DOM renderer");
-          gl.dispose();
-        });
-        term.loadAddon(gl);
-      } catch (e) {
-        console.warn("xterm WebGL unavailable; using DOM renderer", e);
-      }
+      // The WebGL atlas rasterizes ASCII up front, so the font must be a web font first
+      // (see ensureTermFont); the DOM renderer covers the wait.
+      void ensureTermFont(useSettings.getState().terminalFontFamily).then(() => {
+        try {
+          const gl = new WebglAddon();
+          gl.onContextLoss(() => {
+            console.warn("xterm WebGL context lost; falling back to DOM renderer");
+            gl.dispose();
+          });
+          term.loadAddon(gl);
+        } catch (e) {
+          console.warn("xterm WebGL unavailable; using DOM renderer", e);
+        }
+      });
     } else {
       container.appendChild(term.element);
     }

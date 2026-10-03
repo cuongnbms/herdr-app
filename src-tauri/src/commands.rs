@@ -506,6 +506,21 @@ pub async fn system_fonts() -> Result<Vec<String>, AppError> {
         .map_err(|e| AppError::new("io", e.to_string()))
 }
 
+/// Raw bytes of `family`'s `style` face, for registering it as a web font; `not_found` when
+/// the face is missing or the WebView renders it natively (see `fonts::face_file`).
+#[tauri::command]
+pub async fn font_face(family: String, style: String) -> Result<tauri::ipc::Response, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let path = crate::fonts::face_file(&family, &style)
+            .ok_or_else(|| AppError::new("not_found", format!("no web-loadable {family} {style}")))?;
+        std::fs::read(&path)
+            .map(tauri::ipc::Response::new)
+            .map_err(|e| AppError::new("io", e.to_string()))
+    })
+    .await
+    .map_err(|e| AppError::new("io", e.to_string()))?
+}
+
 #[tauri::command]
 pub async fn quota_fetch(
     provider: crate::quota::Provider,
