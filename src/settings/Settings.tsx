@@ -6,6 +6,9 @@ import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQui
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
 
+/** How far one press of − or + moves a font size, in px. */
+const SIZE_STEP = 0.5;
+
 function Stepper({
   label,
   value,
@@ -21,11 +24,11 @@ function Stepper({
     <div className="setting-row">
       <span>{label}</span>
       <div className="stepper">
-        <button aria-label={`Decrease ${label.toLowerCase()}`} disabled={value <= range.min} onClick={() => onChange(value - 1)}>
+        <button aria-label={`Decrease ${label.toLowerCase()}`} disabled={value <= range.min} onClick={() => onChange(value - SIZE_STEP)}>
           −
         </button>
         <output>{value}px</output>
-        <button aria-label={`Increase ${label.toLowerCase()}`} disabled={value >= range.max} onClick={() => onChange(value + 1)}>
+        <button aria-label={`Increase ${label.toLowerCase()}`} disabled={value >= range.max} onClick={() => onChange(value + SIZE_STEP)}>
           +
         </button>
       </div>

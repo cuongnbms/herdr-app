@@ -132,9 +132,9 @@ describe("Settings fonts", () => {
     openSettings();
     fireEvent.click(screen.getByRole("button", { name: "Increase terminal size" }));
     fireEvent.click(screen.getByRole("button", { name: "Decrease chat size" }));
-    expect(useSettings.getState().terminalFontSize).toBe(14);
-    expect(useSettings.getState().chatFontSize).toBe(12.5);
-    expect(screen.getByText("14px")).toBeTruthy();
+    expect(useSettings.getState().terminalFontSize).toBe(13.5);
+    expect(useSettings.getState().chatFontSize).toBe(13);
+    expect(screen.getByText("13.5px")).toBeTruthy();
   });
 
   it("disables a stepper at its limit", () => {
