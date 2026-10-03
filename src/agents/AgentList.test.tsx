@@ -133,3 +133,55 @@ describe("AgentList", () => {
     expect(screen.getByText("Select a session")).toBeTruthy();
   });
 });
+
+describe("AgentList tab reordering", () => {
+  const dt = () => {
+    const data: Record<string, string> = {};
+    return { data, types: [] as string[], effectAllowed: "", dropEffect: "",
+      setData(t: string, v: string) { data[t] = v; this.types.push(t); }, getData: (t: string) => data[t] ?? "", setDragImage() {} };
+  };
+  const card = (title: string) => screen.getByText(title).closest("button")!;
+  const drag = (from: HTMLElement, to: HTMLElement) => {
+    const dataTransfer = dt();
+    fireEvent.dragStart(from, { dataTransfer });
+    fireEvent.dragEnter(to, { dataTransfer });
+    fireEvent.dragOver(to, { dataTransfer });
+    fireEvent.drop(to, { dataTransfer });
+    fireEvent.dragEnd(from, { dataTransfer });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useApp.setState({ machines: { local: m }, order: ["local"], selected: null, viewed: { machine_id: "local", session: "default" } });
+  });
+
+  it("moves a tab after the tab it is dropped on", () => {
+    render(<AgentList />);
+    // jsdom rects are empty, so every drop lands after the target.
+    drag(card("Guard export"), card("Ship flag"));
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.move", { tab_id: "w2:t1", insert_index: 2 });
+    expect(document.querySelector(".drop-before, .drop-after")).toBeNull();
+  });
+
+  it("shows the indicator on the whole tab while dragging over one of its panes", () => {
+    render(<AgentList />);
+    const dataTransfer = dt();
+    fireEvent.dragStart(card("Guard export"), { dataTransfer });
+    fireEvent.dragOver(card("Tag v1.4.0"), { dataTransfer });
+    expect(screen.getByRole("group", { name: "Tab release" }).className).toContain("drop-after");
+  });
+
+  it("does nothing when the drop leaves the tab in place", () => {
+    render(<AgentList />);
+    drag(card("Tag v1.4.0"), card("Ship flag"));
+    drag(card("Guard export"), card("Guard export"));
+    expect(herdrCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses a drop on another workspace", () => {
+    render(<AgentList />);
+    drag(card("Idempotent payments"), card("Guard export"));
+    expect(herdrCall).not.toHaveBeenCalled();
+    expect(document.querySelector(".drop-before, .drop-after")).toBeNull();
+  });
+});

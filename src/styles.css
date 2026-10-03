@@ -392,6 +392,15 @@ kbd {
 .agent-card-close:hover { color: var(--fg); box-shadow: inset 0 0 0 1px var(--line-2); }
 .agent-card-close svg { width: 13px; height: 13px; }
 .agent-card-sub { color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Where a dragged tab will land: a line in the gap before or after the tab's row. */
+.tab-group { position: relative; }
+.agent-card-item.drop-before::after, .agent-card-item.drop-after::after,
+.tab-group.drop-before::after, .tab-group.drop-after::after {
+  content: ""; position: absolute; left: 4px; right: 4px; height: 2px;
+  border-radius: 1px; background: var(--accent); pointer-events: none;
+}
+.agent-card-item.drop-before::after, .tab-group.drop-before::after { top: -2px; }
+.agent-card-item.drop-after::after, .tab-group.drop-after::after { bottom: -2px; }
 
 .agent-tile {
   flex: 0 0 26px; width: 26px; height: 26px; box-sizing: border-box;
