@@ -29,10 +29,9 @@ fn location_and_rest(s: &str) -> Option<(&str, &str)> {
     valid_path(path).then_some((path, rest))
 }
 
-/// The text after the body, which ends at the first `end` (an empty body is allowed).
+/// The text after the body, which ends at the first `end`.
 fn after_body<'a>(s: &'a str, end: &str) -> Option<&'a str> {
-    s.strip_prefix(&end[1..])
-        .or_else(|| s.split_once(end).map(|(_, r)| r))
+    s.split_once(end).map(|(_, r)| r)
 }
 
 /// One chained block at the start of `s`: the Skill and the text after the block.
@@ -170,5 +169,15 @@ mod tests {
         assert_eq!(parse_skill_prompt(&trailing), None);
         let unclosed = block("a", "/a/SKILL.md").replace("\n</skill-instruction>", "");
         assert_eq!(parse_skill_prompt(&unclosed), None);
+        let chained_nobody = block("a", "/a/SKILL.md").replace("\n# a\nbody", "");
+        assert_eq!(parse_skill_prompt(&chained_nobody), None);
+        assert_eq!(parse_skill_prompt("<skill name=\"x\" location=\"/p\">\n</skill>"), None);
+    }
+    #[test]
+    fn empty_body_with_blank_line_is_accepted() {
+        let chained = block("a", "/a/SKILL.md").replace("# a\nbody", "");
+        assert_eq!(parse_skill_prompt(&chained), Some((vec![s("a", "/a/SKILL.md")], "".into())));
+        let legacy = "<skill name=\"x\" location=\"/p\">\n\n</skill>";
+        assert_eq!(parse_skill_prompt(legacy), Some((vec![s("x", "/p")], "".into())));
     }
 }
