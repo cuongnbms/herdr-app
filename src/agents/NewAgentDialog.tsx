@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey, type WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { getFolder, setFolder, suggestFolder } from "../workspaces/folder";
-import { AgentChoice } from "./AgentChoice";
+import { AgentIcon } from "./AgentIcon";
 import { startAgent } from "./startAgent";
 
 type Agent = "claude" | "pi" | "shell";
@@ -29,8 +29,14 @@ export function NewAgentDialog({
   const ref = { machine_id: machineId, session, workspace_id: workspace.workspace_id };
   const [stored] = useState(() => getFolder(ref));
   const [folder, setFolderValue] = useState(() => suggestFolder(workspace));
-  const [agent, setAgent] = useState<Agent>("claude");
-  const start = async () => {
+  // Clicking an agent submits the form; Enter in the folder field picks the first (claude).
+  const picked = useRef<Agent>(AGENTS[0]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const start = async (agent: Agent) => {
     const cwd = (stored ?? folder).trim();
     if (!cwd) return;
     onClose();
@@ -60,23 +66,30 @@ export function NewAgentDialog({
         role="dialog"
         aria-label="New agent"
         onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
         onSubmit={(e) => {
           e.preventDefault();
-          void start();
+          const agent = picked.current;
+          picked.current = AGENTS[0];
+          void start(agent);
         }}
       >
-        <h3>New agent in {workspace.label}</h3>
-        <AgentChoice options={AGENTS} value={agent} onChange={setAgent} autoFocus={stored !== null} />
+        <div className="dialog-head">
+          <h3>New agent in {workspace.label}</h3>
+          <kbd aria-hidden="true">esc</kbd>
+        </div>
         {stored === null && (
           <label>
             Folder
             <input spellCheck={false} autoCorrect="off" autoCapitalize="off" autoFocus value={folder} placeholder="/path/to/project" onChange={(e) => setFolderValue(e.target.value)} />
           </label>
         )}
-        <div className="actions">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary">Start</button>
+        <div className="agent-pick" role="group" aria-label="Agent">
+          {AGENTS.map((a, i) => (
+            <button key={a} type="submit" autoFocus={stored !== null && i === 0} onClick={() => (picked.current = a)}>
+              <span aria-hidden="true"><AgentIcon agent={a === "shell" ? null : a} /></span>
+              {a}
+            </button>
+          ))}
         </div>
       </form>
     </div>

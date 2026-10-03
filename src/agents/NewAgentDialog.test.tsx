@@ -37,7 +37,7 @@ describe("NewAgentDialog", () => {
     });
     respond();
     open();
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(lensWhenSelected).toBe("terminal");
   });
@@ -46,8 +46,7 @@ describe("NewAgentDialog", () => {
     setFolder(ref, "/home/me/api");
     respond();
     const { onError } = open();
-    fireEvent.click(screen.getByRole("radio", { name: "shell" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "shell" }));
     await waitFor(() => expect(useApp.getState().selected?.pane_id).toBe("w1:p7"));
     expect(herdrCall).toHaveBeenCalledTimes(1);
     expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", { workspace_id: "w1", cwd: "/home/me/api", label: "shell", focus: false });
@@ -61,7 +60,7 @@ describe("NewAgentDialog", () => {
     expect(screen.getByRole("dialog", { name: "New agent" })).toBeTruthy();
     expect((screen.getByLabelText("Folder") as HTMLInputElement).value).toBe("/srv/api");
     fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/srv/api2 " } });
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(getFolder(ref)).toBe("/srv/api2");
     expect(herdrCall).toHaveBeenNthCalledWith(1, "local", "default", "tab.create", { workspace_id: "w1", cwd: "/srv/api2", label: "claude", focus: false });
@@ -74,8 +73,7 @@ describe("NewAgentDialog", () => {
     respond();
     open();
     expect(screen.queryByLabelText("Folder")).toBeNull();
-    fireEvent.click(screen.getByRole("radio", { name: "pi" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "pi" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(herdrCall).toHaveBeenNthCalledWith(1, "local", "default", "tab.create", { workspace_id: "w1", cwd: "/home/me/api", label: "pi", focus: false });
     expect(herdrCall).toHaveBeenNthCalledWith(2, "local", "default", "agent.start", { name: "pi", kind: "pi", pane_id: "w1:p7" });
@@ -87,7 +85,7 @@ describe("NewAgentDialog", () => {
     respond();
     const { onClose } = open();
     fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "   " } });
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
     expect(herdrCall).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(getFolder(ref)).toBeNull();
@@ -96,24 +94,32 @@ describe("NewAgentDialog", () => {
   it("reports an agent.start failure and keeps the new pane selected", async () => {
     respond(() => Promise.reject({ code: "timeout", message: "agent did not become ready" }));
     const { onError } = open();
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await waitFor(() => expect(onError).toHaveBeenCalledWith("agent did not become ready"));
     expect(useApp.getState().selected?.pane_id).toBe("w1:p7");
   });
-  it("offers the agents as radios, claude checked by default", () => {
+  it("offers each agent as a start button, below the folder, with no Cancel or Start", () => {
     respond();
     open();
-    expect(screen.getByRole("group", { name: "Agent" })).toBeTruthy();
-    expect((screen.getByRole("radio", { name: "claude" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("radio", { name: "pi" }) as HTMLInputElement).checked).toBe(false);
+    const group = screen.getByRole("group", { name: "Agent" });
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["claude", "pi", "shell"]);
+    expect(screen.getByLabelText("Folder").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("focuses the selected agent radio when the folder is remembered, so Escape closes", () => {
+  it("starts claude on Enter in the folder field", async () => {
+    respond();
+    open();
+    fireEvent.submit(screen.getByLabelText("Folder"));
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
+    expect(herdrCall).toHaveBeenNthCalledWith(1, "local", "default", "tab.create", { workspace_id: "w1", cwd: "/srv/api", label: "claude", focus: false });
+  });
+
+  it("focuses the first agent when the folder is remembered, and Escape closes", () => {
     setFolder(ref, "/home/me/api");
     respond();
     const { onClose } = open();
-    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "claude" }));
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "claude" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -122,7 +128,7 @@ describe("NewAgentDialog", () => {
       method === "tab.create" ? Promise.reject({ code: "io", message: "no such workspace" }) : Promise.resolve(undefined));
     const { onError } = open();
     fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/srv/x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await waitFor(() => expect(onError).toHaveBeenCalledWith("no such workspace"));
     expect(herdrCall).toHaveBeenCalledTimes(1);
     expect(herdrCall).not.toHaveBeenCalledWith("local", "default", "agent.start", expect.anything());

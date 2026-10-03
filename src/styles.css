@@ -601,6 +601,18 @@ kbd {
 .seg-option .agent-tile { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 5px; }
 .seg-option .agent-tile svg { width: 12px; height: 12px; }
 .seg-option .agent-tile-bare svg { width: 100%; height: 100%; }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.agent-pick button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  height: 76px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-md);
+  background: var(--surface-1); color: var(--fg-2); font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+.agent-pick button:hover { border-color: var(--accent); background: var(--surface-3); color: var(--fg); }
+.agent-pick button:focus-visible { border-color: var(--accent); color: var(--fg); box-shadow: var(--ring); outline: none; }
+.agent-pick button:active { transform: translateY(0.5px); }
+.agent-pick button > span { display: contents; }
 .dialog details { color: var(--fg-2); }
 .dialog details summary { cursor: pointer; font-size: 12px; }
 .dialog details[open] summary { margin-bottom: 10px; }
