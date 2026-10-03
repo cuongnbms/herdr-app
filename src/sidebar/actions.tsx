@@ -5,6 +5,8 @@ import type { MachineView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { ConfirmDialog, ContextMenu, TextDialog } from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
+import { MoveToGroupDialog } from "./MoveToGroupDialog";
+import type { SessionKey } from "./groups";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
 import { NewAgentDialog } from "../agents/NewAgentDialog";
 import { setFolder } from "../workspaces/folder";
@@ -13,21 +15,23 @@ import { AddMachineDialog } from "../machines/AddMachineDialog";
 const ConnectDialog = lazy(() => import("../machines/ConnectDialog").then((m) => ({ default: m.ConnectDialog })));
 
 type Dialog =
-  | { kind: "rename"; title: string; initial: string; run: (label: string) => Promise<unknown> }
+  | { kind: "rename"; title: string; initial: string; submitLabel: string; run: (label: string) => Promise<unknown> }
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
   | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
   | { kind: "agent"; machineId: string; session: string; workspace: WorkspaceView }
   | { kind: "folder"; ref: WorkspaceRef; initial: string }
+  | { kind: "move"; key: SessionKey }
   | { kind: "add-machine" }
   | { kind: "connect"; machine: MachineView };
 
 export interface Actions {
   menu: (e: MouseEvent, items: MenuItem[]) => void;
-  rename: (title: string, initial: string, run: (label: string) => Promise<unknown>) => void;
+  rename: (title: string, initial: string, run: (label: string) => Promise<unknown>, submitLabel?: string) => void;
   confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
   newWorkspace: (machineId: string, session: string) => void;
   newAgent: (machineId: string, session: string, workspace: WorkspaceView) => void;
   changeFolder: (ref: WorkspaceRef, initial: string) => void;
+  moveToGroup: (key: SessionKey) => void;
   addMachine: () => void;
   connect: (machine: MachineView) => void;
   guard: (run: () => Promise<unknown>) => void;
@@ -69,10 +73,11 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY, items });
       },
-      rename: (title, initial, run) => setDialog({ kind: "rename", title, initial, run }),
+      rename: (title, initial, run, submitLabel = "Rename") => setDialog({ kind: "rename", title, initial, submitLabel, run }),
       confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
       newAgent: (machineId, session, workspace) => setDialog({ kind: "agent", machineId, session, workspace }),
       changeFolder: (ref, initial) => setDialog({ kind: "folder", ref, initial }),
+      moveToGroup: (key) => setDialog({ kind: "move", key }),
       addMachine: () => setDialog({ kind: "add-machine" }),
       // Batch first (key or agent); the dialog opens only when that needs the user.
       connect: (machine) => {
@@ -97,7 +102,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
   let modal: ReactNode = null;
   if (dialog?.kind === "rename") {
     modal = (
-      <TextDialog title={dialog.title} initial={dialog.initial} submitLabel="Rename" onClose={closeDialog}
+      <TextDialog title={dialog.title} initial={dialog.initial} submitLabel={dialog.submitLabel} onClose={closeDialog}
         onSubmit={(v) => v.trim() && guard(() => dialog.run(v.trim()))} />
     );
   } else if (dialog?.kind === "confirm") {
@@ -120,6 +125,8 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       <TextDialog title="Workspace folder" initial={dialog.initial} submitLabel="Save" onClose={closeDialog}
         onSubmit={(v) => v.trim() && setFolder(dialog.ref, v)} />
     );
+  } else if (dialog?.kind === "move") {
+    modal = <MoveToGroupDialog sessionKey={dialog.key} onClose={closeDialog} />;
   } else if (dialog?.kind === "add-machine") {
     modal = (
       <AddMachineDialog

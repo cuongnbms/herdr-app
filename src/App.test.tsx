@@ -53,4 +53,12 @@ describe("App shell", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
+
+  it("keeps file drops from navigating the webview, leaving sidebar drags alone", () => {
+    render(<App />);
+    expect(fireEvent.dragOver(document, { dataTransfer: { types: ["Files"] } })).toBe(false);
+    expect(fireEvent.drop(document, { dataTransfer: { types: ["Files"] } })).toBe(false);
+    expect(fireEvent.dragOver(document, { dataTransfer: { types: ["application/x-herdr-node"] } })).toBe(true);
+    expect(fireEvent.drop(document, { dataTransfer: { types: ["application/x-herdr-node"] } })).toBe(true);
+  });
 });

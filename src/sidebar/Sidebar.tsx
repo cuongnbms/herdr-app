@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { DragContext, useDragState } from "./dnd";
+import type { Drag, Indicator } from "./dnd";
+import { indicatorClass, useBookmarkRowDnd, useBookmarksDropDnd, useTreeRowDnd } from "./useRowDnd";
 import type { MouseEvent } from "react";
 import {
   machineDisconnect,
@@ -9,55 +12,91 @@ import {
   sessionStart,
   sessionStop,
 } from "../lib/ipc";
-import type { MachineView, SessionView } from "../lib/types";
+import type { MachineView } from "../lib/types";
 import { useApp } from "../store/app";
 import { StatusDot } from "./StatusDot";
 import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
 import { forgetSessionFolders } from "../workspaces/folder";
 import { DashboardEntry } from "../dashboard/AgentDashboard";
-import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon } from "../ui/icons";
+import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon, StarIcon } from "../ui/icons";
+import { forgetSessions, resolve, setBookmarked, useLayout } from "./groups";
+import type { RSession } from "./groups";
+import { GroupTree } from "./GroupTree";
 
 const hl = (status: string) => (status === "blocked" ? " blocked" : "");
 
-function Chevron({ open }: { open: boolean }) {
+export function Chevron({ open }: { open: boolean }) {
   return <ChevronIcon className={"icon chev" + (open ? " open" : "")} />;
 }
 
-function SessionNode({ machineId, session }: { machineId: string; session: SessionView }) {
+export function SessionRow({ node, bookmark, nextKey = null }: { node: RSession; bookmark?: boolean; nextKey?: string | null }) {
+  const { machine, session, key } = node;
+  const machineId = machine.id;
   const viewed = useApp((s) => s.viewed?.machine_id === machineId && s.viewed.session === session.name);
   const view = useApp((s) => s.view);
+  const bookmarked = useLayout((s) => s.layout.bookmarks.includes(key));
   const a = useActions();
+  const drag = useDragState();
+  const treeDnd = useTreeRowDnd({ kind: "session", key }, `session:${key}`);
+  const bookmarkDnd = useBookmarkRowDnd(key, nextKey);
+  const dnd = bookmark ? bookmarkDnd : treeDnd;
+  const online = machine.state === "connected";
+  const bookmarkItem = {
+    label: bookmarked ? "Unbookmark" : "Bookmark",
+    onSelect: () => useLayout.getState().update((l) => setBookmarked(l, key, !bookmarked)),
+  };
+  const moveItem = { label: "Move to group…", onSelect: () => a?.moveToGroup(key) };
   const onMenu = (e: MouseEvent) =>
     a?.menu(
       e,
-      session.running
+      !online
+        ? [bookmarkItem, moveItem]
+        : session.running
         ? [
             { label: "New workspace…", onSelect: () => a.newWorkspace(machineId, session.name) },
             { label: "Stop session", onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },
+            bookmarkItem,
+            moveItem,
           ]
         : [
             { label: "Start session", onSelect: () => a.guard(() => sessionStart(machineId, session.name)) },
+            bookmarkItem,
+            moveItem,
             {
               label: "Delete session…",
               onSelect: () =>
                 a.confirm("Delete session", `Delete session "${session.name}"? This can't be undone.`, "Delete", () =>
-                  sessionDelete(machineId, session.name).then(() => forgetSessionFolders(machineId, session.name)),
+                  sessionDelete(machineId, session.name).then(() => {
+                    forgetSessionFolders(machineId, session.name);
+                    useLayout.getState().update((l) => forgetSessions(l, [key]));
+                  }),
                 ),
             },
           ],
     );
   const open = () => view({ machine_id: machineId, session: session.name });
+  const onClick = !online
+    ? undefined
+    : session.running
+      ? open
+      : () => a?.guard(() => sessionStart(machineId, session.name).then(open));
   return (
-    <li className={"session" + (session.running ? "" : " stopped")}>
+    <li className={"session" + (session.running ? "" : " stopped") + (online ? "" : " offline")}>
       <button
-        className={"row" + (viewed ? " active" : "") + hl(session.status)}
+        {...dnd}
+        className={"row" + (viewed ? " active" : "") + hl(session.status) + indicatorClass(drag, bookmark ? `bookmark:${key}` : `session:${key}`)}
         aria-label={session.running ? undefined : `Start ${session.name}`}
-        onClick={session.running ? open : () => a?.guard(() => sessionStart(machineId, session.name).then(open))}
+        aria-disabled={online ? undefined : true}
+        onClick={onClick}
         onContextMenu={onMenu}
       >
-        <StatusDot status={session.status} />
+        {bookmark && <StarIcon className="icon star-icon" />}
         <span className="label">{session.name}</span>
+        <span className="badge">
+          {session.running && <StatusDot status={session.status} />}
+          <span className="badge-label">{machine.label}</span>
+        </span>
       </button>
       {session.error && <p className="error">{session.error.message}</p>}
     </li>
@@ -89,14 +128,9 @@ function HerdrPathEdit({ machineId }: { machineId: string }) {
 }
 
 function MachineNode({ machine }: { machine: MachineView }) {
-  const key = machine.id;
-  const open = useApp((s) => s.expanded[key] ?? true);
-  const toggle = useApp((s) => s.toggle);
   const a = useActions();
   const ssh = machine.kind === "ssh";
   const ok = machine.state === "connected";
-  // A dropped ssh Machine stays visible (greyed, controls disabled) with its last snapshot.
-  const showSessions = ok || machine.sessions.length > 0;
   // Any error can be retried (e.g. after installing herdr); ssh goes batch first, then the dialog.
   const needsConnect = (ssh && machine.state === "disconnected") || machine.state === "error";
   const notFound = ssh && machine.error?.code === "herdr_not_found";
@@ -124,11 +158,8 @@ function MachineNode({ machine }: { machine: MachineView }) {
     <li className={"machine" + (ok ? "" : " offline")}>
       <button
         className={"row" + hl(machine.status)}
-        aria-expanded={open}
-        onClick={() => toggle(key, open)}
         onContextMenu={(e) => items.length > 0 && a?.menu(e, items)}
       >
-        <Chevron open={open} />
         {ssh ? <ServerIcon className="icon machine-icon" /> : <LaptopIcon className="icon machine-icon" />}
         <span className="label">{machine.label}</span>
         <StatusDot status={machine.status} />
@@ -139,13 +170,6 @@ function MachineNode({ machine }: { machine: MachineView }) {
         <div className="machine-actions">
           <button className="btn btn-xs" onClick={() => a?.connect(machine)}>{ssh ? "Connect…" : "Retry"}</button>
         </div>
-      )}
-      {open && showSessions && (
-        <ul className="children">
-          {machine.sessions.map((s) => (
-            <SessionNode key={s.name} machineId={machine.id} session={s} />
-          ))}
-        </ul>
       )}
     </li>
   );
@@ -161,17 +185,78 @@ function AddMachine() {
   );
 }
 
+function SectionHeader({ id, label }: { id: string; label: string }) {
+  const open = useApp((s) => s.expanded[id] ?? true);
+  const toggle = useApp((s) => s.toggle);
+  return (
+    <button className="section-toggle" aria-expanded={open} onClick={() => toggle(id, open)}>
+      <Chevron open={open} />
+      {label}
+    </button>
+  );
+}
+
+function BookmarksSection({ bookmarks }: { bookmarks: RSession[] }) {
+  const open = useApp((s) => s.expanded["bookmarks"] ?? true);
+  const drag = useDragState();
+  const dnd = useBookmarksDropDnd();
+  return (
+    <section aria-label="Bookmarks" className={indicatorClass(drag, "bookmarks").trim()} {...dnd}>
+      <SectionHeader id="bookmarks" label="Bookmarks" />
+      {open && (
+        <ul className="tree">
+          {bookmarks.map((n, i) => <SessionRow key={n.key} node={n} bookmark nextKey={bookmarks[i + 1]?.key ?? null} />)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function Sidebar() {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
+  const layout = useLayout((s) => s.layout);
+  const bookmarks = useMemo(() => resolve(layout, machines, order).bookmarks, [layout, machines, order]);
+  const machinesOpen = useApp((s) => s.expanded["machines"] ?? true);
+  const [dragging, setDragging] = useState<Drag | null>(null);
+  const [indicator, setIndicator] = useState<Indicator | null>(null);
+  const dragState = useMemo(() => ({ dragging, setDragging, indicator, setIndicator }), [dragging, indicator]);
+  // Safety net: the source row can be remounted by a drop, so its own `dragend` may never reach React.
+  useEffect(() => {
+    if (!dragging) return;
+    const end = () => {
+      setDragging(null);
+      setIndicator(null);
+    };
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, [dragging]);
+  // Empty Bookmarks stay hidden, except while a Session is dragged so a first Bookmark can be dropped.
+  const draggingSession = dragging?.kind === "node" && dragging.ref.kind === "session";
   return (
     <ActionsProvider>
-      <DashboardEntry />
-      <div className="section-label">Machines</div>
-      <ul className="tree">
-        {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
-      </ul>
-      <AddMachine />
+      <DragContext.Provider value={dragState}>
+        <DashboardEntry />
+        {(bookmarks.length > 0 || draggingSession) && <BookmarksSection bookmarks={bookmarks} />}
+        <section aria-label="Groups">
+          <GroupTree />
+        </section>
+        <section aria-label="Machines">
+          <SectionHeader id="machines" label="Machines" />
+          {machinesOpen && (
+            <>
+              <ul className="tree">
+                {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
+              </ul>
+              <AddMachine />
+            </>
+          )}
+        </section>
+      </DragContext.Provider>
     </ActionsProvider>
   );
 }

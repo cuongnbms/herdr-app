@@ -9,6 +9,7 @@ import { applyChatFont, useSettings } from "./settings/store";
 import { applyTheme, useTheme } from "./settings/theme";
 import { Header } from "./main/Header";
 import { Sidebar } from "./sidebar/Sidebar";
+import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
 import { useShallow } from "zustand/react/shallow";
@@ -97,6 +98,7 @@ export default function App() {
   useEffect(() => applyChatFont(chatFontSize), [chatFontSize]);
   useEffect(() => applyTheme(theme, themePref), [theme, themePref]);
   useEffect(() => syncSeenToHerdr(), []);
+  useEffect(() => guardFileDrops(), []);
 
   useEffect(() => {
     let cancelled = false;
