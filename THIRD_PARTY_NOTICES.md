@@ -8,7 +8,7 @@ next prompt in `src/chat/prompt/claudeSuggestion.ts` (and the screens in its tes
 and todo checklists in `src/chat/workBlocks.ts` and `src/chat/checklist.ts`, the Composer's completion
 triggers in `src/chat/mentions.ts`, the file scoring in `src/chat/complete.ts`, the built-in Slash
 command tables and descriptions in `src-tauri/src/complete/commands.rs`, the tool-row icon choice in
-`src/chat/toolIcon.ts`, the quick-reply defaults and limits in `src/settings/quickReplies.ts`, and the agent marks in
+`src/chat/toolIcon.ts`, the quick-reply defaults and limits in `src/settings/quickReplies.ts`, the Transcript image extraction in `src-tauri/src/transcript/claude.rs`, `pi.rs` and `images.rs`, the Model and Reasoning effort rules, the pi skill-prompt format in `src-tauri/src/transcript/skill_prompt.rs`, `turnSkills` in `src/chat/skills.tsx`, and the agent marks in
 `src/agents/AgentMark.tsx` and `src/agents/agentSvgMarks.ts` are adapted from
 [herdr-web-ui](https://github.com/devswha/herdr-web-ui). Several of those marks come from
 [lobe-icons](https://github.com/lobehub/lobe-icons) (MIT). The provider logos remain the
