@@ -205,29 +205,38 @@ export function PromptPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
     (method: string, params: unknown) => herdrCall(pane.machine_id, pane.session, method, params),
     [pane.machine_id, pane.session],
   );
-  const read = useCallback(
-    () =>
-      call("pane.read", { pane_id: pane.pane_id, source: "visible", format: "ansi", strip_ansi: false }).then(
+  // The readers are written against herdr's plain-text read; the mirror alone wants the colors.
+  const readAs = useCallback(
+    (format: "text" | "ansi") =>
+      call("pane.read", { pane_id: pane.pane_id, source: "visible", format, strip_ansi: format === "text" }).then(
         (r) => (r as ReadResult | undefined)?.text ?? (r as ReadResult | undefined)?.read?.text ?? "",
       ),
     [call, pane.pane_id],
   );
+  const read = useCallback(() => readAs("text"), [readAs]);
   const show = useCallback(
     (text: string) => {
       if (!live.current) return;
-      setScreenText(text);
       const next = readPrompt(agent, text);
       // the same prompt keeps its card (and what was ticked or typed on it)
       setPrompt((cur) => (cur?.id === next.id ? cur : next));
+      return next;
     },
     [agent],
   );
+  const mirrorOn = useRef(false);
   const refresh = useCallback(
     () =>
       read()
-        .then(show)
+        .then(async (text) => {
+          const next = show(text);
+          if (mirrorOn.current || next?.fallback) {
+            const ansi = await readAs("ansi");
+            if (live.current) setScreenText(ansi);
+          }
+        })
         .catch((e) => console.error("pane.read failed", e)),
-    [read, show],
+    [read, readAs, show],
   );
 
   useEffect(() => {
@@ -285,6 +294,11 @@ export function PromptPanel({ pane, view }: { pane: PaneRef; view: PaneView }) {
     );
 
   const screenOpen = showScreen || !!prompt?.fallback;
+  mirrorOn.current = screenOpen;
+  // Opening the mirror reads the screen now rather than at the next poll.
+  useEffect(() => {
+    if (showScreen) void refresh();
+  }, [showScreen, refresh]);
   return (
     <div className="blocked-panel" aria-busy={pending}>
       {prompt ? (

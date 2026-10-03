@@ -67,6 +67,18 @@ describe("PromptPanel", () => {
     );
   });
 
+  it("reads the screen as plain text for the card", async () => {
+    render(<PromptPanel pane={pane} view={view} />);
+    await screen.findByText("Which evaluation dataset should we use?");
+    expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "pane.read", {
+      pane_id: "w1:p1",
+      source: "visible",
+      format: "text",
+      strip_ansi: true,
+    });
+    expect(vi.mocked(herdrCall).mock.calls.some(([, , , p]) => (p as { format?: string }).format === "ansi")).toBe(false);
+  });
+
   it("types an answer of one's own into the custom row", async () => {
     render(<PromptPanel pane={pane} view={view} />);
     const box = await screen.findByRole("textbox", { name: "Your own answer" });

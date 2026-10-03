@@ -281,6 +281,17 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     ]);
   });
 
+  test("reads the same question through color escapes", () => {
+    const plain = "☐ Pick\n\nWhich one?\n\n❯ 1. Alpha\n     First.\n  2. Beta\n  3. Type something.\n  4. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n";
+    const colored = plain
+      .replace("❯ 1. Alpha", "\x1b[38;5;153m❯\x1b[0m \x1b[1m1. Alpha\x1b[0m")
+      .replace("First.", "\x1b[2mFirst.\x1b[22m")
+      .replace("Enter to select", "\x1b[2mEnter to select");
+    const a = parseInteractivePrompt("claude", plain);
+    expect(a).toMatchObject({ question: "Which one?", options: [{ label: "Alpha", description: "First." }, { label: "Beta" }] });
+    expect(parseInteractivePrompt("claude", colored)?.id).toBe(a?.id);
+  });
+
   test("ignores unknown agents and ordinary output", () => {
     expect(parseInteractivePrompt("other", "Enter to select · ↑/↓ to navigate · Esc to cancel")).toBeNull();
     expect(parseInteractivePrompt("claude", "No response requested. The task is complete.")).toBeNull();
