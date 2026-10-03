@@ -32,9 +32,9 @@ impl TailHandle {
         items[end.saturating_sub(limit)..end].to_vec()
     }
 
-    /// The media type and bytes of the image stored under `r`, if still kept.
-    pub fn image(&self, r: &str) -> Option<(String, Vec<u8>)> {
-        self.images.lock().unwrap().get(r)
+    /// The tail's image store, shared: lock it after letting go of any other lock.
+    pub fn images(&self) -> Arc<Mutex<ImageStore>> {
+        self.images.clone()
     }
 }
 
@@ -312,8 +312,12 @@ mod tests {
             })
             .collect();
         assert_eq!(metas, vec![Some("m1".to_string())]);
-        assert_eq!(h.image("r1"), Some(("image/png".to_string(), vec![7, 7])));
-        assert_eq!(h.image("nope"), None);
+        let store = h.images();
+        assert_eq!(
+            store.lock().unwrap().get("r1"),
+            Some(("image/png".to_string(), vec![7, 7]))
+        );
+        assert_eq!(store.lock().unwrap().get("nope"), None);
         drop(ev);
         drop(h);
     }

@@ -195,12 +195,17 @@ impl ChatManager {
 
     /// The bytes of the image `r` in the Pane's open chat.
     pub fn image(&self, pane: &PaneRef, r: &str) -> Result<Vec<u8>, AppError> {
-        let map = self.handles.lock().unwrap();
-        let handle = map
+        // The tail holds the store lock while it parses a line (up to 32 MiB): wait on it
+        // without holding `handles`, which every other Pane's chat call needs.
+        let store = self
+            .handles
+            .lock()
+            .unwrap()
             .get(pane)
+            .map(|h| h.images())
             .ok_or_else(|| AppError::new("not_found", "no open chat for this pane"))?;
-        handle
-            .image(r)
+        let found = store.lock().unwrap().get(r);
+        found
             .map(|(_, bytes)| bytes)
             .ok_or_else(|| AppError::new("not_found", "image not available"))
     }
@@ -273,6 +278,42 @@ mod tests {
             chats.image(&other, "u:0").unwrap_err().message,
             "no open chat for this pane"
         );
+    }
+
+    #[tokio::test]
+    async fn image_lookup_lets_go_of_the_handles_while_the_store_is_busy() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "").unwrap();
+        let chats = Arc::new(ChatManager::default());
+        let pane = PaneRef {
+            machine_id: "a".into(),
+            session: "default".into(),
+            pane_id: "w1:p1".into(),
+        };
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(NoItems),
+            Arc::new(|_| {}),
+        );
+        let store = h.images();
+        chats.insert(pane.clone(), h);
+        // The tail is mid-line (a long parse holds the store lock).
+        let busy = store.lock().unwrap();
+        let (c, p2) = (chats.clone(), pane.clone());
+        std::thread::spawn(move || {
+            let _ = c.image(&p2, "u:0");
+        });
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let c = chats.clone();
+        std::thread::spawn(move || {
+            tx.send(c.page(&pane, 0, 1).is_some()).unwrap();
+        });
+        let paged = rx.recv_timeout(std::time::Duration::from_secs(2));
+        drop(busy);
+        assert_eq!(paged, Ok(true), "chat_page waited on the image store");
     }
 
     #[tokio::test]
