@@ -14,6 +14,7 @@ import { AgentDashboard } from "./dashboard/AgentDashboard";
 import { useShallow } from "zustand/react/shallow";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
+import { syncSeenToHerdr } from "./store/seenSync";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
@@ -95,6 +96,7 @@ export default function App() {
 
   useEffect(() => applyChatFont(chatFontSize), [chatFontSize]);
   useEffect(() => applyTheme(theme, themePref), [theme, themePref]);
+  useEffect(() => syncSeenToHerdr(), []);
 
   useEffect(() => {
     let cancelled = false;

@@ -41,7 +41,7 @@ const BADGE:Record<AgentStatus, string> = {
   blocked: "INPUT",
   working: "WORKING",
   done: "DONE",
-  idle: "READY",
+  idle: "IDLE",
   unknown: "—",
 };
 

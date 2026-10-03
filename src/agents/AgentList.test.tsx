@@ -54,7 +54,7 @@ describe("AgentList", () => {
     expect(within(items[1]).getByRole("img", { name: "codex" })).toBeTruthy();
     expect(within(items[1]).getByText("INPUT")).toBeTruthy();
     expect(within(items[2]).getByRole("img", { name: "no agent" })).toBeTruthy();
-    expect(within(items[3]).getByText("READY")).toBeTruthy();
+    expect(within(items[3]).getByText("IDLE")).toBeTruthy();
   });
 
   it("falls back to a monogram for an unknown agent", () => {
