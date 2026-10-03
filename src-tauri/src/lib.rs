@@ -53,6 +53,7 @@ pub fn run() {
             commands::chat_page,
             commands::chat_close,
             commands::system_fonts,
+            commands::font_face,
             commands::quota_fetch,
         ])
         .setup(|app| {

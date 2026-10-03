@@ -24,15 +24,47 @@ pub fn installed_monospace() -> Vec<String> {
     monospace_families(descs.iter().filter_map(|d| mac::face(&d)))
 }
 
+/// Whether the WebView can be handed this face as a web font: a single-face file outside the
+/// system font folders. WebKit already renders system fonts everywhere; a collection would only
+/// yield its first face.
+pub fn web_loadable(path: &std::path::Path) -> bool {
+    let single = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "otf" | "ttf" | "woff" | "woff2"));
+    single && !path.starts_with("/System/")
+}
+
+/// The file of `family`'s face named `style` (CoreText style name, e.g. "Bold Italic"), when
+/// [`web_loadable`]. Installed (non-system) fonts must be registered with the WebView this way:
+/// WebKit hides them from detached canvases, which is where xterm's WebGL atlas draws glyphs.
+#[cfg(target_os = "macos")]
+pub fn face_file(family: &str, style: &str) -> Option<std::path::PathBuf> {
+    let descs = core_text::font_collection::create_for_family(family)?.get_descriptors()?;
+    descs
+        .iter()
+        .filter_map(|d| mac::style_and_path(&d))
+        .find(|(s, _)| s.eq_ignore_ascii_case(style))
+        .map(|(_, p)| p)
+        .filter(|p| web_loadable(p))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn face_file(_family: &str, _style: &str) -> Option<std::path::PathBuf> {
+    None
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::dictionary::CFDictionary;
     use core_foundation::number::CFNumber;
     use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::url::CFURL;
     use core_text::font_descriptor::{
-        kCTFontFamilyNameAttribute, kCTFontMonoSpaceTrait, kCTFontSymbolicTrait,
-        kCTFontTraitsAttribute, CTFontDescriptor, CTFontDescriptorCopyAttribute,
+        kCTFontFamilyNameAttribute, kCTFontMonoSpaceTrait, kCTFontStyleNameAttribute,
+        kCTFontSymbolicTrait, kCTFontTraitsAttribute, kCTFontURLAttribute, CTFontDescriptor,
+        CTFontDescriptorCopyAttribute,
     };
 
     fn attribute(d: &CTFontDescriptor, key: CFStringRef) -> Option<CFType> {
@@ -62,6 +94,17 @@ mod mac {
             .is_some_and(|bits| bits as u32 & kCTFontMonoSpaceTrait != 0);
         Some((family, mono))
     }
+
+    /// `(style name, file)`, or `None` when either attribute is missing.
+    pub fn style_and_path(d: &CTFontDescriptor) -> Option<(String, std::path::PathBuf)> {
+        let style = attribute(d, unsafe { kCTFontStyleNameAttribute })?
+            .downcast::<CFString>()?
+            .to_string();
+        let path = attribute(d, unsafe { kCTFontURLAttribute })?
+            .downcast::<CFURL>()?
+            .to_path()?;
+        Some((style, path))
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -89,6 +132,23 @@ mod tests {
             face("Fira Code", true),
         ]);
         assert_eq!(got, ["Fira Code", "lilex", "Menlo"]);
+    }
+
+    #[test]
+    fn web_loadable_takes_single_face_files_outside_the_system() {
+        use std::path::Path;
+        assert!(web_loadable(Path::new("/Users/me/Library/Fonts/Lilex-Regular.otf")));
+        assert!(web_loadable(Path::new("/Library/Fonts/Foo.TTF")));
+        assert!(!web_loadable(Path::new("/Users/me/Library/Fonts/Iosevka.ttc")));
+        assert!(!web_loadable(Path::new("/System/Library/Fonts/SFNSMono.ttf")));
+        assert!(!web_loadable(Path::new("/Users/me/Library/Fonts/Old.dfont")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn system_fonts_have_no_face_file() {
+        assert_eq!(face_file("Menlo", "Regular"), None);
+        assert_eq!(face_file("No Such Family 1234", "Regular"), None);
     }
 
     #[cfg(target_os = "macos")]

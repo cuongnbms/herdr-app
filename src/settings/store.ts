@@ -1,7 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { create } from "zustand";
-import { systemFonts } from "../lib/ipc";
+import { fontFace, systemFonts } from "../lib/ipc";
 
 /** Shared with notify.ts: one JSON object, each writer merges its own keys. */
 const SETTINGS_KEY = "herdr-app:settings";
@@ -110,6 +110,44 @@ export function termFontFamily(family: string): string {
   return `"${family}", Menlo, monospace`;
 }
 
+/** The faces xterm draws with, by CoreText style name. */
+const TERM_FACES: { style: string; descriptors: FontFaceDescriptors }[] = [
+  { style: "Regular", descriptors: {} },
+  { style: "Bold", descriptors: { weight: "700" } },
+  { style: "Italic", descriptors: { style: "italic" } },
+  { style: "Bold Italic", descriptors: { weight: "700", style: "italic" } },
+];
+
+const termFonts = new Map<string, Promise<void>>();
+
+/**
+ * Registers an installed `family` as a web font, from its own files. WebKit hides installed
+ * (non-system) fonts from canvases outside the document, and xterm's WebGL atlas draws glyphs
+ * on such a canvas, so they would come out in the fallback font. Once per family; never rejects.
+ */
+export function ensureTermFont(family: string): Promise<void> {
+  if (family === BUNDLED_FONT || typeof FontFace === "undefined") return Promise.resolve();
+  let p = termFonts.get(family);
+  if (!p) {
+    p = Promise.all(
+      TERM_FACES.map(({ style, descriptors }) =>
+        fontFace(family, style)
+          .then((bytes) => {
+            const face = new FontFace(family, bytes, descriptors);
+            document.fonts.add(face);
+            return face.load();
+          })
+          .catch((e: unknown) => {
+            // not_found: a system font or a missing face; WebKit already handles those natively.
+            if ((e as { code?: string } | null)?.code !== "not_found") console.warn("font face", family, style, e);
+          }),
+      ),
+    ).then(() => {});
+    termFonts.set(family, p);
+  }
+  return p;
+}
+
 export function applyChatFont(px: number): void {
   document.documentElement.style.setProperty("--chat-font", `${px}px`);
 }
@@ -126,8 +164,8 @@ export function watchTermFont(term: Terminal, fit: FitAddon, offset = 0): () => 
     term.options.fontFamily = termFontFamily(s.terminalFontFamily);
     term.options.fontSize = s.terminalFontSize + offset;
     // Subsets (e.g. Vietnamese) load lazily; once they are in, redraw glyphs cached from the fallback.
-    void document.fonts
-      ?.load(`${s.terminalFontSize + offset}px "${s.terminalFontFamily}"`, VI_SAMPLE)
+    void ensureTermFont(s.terminalFontFamily)
+      .then(() => document.fonts?.load(`${s.terminalFontSize + offset}px "${s.terminalFontFamily}"`, VI_SAMPLE))
       .then(() => {
         if (term.options.fontFamily !== termFontFamily(s.terminalFontFamily)) return;
         term.clearTextureAtlas?.();

@@ -9,6 +9,8 @@ export const machineConnect = (id: string) => invoke<void>("machine_connect", { 
 export const machineDisconnect = (id: string) => invoke<void>("machine_disconnect", { id });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
 export const systemFonts = () => invoke<string[]>("system_fonts");
+/** Raw file of an installed font's face (CoreText style name); rejects when not web-loadable. */
+export const fontFace = (family: string, style: string) => invoke<ArrayBuffer>("font_face", { family, style });
 /** Native appearance (vibrancy, traffic lights); `null` follows the system. */
 export const setWindowTheme = (theme: "light" | "dark" | null) => getCurrentWindow().setTheme(theme);
 export const machineAdd = (sshTarget: string, label: string | null, herdrPath: string | null) =>
