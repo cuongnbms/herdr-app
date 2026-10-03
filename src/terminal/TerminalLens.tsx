@@ -11,6 +11,7 @@ import { useApp } from "../store/app";
 import { Banner } from "./Banner";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
+import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { initialLensState, lensReducer } from "./lensState";
 import { claim, disposeIf, getOrCreate } from "./termCache";
 
@@ -99,11 +100,12 @@ export function TerminalLens({ pane, terminalId }: Props) {
       // streaming (and acking) while hidden, and a hidden pane must still be disposed on detach.
       let closed = false;
       const token = claim(cacheKey);
+      const acks = createAckBatcher((n) => termAck(key, n));
       const data = new Channel<ArrayBuffer>();
       data.onmessage = (buf) => {
         const bytes = toBytes(buf);
         if (!bytes || closed) return;
-        term.write(bytes, () => void termAck(key, bytes.byteLength).catch(() => {}));
+        term.write(bytes, () => acks.add(bytes.byteLength));
       };
       const events = new Channel<AttachEvent>();
       events.onmessage = (ev) => {
@@ -121,19 +123,8 @@ export function TerminalLens({ pane, terminalId }: Props) {
     takeoverRef.current = () => open(true);
     open(false);
 
-    // Input, coalesced per animation frame.
-    let pending = "";
-    let raf = 0;
-    const input = term.onData((d) => {
-      pending += d;
-      if (!raf)
-        raf = requestAnimationFrame(() => {
-          raf = 0;
-          const out = pending;
-          pending = "";
-          if (out) void termWrite(key, out).catch(() => {});
-        });
-    });
+    const inputQueue = createInputQueue((d) => termWrite(key, d));
+    const input = term.onData((d) => inputQueue.push(d));
     const resize = term.onResize(({ cols, rows }) => void termResize(key, cols, rows).catch(() => {}));
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -152,7 +143,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
     return () => {
       live = false;
       clearTimeout(timer);
-      if (raf) cancelAnimationFrame(raf);
+      inputQueue.dispose();
       ro.disconnect();
       input.dispose();
       resize.dispose();

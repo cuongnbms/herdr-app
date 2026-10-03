@@ -9,11 +9,16 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const READ_CHUNK: usize = 64 * 1024;
 const HIGH_WATER: usize = 1 << 20;
 const LOW_WATER: usize = 512 * 1024;
+/// Reads within this window of a batch's first read go out as one sink message. At 2ms
+/// keystroke echo stays far under a frame, so no interactive fast path is needed.
+const COALESCE: Duration = Duration::from_millis(2);
+/// Read chunks queued ahead of the forwarder while flow control pauses it.
+const READ_QUEUE: usize = 4;
 const WRITE_CHUNK: usize = 16 * 1024;
 const HELD_SCAN: usize = 4096;
 const HELD_MARKER: &[u8] = b"already has an attached client";
@@ -376,20 +381,30 @@ fn detach(entries: &Entries, e: &Arc<Entry>) {
 }
 
 fn read_loop(e: &Arc<Entry>, mut reader: Box<dyn Read + Send>) {
-    let mut buf = vec![0u8; READ_CHUNK];
+    // PTY reads block, so a separate thread reads and this one coalesces and forwards.
+    // The bounded queue keeps the reader blocked while flow control pauses forwarding.
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(READ_QUEUE);
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; READ_CHUNK];
+        loop {
+            let n = match reader.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => n,
+            };
+            if tx.send(buf[..n].to_vec()).is_err() {
+                return;
+            }
+        }
+    });
     let mut head: Vec<u8> = Vec::new();
     let mut first = true;
-    loop {
-        let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => return,
-            Ok(n) => n,
-        };
+    coalesce(&rx, COALESCE, |bytes| {
         if e.closed.load(Ordering::SeqCst) {
-            return;
+            return false;
         }
         let sink = e.sink();
         if head.len() < HELD_SCAN {
-            head.extend_from_slice(&buf[..n.min(HELD_SCAN - head.len())]);
+            head.extend_from_slice(&bytes[..bytes.len().min(HELD_SCAN - head.len())]);
             if !e.held.load(Ordering::SeqCst)
                 && head.windows(HELD_MARKER.len()).any(|w| w == HELD_MARKER)
             {
@@ -407,13 +422,51 @@ fn read_loop(e: &Arc<Entry>, mut reader: Box<dyn Read + Send>) {
         } else if head.len() >= HELD_SCAN {
             e.emit_attached();
         }
-        sink.data(buf[..n].to_vec());
+        let n = bytes.len();
+        sink.data(bytes);
         let mut unacked = e.unacked.lock().unwrap();
         *unacked += n;
         if *unacked > HIGH_WATER {
             while *unacked >= LOW_WATER && !e.closed.load(Ordering::SeqCst) {
                 unacked = e.resume.wait(unacked).unwrap();
             }
+        }
+        !e.closed.load(Ordering::SeqCst)
+    });
+}
+
+/// Merge reads that arrive within `window` of a batch's first read, up to READ_CHUNK,
+/// and hand each batch to `forward` until it returns false or the reader ends.
+fn coalesce(
+    rx: &mpsc::Receiver<Vec<u8>>,
+    window: Duration,
+    mut forward: impl FnMut(Vec<u8>) -> bool,
+) {
+    let mut carry: Option<Vec<u8>> = None;
+    loop {
+        let mut batch = match carry.take().map_or_else(|| rx.recv(), Ok) {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        let deadline = Instant::now() + window;
+        let mut ended = false;
+        while batch.len() < READ_CHUNK {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                // Never exceed READ_CHUNK: the flow-control overshoot stays one chunk.
+                Ok(c) if batch.len() + c.len() > READ_CHUNK => {
+                    carry = Some(c);
+                    break;
+                }
+                Ok(c) => batch.extend_from_slice(&c),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    ended = true;
+                    break;
+                }
+            }
+        }
+        if !forward(batch) || ended {
+            return;
         }
     }
 }
@@ -455,6 +508,63 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
         panic!("timed out");
+    }
+
+    fn batches(chunks: Vec<Vec<u8>>, gap: Option<(usize, Duration)>) -> Vec<Vec<u8>> {
+        let (tx, rx) = mpsc::sync_channel(chunks.len());
+        match gap {
+            // Queued up front: deterministic, no dependence on thread scheduling.
+            None => chunks.into_iter().for_each(move |c| tx.send(c).unwrap()),
+            Some((at, d)) => {
+                std::thread::spawn(move || {
+                    for (i, c) in chunks.into_iter().enumerate() {
+                        if i == at {
+                            std::thread::sleep(d);
+                        }
+                        tx.send(c).unwrap();
+                    }
+                });
+            }
+        }
+        let mut out = Vec::new();
+        coalesce(&rx, COALESCE, |b| {
+            out.push(b);
+            true
+        });
+        out
+    }
+
+    #[test]
+    fn coalesces_small_reads_into_one_send() {
+        let out = batches((0..50).map(|i| vec![i as u8; 10]).collect(), None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].len(), 500);
+        assert!(out[0].starts_with(&[0; 10]) && out[0].ends_with(&[49; 10]));
+    }
+    #[test]
+    fn coalesced_sends_never_exceed_read_chunk() {
+        let out = batches(vec![vec![1u8; 10 * 1024]; 10], None);
+        let sizes: Vec<usize> = out.iter().map(Vec::len).collect();
+        assert_eq!(sizes, vec![60 * 1024, 40 * 1024]);
+    }
+    #[test]
+    fn coalescing_window_does_not_hold_later_reads() {
+        let out = batches(
+            vec![b"a".to_vec(), b"b".to_vec()],
+            Some((1, Duration::from_millis(50))),
+        );
+        assert_eq!(out, vec![b"a".to_vec(), b"b".to_vec()]);
+    }
+    #[test]
+    fn coalesce_stops_when_forward_declines() {
+        let (tx, rx) = mpsc::sync_channel(4);
+        tx.send(b"a".to_vec()).unwrap();
+        let mut n = 0;
+        coalesce(&rx, COALESCE, |_| {
+            n += 1;
+            false
+        });
+        assert_eq!(n, 1);
     }
 
     #[tokio::test]
