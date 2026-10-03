@@ -76,7 +76,8 @@ async fn read_response(
     }
 }
 
-/// One request on a fresh connection. 10 s timeout covers connect, write and read.
+/// One request on a fresh connection (herdr closes the socket after one response, so a
+/// connection cannot be reused). 10 s timeout covers connect, write and read.
 pub async fn call(socket: &Path, method: &str, params: Value) -> AppResult<Value> {
     let fut = async {
         let (mut lines, id, _w) = open(socket, method, &params).await?;
