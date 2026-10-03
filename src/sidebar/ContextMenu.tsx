@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 
 export interface MenuItem {
   label: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   onSelect: () => void;
 }
 
@@ -23,6 +25,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
                 it.onSelect();
               }}
             >
+              <it.icon />
               {it.label}
             </button>
           </li>

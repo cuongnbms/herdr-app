@@ -19,7 +19,20 @@ import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
 import { forgetSessionFolders } from "../workspaces/folder";
 import { DashboardEntry } from "../dashboard/AgentDashboard";
-import { ChevronIcon, LaptopIcon, PlusIcon, ServerIcon, StarIcon } from "../ui/icons";
+import {
+  ChevronIcon,
+  FolderInputIcon,
+  LaptopIcon,
+  PlayIcon,
+  PlusIcon,
+  RefreshIcon,
+  ServerIcon,
+  StarIcon,
+  StarOffIcon,
+  StopIcon,
+  TrashIcon,
+  UnplugIcon,
+} from "../ui/icons";
 import { forgetSessions, resolve, setBookmarked, useLayout } from "./groups";
 import type { RSession } from "./groups";
 import { GroupTree } from "./GroupTree";
@@ -44,9 +57,10 @@ export function SessionRow({ node, bookmark, nextKey = null }: { node: RSession;
   const online = machine.state === "connected";
   const bookmarkItem = {
     label: bookmarked ? "Unbookmark" : "Bookmark",
+    icon: bookmarked ? StarOffIcon : StarIcon,
     onSelect: () => useLayout.getState().update((l) => setBookmarked(l, key, !bookmarked)),
   };
-  const moveItem = { label: "Move to group…", onSelect: () => a?.moveToGroup(key) };
+  const moveItem = { label: "Move to group…", icon: FolderInputIcon, onSelect: () => a?.moveToGroup(key) };
   const onMenu = (e: MouseEvent) =>
     a?.menu(
       e,
@@ -54,17 +68,18 @@ export function SessionRow({ node, bookmark, nextKey = null }: { node: RSession;
         ? [bookmarkItem, moveItem]
         : session.running
         ? [
-            { label: "New workspace…", onSelect: () => a.newWorkspace(machineId, session.name) },
-            { label: "Stop session", onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },
+            { label: "New workspace…", icon: PlusIcon, onSelect: () => a.newWorkspace(machineId, session.name) },
+            { label: "Stop session", icon: StopIcon, onSelect: () => a.confirm("Stop session", `Stop session "${session.name}"? Running agents will end.`, "Stop", () => sessionStop(machineId, session.name)) },
             bookmarkItem,
             moveItem,
           ]
         : [
-            { label: "Start session", onSelect: () => a.guard(() => sessionStart(machineId, session.name)) },
+            { label: "Start session", icon: PlayIcon, onSelect: () => a.guard(() => sessionStart(machineId, session.name)) },
             bookmarkItem,
             moveItem,
             {
               label: "Delete session…",
+              icon: TrashIcon,
               onSelect: () =>
                 a.confirm("Delete session", `Delete session "${session.name}"? This can't be undone.`, "Delete", () =>
                   sessionDelete(machineId, session.name).then(() => {
@@ -143,15 +158,16 @@ function MachineNode({ machine }: { machine: MachineView }) {
     ? [
         ...(ok
           ? [
-              { label: "New session…", onSelect: () => a.newSession(machine.id) },
-              { label: "Refresh sessions", onSelect: () => a.guard(() => sessionsRefresh(machine.id)) },
+              { label: "New session…", icon: PlusIcon, onSelect: () => a.newSession(machine.id) },
+              { label: "Refresh sessions", icon: RefreshIcon, onSelect: () => a.guard(() => sessionsRefresh(machine.id)) },
             ]
           : []),
         ...(ssh
           ? [
-              ...(machine.state !== "disconnected" ? [{ label: "Disconnect", onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
+              ...(machine.state !== "disconnected" ? [{ label: "Disconnect", icon: UnplugIcon, onSelect: () => a.guard(() => machineDisconnect(machine.id)) }] : []),
               {
                 label: "Remove machine…",
+                icon: TrashIcon,
                 onSelect: () =>
                   a.confirm("Remove machine", `Remove "${machine.label}"? Its sessions keep running on the machine.`, "Remove", () =>
                     machineRemove(machine.id).then(() => useApp.getState().removeMachine(machine.id)),

@@ -7,7 +7,7 @@ import type { RGroup, RNode } from "./groups";
 import { Chevron, SessionRow } from "./Sidebar";
 import { useDragState } from "./dnd";
 import { indicatorClass, useTreeEndDnd, useTreeRowDnd } from "./useRowDnd";
-import { FolderIcon } from "../ui/icons";
+import { FolderIcon, FolderPlusIcon, PencilIcon, TrashIcon } from "../ui/icons";
 
 function GroupRow({ group }: { group: RGroup }) {
   const key = `group:${group.id}`;
@@ -21,6 +21,7 @@ function GroupRow({ group }: { group: RGroup }) {
     a?.menu(e, [
       {
         label: "New subgroup",
+        icon: FolderPlusIcon,
         onSelect: () =>
           a.rename(
             "New subgroup",
@@ -32,8 +33,8 @@ function GroupRow({ group }: { group: RGroup }) {
             "Create",
           ),
       },
-      { label: "Rename…", onSelect: () => a.rename("Rename group", group.label, async (label) => useLayout.getState().update((l) => renameGroup(l, group.id, label))) },
-      { label: "Delete group", onSelect: () => a.guard(async () => useLayout.getState().update((l) => deleteGroup(l, group.id))) },
+      { label: "Rename…", icon: PencilIcon, onSelect: () => a.rename("Rename group", group.label, async (label) => useLayout.getState().update((l) => renameGroup(l, group.id, label))) },
+      { label: "Delete group", icon: TrashIcon, onSelect: () => a.guard(async () => useLayout.getState().update((l) => deleteGroup(l, group.id))) },
     ]);
   return (
     <li className="group">
@@ -75,6 +76,7 @@ export function GroupTree() {
     a?.menu(e, [
       {
         label: "New group",
+        icon: FolderPlusIcon,
         onSelect: () => a.rename("New group", "", async (label) => useLayout.getState().update((l) => addGroup(l, null, label).layout), "Create"),
       },
     ]);

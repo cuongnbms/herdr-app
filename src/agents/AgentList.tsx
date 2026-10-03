@@ -5,7 +5,7 @@ import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from 
 import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { CloseIcon, PlusIcon } from "../ui/icons";
+import { BotIcon, CloseIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon } from "../ui/icons";
 import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
 import { useTabReorder } from "./tabDnd";
@@ -60,13 +60,13 @@ function AgentCard({ machineId, session, entry, reorder, tabRow }: { machineId: 
   const close = call("pane.close", { pane_id: pane.pane_id });
   const items: MenuItem[] = a
     ? [
-        { label: "Rename…", onSelect: () => a.rename("Rename pane", pane.title, (label) => call("pane.rename", { pane_id: pane.pane_id, label })()) },
-        { label: "Split right", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "right" })) },
-        { label: "Split down", onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "down" })) },
-        { label: "Close pane", onSelect: () => a.guard(close) },
-        { label: "New tab", onSelect: () => a.guard(call("tab.create", { workspace_id: ws.workspace_id })) },
-        { label: "Rename tab…", onSelect: () => a.rename("Rename tab", tab.label, (label) => call("tab.rename", { tab_id: tab.tab_id, label })()) },
-        { label: "Close tab", onSelect: () => a.confirm("Close tab", `Close tab "${tab.label}" and all its panes?`, "Close", call("tab.close", { tab_id: tab.tab_id })) },
+        { label: "Rename…", icon: PencilIcon, onSelect: () => a.rename("Rename pane", pane.title, (label) => call("pane.rename", { pane_id: pane.pane_id, label })()) },
+        { label: "Split right", icon: SplitRightIcon, onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "right" })) },
+        { label: "Split down", icon: SplitDownIcon, onSelect: () => a.guard(call("pane.split", { target_pane_id: pane.pane_id, direction: "down" })) },
+        { label: "Close pane", icon: CloseIcon, onSelect: () => a.guard(close) },
+        { label: "New tab", icon: TabPlusIcon, onSelect: () => a.guard(call("tab.create", { workspace_id: ws.workspace_id })) },
+        { label: "Rename tab…", icon: PencilIcon, onSelect: () => a.rename("Rename tab", tab.label, (label) => call("tab.rename", { tab_id: tab.tab_id, label })()) },
+        { label: "Close tab", icon: CloseIcon, onSelect: () => a.confirm("Close tab", `Close tab "${tab.label}" and all its panes?`, "Close", call("tab.close", { tab_id: tab.tab_id })) },
       ]
     : [];
   return (
@@ -108,10 +108,10 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   );
   const items: MenuItem[] = a
     ? [
-        { label: "New agent…", onSelect: () => a.newAgent(machineId, session, ws) },
-        { label: "Change folder…", onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
-        { label: "Rename workspace…", onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
-        { label: "Close workspace", onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
+        { label: "New agent…", icon: BotIcon, onSelect: () => a.newAgent(machineId, session, ws) },
+        { label: "Change folder…", icon: FolderOpenIcon, onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
+        { label: "Rename workspace…", icon: PencilIcon, onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
+        { label: "Close workspace", icon: CloseIcon, onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
       ]
     : [];
   return (
