@@ -9,12 +9,14 @@ const mermaid = vi.hoisted(() => ({
 vi.mock("mermaid", () => ({ default: mermaid }));
 vi.mock("../lib/ipc", () => ({ chatImage: vi.fn(), setWindowTheme: vi.fn() }));
 import { ChatItemView } from "./ChatItemView";
+import { clearMermaidCache } from "./MermaidBlock";
 
 const md = (src: string) => "Here:\n\n```mermaid\n" + src + "\n```\n";
 
 describe("mermaid blocks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearMermaidCache();
     mermaid.parse.mockResolvedValue({ diagramType: "flowchart" });
     mermaid.render.mockResolvedValue({ svg: '<svg data-testid="diagram"></svg>' });
   });
@@ -24,6 +26,16 @@ describe("mermaid blocks", () => {
     await waitFor(() => expect(container.querySelector(".chat-mermaid svg")).not.toBeNull());
     expect(mermaid.render).toHaveBeenCalledWith(expect.any(String), "graph TD; A-->B");
     expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: "strict", startOnLoad: false }));
+  });
+
+  it("shows a cached diagram on remount without rendering again", async () => {
+    const item = { kind: "assistant_text" as const, markdown: md("graph TD; C-->D") };
+    const first = render(<ChatItemView item={item} />);
+    await waitFor(() => expect(first.container.querySelector(".chat-mermaid svg")).not.toBeNull());
+    first.unmount();
+    const second = render(<ChatItemView item={item} />);
+    expect(second.container.querySelector(".chat-mermaid svg")).not.toBeNull();
+    expect(mermaid.render).toHaveBeenCalledTimes(1);
   });
 
   it("keeps showing the source while the diagram does not parse", async () => {

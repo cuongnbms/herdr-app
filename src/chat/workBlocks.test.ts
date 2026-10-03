@@ -21,6 +21,14 @@ function shape(rows: ChatRow[]): string[] {
 }
 
 describe("buildRows", () => {
+  it("keys rows by block id or absolute item index, stable across a prepend", () => {
+    const newer = [user("2", "t2"), call("b"), say("y")];
+    const after = buildRows(newer, 10).rows.map((r) => r.key);
+    const before = buildRows([user("1", "t1"), say("x"), ...newer], 8).rows.map((r) => r.key);
+    expect(after).toEqual(["i:10", "w:turn:t2", "i:12"]);
+    expect(before.slice(-3)).toEqual(after);
+  });
+
   it("folds a turn's work into one block and leaves the answer open", () => {
     const { rows } = buildRows([user("hi"), think("hmm"), say("Looking."), call("a"), result("a"), call("b"), result("b"), say("Done.")]);
     expect(shape(rows)).toEqual(["user:hi", "work[think:hmm,say:Looking.,call:a,call:b]", "say:Done."]);

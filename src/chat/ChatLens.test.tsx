@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), Channel: class {} }));
 vi.mock("../lib/ipc", () => ({
@@ -10,8 +10,12 @@ vi.mock("../lib/ipc", () => ({
   completeFiles: vi.fn().mockResolvedValue([]),
 }));
 let opened: Promise<unknown> = new Promise(() => {});
+const channels = vi.hoisted(() => [] as { onmessage: (ev: unknown) => void }[]);
 vi.mock("./chatSession", () => ({
-  openChat: () => ({ opened, close: () => {} }),
+  openChat: (_p: unknown, _path: unknown, ch: { onmessage: (ev: unknown) => void }) => {
+    channels.push(ch);
+    return { opened, close: () => {} };
+  },
   onOpenFailure: () => "error",
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
@@ -37,6 +41,7 @@ let shown = "";
 beforeEach(() => {
   localStorage.clear();
   opened = new Promise(() => {});
+  channels.length = 0;
   shown = "";
   vi.mocked(herdrCall)
     .mockReset()
@@ -97,5 +102,16 @@ describe("ChatLens", () => {
     rerender(<ChatLens pane={pane} view={idlePi} />);
     await new Promise((r) => setTimeout(r, 20));
     expect(vi.mocked(herdrCall).mock.calls.filter(([, , m]) => m === "pane.read")).toEqual([]);
+  });
+
+  it("says the transcript is loading until the first reset or error", () => {
+    const { unmount } = render(<ChatLens pane={pane} view={idlePi} />);
+    expect(screen.getByText("Loading transcript…")).toBeTruthy();
+    act(() => channels[channels.length - 1].onmessage({ type: "reset", items: [], total: 0 }));
+    expect(screen.queryByText("Loading transcript…")).toBeNull();
+    unmount();
+    render(<ChatLens pane={pane} view={idlePi} />);
+    act(() => channels[channels.length - 1].onmessage({ type: "error", error: { code: "io", message: "gone" } }));
+    expect(screen.queryByText("Loading transcript…")).toBeNull();
   });
 });

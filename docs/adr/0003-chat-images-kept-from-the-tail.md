@@ -41,3 +41,12 @@ with the tail.
 |-------------|----------------|
 | Re-read the Transcript on the Machine per image (herdr-web-ui) | It costs one remote command per image over SSH and re-parses the record. pi also needs the branch rebuilt to know which images are visible. |
 | Send the base64 inside the chat items | A `Reset` carries up to 500 items, and pages carry more. Megabytes of images would cross IPC on every reopen and scroll-back. |
+
+## Updates
+
+### 2026-10-03: Tails outlive their lens
+
+Closed tails are now parked rather than killed (ADR [0004](./0004-park-chat-tails.md)), so the store
+is no longer freed when the lens closes. A parked tail's budget drops to 16 MiB, evicting oldest
+images first, and returns to 64 MiB when the lens reopens. Reopening no longer re-reads the
+Transcript, so an evicted image stays unavailable until the tail is dropped and a new one starts.

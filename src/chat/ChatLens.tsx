@@ -18,8 +18,8 @@ import { usePendingTranscript } from "./pendingTranscript";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
-type Action = ChatEvent | { type: "prepend"; items: ChatItem[] };
-const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items) : reduce(s, a));
+type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[]; before: number };
+const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items, a.before) : reduce(s, a, a.atBottom));
 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
@@ -27,6 +27,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const machineState = useApp((s) => s.machines[pane.machine_id]?.state);
   const sawDown = useRef(false);
   const [state, dispatch] = useReducer(reducer, emptyChat);
+  const latest = useRef(state);
+  latest.current = state;
   const [located, setLocated] = useState<Located | null>(null);
   const [openError, setOpenError] = useState<AppError | null>(null);
   const [unseen, setUnseen] = useState(false);
@@ -40,6 +42,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const handle = useRef<{ close: () => void } | null>(null);
   // Bumped on each `reset`: thumbnails that failed while the tail was gone ask again.
   const [opened, setOpened] = useState(0);
+  // The first Reset waits for the whole backlog (seconds over a slow ssh): say so meanwhile.
+  const [loaded, setLoaded] = useState(false);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
   // The Pane `/model` was sent to: pi waits on its picker idle, so the picker is looked for then.
@@ -51,14 +55,16 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     (path: string | null) => {
       const gen = ++generation.current;
       setOpenError(null);
+      setLoaded(false);
       const channel = new Channel<ChatEvent>();
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
+        if (ev.type === "reset" || ev.type === "error") setLoaded(true);
         if (ev.type === "reset") {
           forceBottom.current = true;
           setOpened((n) => n + 1);
         }
-        dispatch(ev);
+        dispatch(ev.type === "append" ? { ...ev, atBottom: atBottom.current } : ev);
       };
       handle.current?.close();
       const h = openChat(pane, path, channel);
@@ -120,7 +126,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   };
 
   // Tool results render inside their call; each turn's work folds into one row.
-  const { rows, results } = useMemo(() => buildRows(state.items), [state.items]);
+  const { rows, results } = useMemo(() => buildRows(state.items, state.total - state.items.length), [state.items, state.total]);
   const toggle = useCallback((id: string, wasOpen: boolean) => {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
@@ -131,6 +137,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 72,
     overscan: 8,
+    getItemKey: (i) => rows[i].key,
   });
 
   const prevRows = useRef(0);
@@ -182,8 +189,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       chatPage(pane, before)
         .then((older) => {
           if (gen !== generation.current || older.length === 0) return;
+          // A trim or reset since the fetch moved the window: the reducer drops the page, so
+          // leave no anchor behind for it.
+          const now = latest.current;
+          if (now.total - now.items.length !== before) return;
           anchor.current = 0;
-          dispatch({ type: "prepend", items: older });
+          dispatch({ type: "prepend", items: older, before });
         })
         .catch((e) => console.error("chat_page failed", e))
         .finally(() => {
@@ -206,6 +217,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
+      {!loaded && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {

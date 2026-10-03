@@ -2215,6 +2215,7 @@ mod tests {
         let parser = crate::transcript::parser_for("claude").unwrap();
         chats.insert(
             pane.clone(),
+            p.to_string_lossy().into(),
             crate::transcript::spawn_tail(
                 Arc::new(LocalTransport),
                 p.to_string_lossy().into(),

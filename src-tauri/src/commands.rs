@@ -521,10 +521,13 @@ pub async fn chat_open(
             tracing::warn!("chat event send failed: {err}");
         }
     });
-    chats.insert(
-        pane_ref,
-        transcript::spawn_tail(transport, located.path.clone(), parser, sink),
-    );
+    if !chats.reattach(&pane_ref, &located.path, sink.clone()) {
+        chats.insert(
+            pane_ref,
+            located.path.clone(),
+            transcript::spawn_tail(transport, located.path.clone(), parser, sink),
+        );
+    }
     Ok(located)
 }
 

@@ -12,11 +12,11 @@ use crate::view::PaneRef;
 use images::ImageSink;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 pub use locate::{locate, Located};
-pub use tail::{spawn_tail, TailHandle};
+pub use tail::{spawn_tail, Sink, TailHandle};
 
 /// An image attached to a chat item; its bytes are fetched by `reference`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -148,17 +148,35 @@ pub(crate) fn meta_label(s: &str) -> Option<String> {
 }
 
 const MAX_RESULT_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_INPUT_STRING_BYTES: usize = 64 * 1024;
 
-/// Truncates a tool result to at most 16 KiB on a char boundary, marking the cut.
-pub(crate) fn truncate_result(s: String) -> String {
-    if s.len() <= MAX_RESULT_BYTES {
+/// Cuts `s` to at most `max` bytes on a char boundary, marking the cut.
+fn cut(s: String, max: usize) -> String {
+    if s.len() <= max {
         return s;
     }
-    let mut end = MAX_RESULT_BYTES;
+    let mut end = max;
     while !s.is_char_boundary(end) {
         end -= 1;
     }
     format!("{}\n… (truncated)", &s[..end])
+}
+
+/// Truncates a tool result to at most 16 KiB on a char boundary, marking the cut.
+pub(crate) fn truncate_result(s: String) -> String {
+    cut(s, MAX_RESULT_BYTES)
+}
+
+/// Caps every string in a tool input at 64 KiB, keeping all fields, so a huge Write
+/// or Edit can't bloat the Chat.
+pub(crate) fn cap_input(v: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match v {
+        Value::String(s) => Value::String(cut(s, MAX_INPUT_STRING_BYTES)),
+        Value::Array(a) => Value::Array(a.into_iter().map(cap_input).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, cap_input(v))).collect()),
+        other => other,
+    }
 }
 
 /// The transcript parser for an agent.
@@ -170,42 +188,104 @@ pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
     }
 }
 
-/// One live transcript tail per Pane.
+/// Closed tails kept running, so reopening skips the backlog.
+pub const PARKED_TAILS: usize = 3;
+
+struct Entry {
+    path: String,
+    handle: TailHandle,
+}
+
+#[derive(Default)]
+struct Tails {
+    open: HashMap<PaneRef, Entry>,
+    /// Oldest first.
+    parked: VecDeque<(PaneRef, Entry)>,
+}
+
+/// One live transcript tail per open Pane, plus up to 3 parked ones.
 #[derive(Default)]
 pub struct ChatManager {
-    handles: Mutex<HashMap<PaneRef, TailHandle>>,
+    tails: Mutex<Tails>,
 }
 
 impl ChatManager {
-    /// Registers `handle` for `pane`, dropping (and so killing) any previous tail.
-    pub fn insert(&self, pane: PaneRef, handle: TailHandle) {
-        let old = self.handles.lock().unwrap().insert(pane, handle);
-        drop(old);
+    /// Registers `handle` for `pane`, dropping (and so killing) any previous tail of it.
+    pub fn insert(&self, pane: PaneRef, path: String, handle: TailHandle) {
+        let gone = {
+            let mut t = self.tails.lock().unwrap();
+            let mut gone: Vec<Entry> = t.open.remove(&pane).into_iter().collect();
+            if let Some(i) = t.parked.iter().position(|(p, _)| p == &pane) {
+                gone.extend(t.parked.remove(i).map(|(_, e)| e));
+            }
+            t.open.insert(pane, Entry { path, handle });
+            gone
+        };
+        drop(gone);
     }
 
+    /// Reopens the Pane's tail onto `sink` if it is still tailing `path`; false if there
+    /// is none (a stale one is dropped), and the caller must spawn a fresh tail.
+    pub fn reattach(&self, pane: &PaneRef, path: &str, sink: Sink) -> bool {
+        let entry = {
+            let mut t = self.tails.lock().unwrap();
+            match t.open.remove(pane) {
+                Some(e) => Some(e),
+                None => t
+                    .parked
+                    .iter()
+                    .position(|(p, _)| p == pane)
+                    .and_then(|i| t.parked.remove(i))
+                    .map(|(_, e)| e),
+            }
+        };
+        let Some(entry) = entry else { return false };
+        if entry.path != path || !entry.handle.is_running() {
+            drop(entry);
+            return false;
+        }
+        // `attach` locks the image store, so the map lock is already released.
+        entry.handle.attach(sink);
+        // A concurrent insert may have filled the slot; drop that entry after the guard.
+        let replaced = self.tails.lock().unwrap().open.insert(pane.clone(), entry);
+        drop(replaced);
+        true
+    }
+
+    /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are dropped.
     pub fn close(&self, pane: &PaneRef) {
-        let old = self.handles.lock().unwrap().remove(pane);
-        drop(old);
+        let entry = self.tails.lock().unwrap().open.remove(pane);
+        let Some(entry) = entry else { return };
+        entry.handle.detach();
+        let gone: Vec<(PaneRef, Entry)> = {
+            let mut t = self.tails.lock().unwrap();
+            t.parked.push_back((pane.clone(), entry));
+            let extra = t.parked.len().saturating_sub(PARKED_TAILS);
+            t.parked.drain(..extra).collect()
+        };
+        drop(gone);
     }
 
     pub fn page(&self, pane: &PaneRef, before: usize, limit: usize) -> Option<Vec<ChatItem>> {
-        self.handles
+        self.tails
             .lock()
             .unwrap()
+            .open
             .get(pane)
-            .map(|h| h.page(before, limit))
+            .map(|e| e.handle.page(before, limit))
     }
 
     /// The bytes of the image `r` in the Pane's open chat.
     pub fn image(&self, pane: &PaneRef, r: &str) -> Result<Vec<u8>, AppError> {
-        // The tail holds the store lock while it parses a line (up to 32 MiB): wait on it
-        // without holding `handles`, which every other Pane's chat call needs.
+        // The tail locks the store only briefly, but `tails` must still not be held
+        // while locking it.
         let store = self
-            .handles
+            .tails
             .lock()
             .unwrap()
+            .open
             .get(pane)
-            .map(|h| h.images())
+            .map(|e| e.handle.images())
             .ok_or_else(|| AppError::new("not_found", "no open chat for this pane"))?;
         let found = store.lock().unwrap().get(r);
         found
@@ -213,18 +293,25 @@ impl ChatManager {
             .ok_or_else(|| AppError::new("not_found", "image not available"))
     }
 
-    /// End every tail of the Machine (it was disconnected or removed).
+    /// End every tail of the Machine, open or parked (it was disconnected or removed).
     pub fn close_machine(&self, machine_id: &str) {
-        let gone: Vec<TailHandle> = {
-            let mut map = self.handles.lock().unwrap();
-            let keys: Vec<PaneRef> = map
+        let (open, parked) = {
+            let mut t = self.tails.lock().unwrap();
+            let t = &mut *t;
+            let keys: Vec<PaneRef> = t
+                .open
                 .keys()
                 .filter(|p| p.machine_id == machine_id)
                 .cloned()
                 .collect();
-            keys.into_iter().filter_map(|k| map.remove(&k)).collect()
+            let open: Vec<Entry> = keys.into_iter().filter_map(|k| t.open.remove(&k)).collect();
+            let (gone, kept) = std::mem::take(&mut t.parked)
+                .into_iter()
+                .partition(|(p, _)| p.machine_id == machine_id);
+            t.parked = kept;
+            (open, gone)
         };
-        drop(gone);
+        drop((open, parked));
     }
 }
 
@@ -232,6 +319,19 @@ impl ChatManager {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn caps_each_input_string_and_keeps_every_field() {
+        let big = format!("a{}", "é".repeat(40 * 1024)); // 80 KiB; the leading byte makes a 2-byte char straddle the cut
+        let v = serde_json::json!({"file_path": "/a", "edits": [{"old_string": big, "new_string": "x"}], "n": 3});
+        let out = cap_input(v);
+        let old = out["edits"][0]["old_string"].as_str().unwrap();
+        assert!(old.ends_with("\n… (truncated)"));
+        assert!(old.len() <= MAX_INPUT_STRING_BYTES + "\n… (truncated)".len());
+        assert_eq!(out["edits"][0]["new_string"], "x");
+        assert_eq!(out["file_path"], "/a");
+        assert_eq!(out["n"], 3);
+    }
 
     struct NoItems;
     impl Parser for NoItems {
@@ -260,6 +360,7 @@ mod tests {
         };
         chats.insert(
             pane.clone(),
+            p.to_string_lossy().into(),
             spawn_tail(
                 Arc::new(crate::transport::local::LocalTransport),
                 p.to_string_lossy().into(),
@@ -301,7 +402,7 @@ mod tests {
             Arc::new(|_| {}),
         );
         let store = h.images();
-        chats.insert(pane.clone(), h);
+        chats.insert(pane.clone(), p.to_string_lossy().into(), h);
         // The tail is mid-line (a long parse holds the store lock).
         let busy = store.lock().unwrap();
         let (c, p2) = (chats.clone(), pane.clone());
@@ -338,11 +439,134 @@ mod tests {
                 Box::new(NoItems),
                 Arc::new(|_| {}),
             );
-            chats.insert(pane(m), h);
+            chats.insert(pane(m), path.clone(), h);
         }
         chats.close_machine("a");
         assert!(chats.page(&pane("a"), 0, 1).is_none());
         assert!(chats.page(&pane("b"), 0, 1).is_some());
+    }
+
+    struct Echo;
+    impl Parser for Echo {
+        fn push_line(&mut self, line: &str, _: &mut dyn ImageSink) -> ParserOutput {
+            let item = ChatItem::User { ts: None, text: line.into(), images: vec![], skills: vec![] };
+            if line == "RESET" { ParserOutput::Reset(vec![item]) } else { ParserOutput::Append(vec![item]) }
+        }
+    }
+    fn pane(id: &str) -> PaneRef {
+        PaneRef { machine_id: "a".into(), session: "default".into(), pane_id: id.into() }
+    }
+    fn recorder() -> (Sink, Arc<std::sync::Mutex<Vec<ChatEvent>>>) {
+        let got: Arc<std::sync::Mutex<Vec<ChatEvent>>> = Arc::default();
+        let g = got.clone();
+        (Arc::new(move |e| g.lock().unwrap().push(e)), got)
+    }
+    fn open(chats: &ChatManager, p: &PaneRef, path: &std::path::Path) -> Arc<std::sync::Mutex<Vec<ChatEvent>>> {
+        let (sink, got) = recorder();
+        let path: String = path.to_string_lossy().into();
+        if !chats.reattach(p, &path, sink.clone()) {
+            chats.insert(p.clone(), path.clone(), spawn_tail(Arc::new(crate::transport::local::LocalTransport), path, Box::new(Echo), sink));
+        }
+        got
+    }
+
+    #[tokio::test]
+    async fn reopening_a_parked_tail_resets_from_kept_items() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\nb\n").unwrap();
+        let chats = ChatManager::default();
+        let first = open(&chats, &pane("p1"), &f);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        chats.close(&pane("p1"));
+        assert!(chats.page(&pane("p1"), 2, 10).is_none(), "a parked tail is not open");
+        use std::io::Write;
+        // A pi-style branch switch while parked.
+        std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"RESET\n").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let second = open(&chats, &pane("p1"), &f);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let ev = second.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { items, total: 1 } if items.len() == 1), "{ev:?}");
+        assert_eq!(ev.iter().filter(|e| matches!(e, ChatEvent::Reset { .. })).count(), 1);
+        assert!(!first.lock().unwrap().iter().any(|e| matches!(e, ChatEvent::Reset { total: 1, .. })), "the closed lens got events");
+    }
+
+    #[tokio::test]
+    async fn close_then_open_within_a_tick_still_resets_once() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        chats.close(&pane("p1"));
+        let again = open(&chats, &pane("p1"), &f);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let ev = again.lock().unwrap();
+        assert_eq!(ev.iter().filter(|e| matches!(e, ChatEvent::Reset { total: 1, .. })).count(), 1, "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn a_parked_tail_mid_backlog_sends_its_first_reset_once() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        chats.close(&pane("p1")); // before any Reset was sent
+        let again = open(&chats, &pane("p1"), &f);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let ev = again.lock().unwrap();
+        assert_eq!(ev.iter().filter(|e| matches!(e, ChatEvent::Reset { .. })).count(), 1, "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn a_fourth_park_drops_the_oldest_and_other_paths_start_fresh() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        let g = d.path().join("u.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        std::fs::write(&g, "z\n").unwrap();
+        let chats = ChatManager::default();
+        for id in ["p1", "p2", "p3", "p4"] {
+            open(&chats, &pane(id), &f);
+            chats.close(&pane(id));
+        }
+        let (sink, _) = recorder();
+        assert!(!chats.reattach(&pane("p1"), &f.to_string_lossy(), sink.clone()), "p1 should have been dropped");
+        assert!(!chats.reattach(&pane("p4"), &g.to_string_lossy(), sink.clone()), "another path must not reattach");
+        assert!(chats.reattach(&pane("p3"), &f.to_string_lossy(), sink));
+    }
+
+    #[tokio::test]
+    async fn a_dead_parked_tail_is_not_reattached() {
+        struct Gone;
+        #[async_trait::async_trait]
+        impl crate::transport::Transport for Gone {
+            fn wrap(&self, _: &[String], _: bool) -> Vec<String> { vec!["true".into()] }
+            async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+            async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+        }
+        let chats = ChatManager::default();
+        let (sink, _) = recorder();
+        chats.insert(pane("p1"), "/x".into(), spawn_tail(Arc::new(Gone), "/x".into(), Box::new(Echo), sink.clone()));
+        chats.close(&pane("p1"));
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!chats.reattach(&pane("p1"), "/x", sink));
+    }
+
+    #[tokio::test]
+    async fn close_machine_drops_parked_tails() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        chats.close(&pane("p1"));
+        chats.close_machine("a");
+        let (sink, _) = recorder();
+        assert!(!chats.reattach(&pane("p1"), &f.to_string_lossy(), sink));
     }
 
     #[test]

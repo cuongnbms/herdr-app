@@ -1,9 +1,10 @@
 //! Stream a transcript file with `tail -F` on the Machine and feed a parser.
-use super::images::{ImageStore, IMAGE_BUDGET};
+use super::images::{ImageSink, ImageStore, IMAGE_BUDGET, PARKED_IMAGE_BUDGET};
 use super::{ChatEvent, ChatItem, ChatMeta, Parser, ParserOutput};
 use crate::error::AppError;
 use crate::transport::Transport;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -12,16 +13,37 @@ use tokio::task::JoinHandle;
 
 const BATCH: Duration = Duration::from_millis(50);
 const RESET_ITEMS: usize = 500;
-const INITIAL_CAP: Duration = Duration::from_millis(300);
+/// Silence that ends the first backlog when the size header is unreadable.
+const QUIET: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2) };
 const MAX_LINE: usize = 32 * 1024 * 1024;
 
-type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
+pub type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
+
+/// Where a tail's events go. `sink` is None while the tail is parked; `attach` leaves the
+/// new sink in `pending` for the parse thread to adopt, so attaching never blocks.
+struct Link {
+    sink: Option<Sink>,
+    pending: Option<Sink>,
+}
+
+type SharedLink = Arc<Mutex<Link>>;
+
+/// Sends `ev` to the current sink, if any. The sink is cloned out so it runs unlocked.
+fn emit(link: &SharedLink, ev: ChatEvent) {
+    let sink = link.lock().unwrap().sink.clone();
+    if let Some(sink) = sink {
+        sink(ev);
+    }
+}
 
 /// A running tail. Dropping it ends the `tail` process.
 pub struct TailHandle {
     items: Arc<Mutex<Vec<ChatItem>>>,
     images: Arc<Mutex<ImageStore>>,
+    link: SharedLink,
     task: JoinHandle<()>,
+    /// Set once the parse thread is gone: past that, nothing reaches a sink.
+    done: Arc<AtomicBool>,
 }
 
 impl TailHandle {
@@ -30,6 +52,29 @@ impl TailHandle {
         let items = self.items.lock().unwrap();
         let end = before.min(items.len());
         items[end.saturating_sub(limit)..end].to_vec()
+    }
+
+    /// Parks the tail: it keeps reading but emits nothing, and keeps fewer images.
+    pub fn detach(&self) {
+        {
+            let mut link = self.link.lock().unwrap();
+            link.sink = None;
+            link.pending = None;
+        }
+        self.images.lock().unwrap().set_budget(PARKED_IMAGE_BUDGET);
+    }
+
+    /// Sends later events to `sink`, starting with a Reset of what the tail kept. The
+    /// parse thread takes it over within a tick (50 ms).
+    pub fn attach(&self, sink: Sink) {
+        self.images.lock().unwrap().set_budget(IMAGE_BUDGET);
+        self.link.lock().unwrap().pending = Some(sink);
+    }
+
+    /// Whether the tail still delivers: the parse thread is up and the reader has not
+    /// finished. The reader can outlive the parse thread briefly after an Eof.
+    pub fn is_running(&self) -> bool {
+        !self.done.load(Ordering::Acquire) && !self.task.is_finished()
     }
 
     /// The tail's image store, shared: lock it after letting go of any other lock.
@@ -51,16 +96,34 @@ struct State {
     /// The Model and Reasoning effort last sent to the sink.
     last_meta: ChatMeta,
     parser: Box<dyn Parser>,
-    sink: Sink,
+    link: SharedLink,
     /// Events of the current batch, in order.
     events: Vec<ChatEvent>,
     /// Items appended since the last event was queued.
     appended: Vec<ChatItem>,
     sent_first: bool,
-    /// Bytes arrived since the previous tick.
-    got_bytes: bool,
-    ever_got_bytes: bool,
-    started: Instant,
+    /// The file's size when the tail started, from the header line.
+    size: Option<u64>,
+    /// Bytes of the stream read after the header.
+    consumed: u64,
+    /// When the last byte arrived; None until the first.
+    last_byte: Option<Instant>,
+    /// Dropped with the State, so any end of the parse thread (Eof, closed channel, panic,
+    /// failed spawn) marks the tail done.
+    done: DoneOnDrop,
+}
+
+struct DoneOnDrop(Arc<AtomicBool>);
+
+impl Drop for DoneOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// The header line is `wc -c` output: the size, maybe space-padded.
+fn parse_header(line: &[u8]) -> Option<u64> {
+    std::str::from_utf8(line).ok()?.trim().parse().ok()
 }
 
 impl State {
@@ -72,15 +135,23 @@ impl State {
     }
 
     fn line(&mut self, line: &str) {
-        let out = {
+        // Parse into a local list so the store is locked only to put, never during a parse.
+        let mut found: Vec<(String, String, Vec<u8>)> = Vec::new();
+        let out = self.parser.push_line(line, &mut found);
+        if !found.is_empty() {
             let mut images = self.images.lock().unwrap();
-            self.parser.push_line(line, &mut *images)
-        };
+            for (r, media_type, bytes) in found {
+                images.put(r, media_type, bytes);
+            }
+        }
         match out {
             ParserOutput::None => {}
             ParserOutput::Append(v) => {
-                self.items.lock().unwrap().extend(v.iter().cloned());
-                self.appended.extend(v);
+                // Before the first Reset, `items` is all that is needed: that Reset snapshots it.
+                if self.sent_first {
+                    self.appended.extend(v.iter().cloned());
+                }
+                self.items.lock().unwrap().extend(v);
             }
             ParserOutput::Reset(v) => {
                 if !self.appended.is_empty() {
@@ -96,11 +167,11 @@ impl State {
     }
 
     fn flush(&mut self) {
-        let got = std::mem::take(&mut self.got_bytes);
         if !self.sent_first {
-            // Wait until the backlog has been read (a quiet interval after data) or the cap
-            // passes (empty or missing file), then send one Reset covering everything.
-            let caught_up = (self.ever_got_bytes && !got) || self.started.elapsed() >= INITIAL_CAP;
+            // Wait until the backlog's bytes have all been read (or, with no usable size,
+            // the stream goes quiet), then send one Reset covering everything.
+            let caught_up = self.size.is_some_and(|s| self.consumed >= s)
+                || self.last_byte.is_some_and(|t| t.elapsed() >= QUIET);
             if !caught_up {
                 return;
             }
@@ -108,7 +179,7 @@ impl State {
             self.events.clear();
             self.appended.clear();
             self.sent_first = true;
-            (self.sink)(ev);
+            emit(&self.link, ev);
             self.send_meta_if_changed();
             return;
         }
@@ -118,7 +189,7 @@ impl State {
             });
         }
         for ev in self.events.drain(..) {
-            (self.sink)(ev);
+            emit(&self.link, ev);
         }
         self.send_meta_if_changed();
     }
@@ -127,11 +198,33 @@ impl State {
         let meta = self.parser.meta();
         if meta != self.last_meta {
             self.last_meta = meta.clone();
-            (self.sink)(ChatEvent::Meta {
-                model: meta.model,
-                effort: meta.effort,
-                context_tokens: meta.context_tokens,
-            });
+            emit(
+                &self.link,
+                ChatEvent::Meta {
+                    model: meta.model,
+                    effort: meta.effort,
+                    context_tokens: meta.context_tokens,
+                },
+            );
+        }
+    }
+
+    /// Moves a pending sink in. What was queued for the old sink is dropped: the Reset
+    /// below covers it. Before the first Reset there is nothing more to do, as that
+    /// Reset goes to the new sink.
+    fn adopt_pending(&mut self) {
+        {
+            let mut link = self.link.lock().unwrap();
+            let Some(s) = link.pending.take() else { return };
+            link.sink = Some(s);
+        }
+        self.events.clear();
+        self.appended.clear();
+        if self.sent_first {
+            let ev = Self::reset_event(&self.items.lock().unwrap());
+            emit(&self.link, ev);
+            self.last_meta = ChatMeta::default();
+            self.send_meta_if_changed();
         }
     }
 }
@@ -144,31 +237,96 @@ pub fn spawn_tail(
 ) -> TailHandle {
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
     let images = Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET)));
+    let done: Arc<AtomicBool> = Arc::default();
     let state = State {
         items: items.clone(),
         images: images.clone(),
         last_meta: ChatMeta::default(),
         parser,
-        sink,
+        link: Arc::new(Mutex::new(Link { sink: Some(sink), pending: None })),
         events: Vec::new(),
         appended: Vec::new(),
         sent_first: false,
-        got_bytes: false,
-        ever_got_bytes: false,
-        started: Instant::now(),
+        size: None,
+        consumed: 0,
+        last_byte: None,
+        done: DoneOnDrop(done.clone()),
     };
-    let task = tokio::spawn(run(t, path, state));
+    let link = state.link.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    // Parsing is CPU-bound (lines reach 32 MiB), so it gets a thread of its own. It ends
+    // when the reader is aborted and the channel closes.
+    let spawned = std::thread::Builder::new()
+        .name("chat-parse".into())
+        .spawn(move || parse_loop(state, rx));
+    if let Err(e) = spawned {
+        emit(&link, ChatEvent::Error { error: AppError::new("io", e.to_string()) });
+    }
+    let task = tokio::spawn(read(t, path, link.clone(), tx));
     TailHandle {
         items,
         images,
+        link,
         task,
+        done,
     }
 }
 
-async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
+/// What the reader tells the parse thread.
+enum Msg {
+    /// The size header line, parsed.
+    Header(Option<u64>),
+    /// One line, without its newline.
+    Line(Vec<u8>),
+    /// Raw bytes read after the header, sent once the chunk's lines are.
+    Bytes(usize),
+    Tick,
+    /// The tail's output ended.
+    Eof,
+}
+
+fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
+    while let Some(m) = rx.blocking_recv() {
+        st.adopt_pending();
+        match m {
+            Msg::Header(size) => {
+                st.size = size;
+                st.last_byte = Some(Instant::now());
+            }
+            Msg::Line(mut bytes) => {
+                if bytes.last() == Some(&b'\r') {
+                    bytes.pop();
+                }
+                st.line(&String::from_utf8_lossy(&bytes));
+            }
+            Msg::Bytes(n) => {
+                st.consumed += n as u64;
+                st.last_byte = Some(Instant::now());
+            }
+            Msg::Tick => st.flush(),
+            Msg::Eof => {
+                st.flush();
+                emit(
+                    &st.link,
+                    ChatEvent::Error {
+                        error: AppError::new("io", "transcript tail exited"),
+                    },
+                );
+                return;
+            }
+        }
+    }
+}
+
+async fn read(
+    t: Arc<dyn Transport>,
+    path: String,
+    link: SharedLink,
+    tx: tokio::sync::mpsc::Sender<Msg>,
+) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
     // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
-    let script = r#"tail -n +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
+    let script = r#"wc -c < "$1" 2>/dev/null || echo 0; tail -c +1 -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
     let argv = t.wrap(
         &["sh".into(), "-c".into(), script.into(), "sh".into(), path],
         false,
@@ -182,7 +340,7 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     let mut child = match spawned {
         Ok(c) => c,
         Err(e) => {
-            (st.sink)(ChatEvent::Error { error: e.into() });
+            emit(&link, ChatEvent::Error { error: e.into() });
             return;
         }
     };
@@ -193,14 +351,26 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
     let mut chunk = vec![0u8; 64 * 1024];
     let mut buf: Vec<u8> = Vec::new();
     let mut dropping = false;
+    let mut header = true;
     loop {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
                 let n = match n { Ok(0) | Err(_) => break, Ok(n) => n };
-                st.got_bytes = true;
-                st.ever_got_bytes = true;
+                // Header bytes are not counted: they are not part of the file.
+                let mut raw = 0usize;
                 for part in chunk[..n].split_inclusive(|b| *b == b'\n') {
                     let complete = part.ends_with(b"\n");
+                    if header {
+                        buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
+                        if complete {
+                            let size = parse_header(&buf);
+                            buf.clear();
+                            header = false;
+                            if tx.send(Msg::Header(size)).await.is_err() { return; }
+                        }
+                        continue;
+                    }
+                    raw += part.len();
                     if !dropping {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
                         if buf.len() > MAX_LINE {
@@ -209,23 +379,22 @@ async fn run(t: Arc<dyn Transport>, path: String, mut st: State) {
                         }
                     }
                     if complete {
-                        if !dropping {
-                            let mut bytes = std::mem::take(&mut buf);
-                            if bytes.last() == Some(&b'\r') { bytes.pop(); }
-                            st.line(&String::from_utf8_lossy(&bytes));
+                        if !dropping && tx.send(Msg::Line(std::mem::take(&mut buf))).await.is_err() {
+                            return;
                         }
                         dropping = false;
                         buf.clear();
                     }
                 }
+                // Sent even when 0, so a header still arriving starts the quiet clock.
+                if tx.send(Msg::Bytes(raw)).await.is_err() { return; }
             }
-            _ = tick.tick() => st.flush(),
+            _ = tick.tick() => {
+                if tx.send(Msg::Tick).await.is_err() { return; }
+            }
         }
     }
-    st.flush();
-    (st.sink)(ChatEvent::Error {
-        error: AppError::new("io", "transcript tail exited"),
-    });
+    let _ = tx.send(Msg::Eof).await;
 }
 
 #[cfg(test)]
@@ -277,6 +446,42 @@ mod tests {
                 ..Default::default()
             }
         }
+    }
+
+    /// Blocks inside `push_line` until released, reporting when it got there.
+    struct Stuck {
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl Parser for Stuck {
+        fn push_line(&mut self, _: &str, images: &mut dyn ImageSink) -> ParserOutput {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            images.put("r".into(), "image/png".into(), vec![1]);
+            ParserOutput::None
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_image_store_is_free_while_a_line_parses() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let h = spawn_tail(
+            Arc::new(crate::transport::local::LocalTransport),
+            p.to_string_lossy().into(),
+            Box::new(Stuck { entered: entered_tx, release: release_rx }),
+            Arc::new(|_| {}),
+        );
+        let store = h.images();
+        tokio::task::spawn_blocking(move || entered.recv_timeout(std::time::Duration::from_secs(3)))
+            .await.unwrap().expect("parser never ran");
+        assert!(store.try_lock().is_ok(), "the store is locked during the parse");
+        release.send(()).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(store.lock().unwrap().get("r"), Some(("image/png".to_string(), vec![1])));
     }
 
     #[tokio::test]
@@ -466,5 +671,144 @@ mod tests {
                 text: "m0".into()
             }
         );
+    }
+
+    /// Starts the command only after `delay`, like a slow ssh: nothing arrives at first.
+    struct Slow(&'static str);
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Slow {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let mut v: Vec<String> = vec!["sh".into(), "-c".into(), format!("sleep {}; exec \"$@\"", self.0), "sh".into()];
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    /// Prints a junk first line before the command: the size header is unreadable.
+    struct Junk;
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Junk {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let mut v: Vec<String> = vec!["sh".into(), "-c".into(), "echo ' junk'; exec \"$@\"".into(), "sh".into()];
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    fn collect(t: Arc<dyn crate::transport::Transport>, p: &std::path::Path) -> (TailHandle, Arc<Mutex<Vec<ChatEvent>>>) {
+        let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
+        let g = got.clone();
+        let h = spawn_tail(t, p.to_string_lossy().into(), Box::new(Lines), Arc::new(move |e| g.lock().unwrap().push(e)));
+        (h, got)
+    }
+
+    fn state(parser: Box<dyn Parser>) -> State {
+        State {
+            items: Arc::default(),
+            images: Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET))),
+            last_meta: ChatMeta::default(),
+            parser,
+            link: Arc::new(Mutex::new(Link { sink: None, pending: None })),
+            events: Vec::new(),
+            appended: Vec::new(),
+            sent_first: false,
+            size: None,
+            consumed: 0,
+            last_byte: None,
+            done: DoneOnDrop(Arc::default()),
+        }
+    }
+
+    #[test]
+    fn the_parse_thread_marks_the_tail_done_however_it_ends() {
+        for eof in [true, false] {
+            let st = state(Box::new(Lines));
+            let done = st.done.0.clone();
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            if eof {
+                tx.blocking_send(Msg::Eof).unwrap();
+            } else {
+                drop(tx);
+            }
+            parse_loop(st, rx);
+            assert!(done.load(Ordering::Acquire), "eof: {eof}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_done_tail_is_not_running_while_its_reader_lingers() {
+        let done: Arc<AtomicBool> = Arc::default();
+        let h = TailHandle {
+            items: Arc::default(),
+            images: Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET))),
+            link: Arc::new(Mutex::new(Link { sink: None, pending: None })),
+            task: tokio::spawn(std::future::pending()),
+            done: done.clone(),
+        };
+        assert!(h.is_running());
+        done.store(true, Ordering::Release);
+        assert!(!h.is_running());
+    }
+
+    #[test]
+    fn the_backlog_is_not_queued_twice_before_the_first_reset() {
+        let mut st = state(Box::new(Lines));
+        st.line("a");
+        st.line("b");
+        assert_eq!(st.items.lock().unwrap().len(), 2);
+        assert!(st.appended.is_empty(), "the first Reset already carries the backlog");
+        st.sent_first = true;
+        st.line("c");
+        assert_eq!(st.appended.len(), 1);
+    }
+
+    #[test]
+    fn reads_the_size_header() {
+        assert_eq!(parse_header(b"   1234"), Some(1234));
+        assert_eq!(parse_header(b"0"), Some(0));
+        assert_eq!(parse_header(b" junk"), None);
+    }
+
+    #[tokio::test]
+    async fn a_slow_start_still_sends_the_whole_backlog_as_one_reset() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, (0..50).map(|i| format!("m{i}\n")).collect::<String>()).unwrap();
+        // Slower than QUIET (1 s in tests): the quiet clock must not run before the first byte.
+        let (_h, got) = collect(Arc::new(Slow("1.3")), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        let ev = got.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { total: 50, .. }), "{ev:?}");
+        assert!(!ev.iter().any(|e| matches!(e, ChatEvent::Append { .. })), "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn a_last_line_without_newline_follows_the_reset() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\nb").unwrap();
+        let (_h, got) = collect(Arc::new(crate::transport::local::LocalTransport), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 1, .. }));
+        use std::io::Write;
+        std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(b"\n").unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let ev = got.lock().unwrap();
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items.len() == 1)), "{ev:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_header_falls_back_to_quiet() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let (_h, got) = collect(Arc::new(Junk), &p);
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        assert!(got.lock().unwrap().is_empty(), "sent before QUIET");
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        // The real size line becomes an item: only the quiet rule could have sent this Reset.
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
     }
 }

@@ -60,6 +60,10 @@ _Avoid_: mode, view
 The Agent's own conversation file (`.jsonl`) that the Chat lens reads.
 _Avoid_: history, log
 
+**Parked tail**:
+The live reading of a Transcript kept after its Chat lens closed, so reopening that Chat lens resumes it instead of reading the Transcript again.
+_Avoid_: cached chat, background tail
+
 **Provider**:
 The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
 _Avoid_: vendor, model
