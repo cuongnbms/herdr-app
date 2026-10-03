@@ -58,6 +58,14 @@ describe("Sidebar", () => {
     expect(useApp.getState().viewed).toEqual({ machine_id: "box", session: "default" });
     expect(row("default").className).toContain("active");
   });
+  it("marks both rows of a bookmarked session in a group active", () => {
+    useLayout.setState({ layout: { tree: [work], bookmarks: [sessionKey("box", "default")] } });
+    render(<Sidebar />);
+    fireEvent.click(screen.getAllByText("default")[0]);
+    const rows = screen.getAllByText("default").map((e) => e.closest("button")!);
+    expect(rows).toHaveLength(2);
+    rows.forEach((r) => expect(r.className).toContain("active"));
+  });
   it("selecting a pane views its session", () => {
     useApp.getState().select({ machine_id: "box", session: "default", pane_id: "w1:p1" });
     expect(useApp.getState().viewed).toEqual({ machine_id: "box", session: "default" });

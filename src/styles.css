@@ -953,3 +953,6 @@ kbd {
 .row.drop-into, section.drop-into { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .tree-end { min-height: 24px; border-radius: var(--r-sm); }
 .tree-end.drop-into { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+.move-choices { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
+.move-choices button { flex-shrink: 0; justify-content: flex-start; text-align: left; }

@@ -80,6 +80,19 @@ describe("Sidebar machine actions", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Unbookmark" }));
     expect(useLayout.getState().layout.bookmarks).toEqual([]);
   });
+  it("unbookmarking a session in a group keeps its group row", () => {
+    set([local]);
+    const kx = sessionKey("local", "x");
+    useLayout.setState({ layout: { tree: [{ kind: "group", id: "g", label: "Work", children: [{ kind: "session", key: kx }] }], bookmarks: [kx] } });
+    render(<Sidebar />);
+    expect(screen.getAllByText("x")).toHaveLength(2);
+    fireEvent.contextMenu(within(screen.getByRole("region", { name: "Bookmarks" })).getByText("x"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unbookmark" }));
+    expect(useLayout.getState().layout.bookmarks).toEqual([]);
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).toBeNull();
+    expect(screen.getAllByText("x")).toHaveLength(1);
+    expect(screen.getByText("x").closest("li.group")?.textContent).toContain("Work");
+  });
   it("creates, renames, nests and deletes groups", async () => {
     set([local]);
     render(<Sidebar />);
