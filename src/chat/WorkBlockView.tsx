@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { ChevronIcon } from "../ui/icons";
 import { ChatItemView } from "./ChatItemView";
+import { SkillChips, turnSkills } from "./skills";
 import { formatWorkDuration, workSummary, type ToolResult, type WorkBlock } from "./workBlocks";
 
 /**
@@ -35,6 +36,7 @@ export const WorkBlockView = memo(function WorkBlockView({
           </>
         )}
       </button>
+      <SkillChips chips={turnSkills(block.items, results)} />
       {open && (
         <div className="chat-work-rows">
           {block.items.map((it, i) => (

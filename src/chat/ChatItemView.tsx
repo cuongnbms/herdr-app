@@ -6,6 +6,7 @@ import type { ChatItem } from "../lib/types";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 import { ChatImages } from "./images";
+import { SkillChips } from "./skills";
 import { toolIcon } from "./toolIcon";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
@@ -180,6 +181,7 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
         <div className="chat-row chat-user">
           {!!item.images?.length && <ChatImages images={item.images} />}
           {item.text !== "" && <div className="chat-bubble">{item.text}</div>}
+          {!!item.skills?.length && <SkillChips chips={item.skills.map((s) => ({ name: s.name, path: s.path, status: "loaded" }))} />}
           {copy && <CopyButton text={item.text} />}
         </div>
       );

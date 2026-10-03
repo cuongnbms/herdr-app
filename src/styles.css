@@ -643,6 +643,10 @@ kbd {
 .chat-user { align-items: flex-end; gap: 6px; }
 .chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-user .chat-images { justify-content: flex-end; }
+.skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.skill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; color: var(--fg-2); }
+.skill-chip svg { width: 12px; height: 12px; }
+.skill-chip-status { color: var(--fg-3); }
 .chat-image, .chat-image-missing {
   width: 64px; height: 64px; box-sizing: border-box; border: 1px solid var(--line-2); border-radius: var(--r-sm);
 }
