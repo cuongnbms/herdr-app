@@ -30,6 +30,9 @@ export const connectWrite = (machineId: string, data: string) => invoke<void>("c
 export const connectResize = (machineId: string, cols: number, rows: number) =>
   invoke<void>("connect_resize", { machineId, cols, rows });
 export const connectClose = (machineId: string) => invoke<void>("connect_close", { machineId });
+/** The saved sidebar layout, or `null` when none was saved yet. */
+export const layoutLoad = () => invoke<unknown>("layout_load");
+export const layoutSave = (layout: unknown) => invoke<void>("layout_save", { layout });
 export const sessionsRefresh = (machineId: string) => invoke<void>("sessions_refresh", { machineId });
 export const sessionStart = (machineId: string, session: string) =>
   invoke<void>("session_start", { machineId, session });

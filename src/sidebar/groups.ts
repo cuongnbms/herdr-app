@@ -272,27 +272,57 @@ export function groupPaths(layout: Layout): { id: string; path: string }[] {
   return out;
 }
 
+/** Where the layout lived before it moved to a file; read once to migrate, never written. */
 export const LAYOUT_KEY = "herdr-app:sidebar-layout";
 
+function parseLayout(v: unknown): Layout | null {
+  const p = v as Partial<Layout> | null;
+  return p && Array.isArray(p.tree) && Array.isArray(p.bookmarks) ? { tree: p.tree, bookmarks: p.bookmarks } : null;
+}
+
+/** The legacy localStorage layout; empty when missing, corrupt or unreadable. */
 export function loadLayout(): Layout {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as Partial<Layout> | null;
-      if (p && Array.isArray(p.tree) && Array.isArray(p.bookmarks)) return { tree: p.tree, bookmarks: p.bookmarks };
-    }
+    if (raw) return parseLayout(JSON.parse(raw)) ?? EMPTY_LAYOUT;
   } catch {
     /* storage unavailable or corrupt */
   }
   return EMPTY_LAYOUT;
 }
 
-export function saveLayout(l: Layout): void {
+export interface LayoutIO {
+  load: () => Promise<unknown>;
+  save: (l: Layout) => Promise<void>;
+}
+
+// Null until `initLayout` read the file, so nothing can overwrite it with an unloaded layout.
+let persist: ((l: Layout) => void) | null = null;
+
+/** Load the layout file, migrating the localStorage layout when there is no file yet. */
+export async function initLayout(io: LayoutIO): Promise<void> {
+  persist = null;
+  let stored: unknown;
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ tree: l.tree, bookmarks: l.bookmarks }));
-  } catch {
-    /* ignore */
+    stored = await io.load();
+  } catch (e) {
+    // Keep the file as it is: show the old layout and save nothing this run.
+    console.error("cannot read the sidebar layout file", e);
+    useLayout.setState({ layout: loadLayout() });
+    return;
   }
+  let queue = Promise.resolve();
+  persist = (l) => {
+    queue = queue.then(() => io.save(l)).catch((e) => console.error("cannot save the sidebar layout", e));
+  };
+  const saved = parseLayout(stored);
+  if (saved) {
+    useLayout.setState({ layout: saved });
+    return;
+  }
+  const legacy = loadLayout();
+  useLayout.setState({ layout: legacy });
+  if (legacy !== EMPTY_LAYOUT) persist(legacy);
 }
 
 interface LayoutState {
@@ -301,13 +331,13 @@ interface LayoutState {
 }
 
 export const useLayout = create<LayoutState>((set, get) => ({
-  layout: loadLayout(),
+  layout: EMPTY_LAYOUT,
   update: (fn) => {
     const prev = get().layout;
     const next = fn(prev);
     if (next === prev) return;
     set({ layout: next });
-    saveLayout(next);
+    persist?.(next);
   },
 }));
 

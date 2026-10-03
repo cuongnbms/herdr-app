@@ -4,6 +4,7 @@ pub mod complete;
 pub mod error;
 pub mod fonts;
 pub mod herdr;
+pub mod layout;
 pub mod machines;
 pub mod quota;
 pub mod sshconfig;
@@ -58,12 +59,17 @@ pub fn run() {
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,
+            commands::layout_load,
+            commands::layout_save,
         ])
         .setup(|app| {
             init_logging(app.path().app_log_dir()?)?;
             tracing::info!("herdr-app starting");
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            app.manage(Arc::new(layout::LayoutStore::new(
+                dir.join("sidebar-layout.json"),
+            )));
             let handle = app.handle().clone();
             let mgr = MachineManager::new(
                 dir.join("machines.json"),

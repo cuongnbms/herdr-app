@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EMPTY_LAYOUT, LAYOUT_KEY, loadLayout, resolve, saveLayout, sessionKey, useLayout } from "./groups";
+import { EMPTY_LAYOUT, LAYOUT_KEY, initLayout, loadLayout, resolve, sessionKey, useLayout } from "./groups";
 import type { RNode } from "./groups";
 import type { MachineView, SessionView } from "../lib/types";
 
@@ -9,14 +9,8 @@ const mach = (id: string, ...names: string[]): MachineView => ({
 });
 const names = (nodes: RNode[]): unknown[] => nodes.map((n) => (n.kind === "group" ? { [n.label]: names(n.children) } : `${n.machine.id}:${n.session.name}`));
 
-describe("layout storage", () => {
+describe("legacy localStorage layout", () => {
   beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
-  it("round-trips", () => {
-    const l = { tree: [{ kind: "session" as const, key: "local/x" }], bookmarks: ["local/x"] };
-    saveLayout(l);
-    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!)).toEqual(l);
-    expect(loadLayout()).toEqual(l);
-  });
   it("reads missing, corrupt or misshapen values as empty", () => {
     expect(loadLayout()).toEqual(EMPTY_LAYOUT);
     localStorage.setItem(LAYOUT_KEY, "{nope");
@@ -28,11 +22,72 @@ describe("layout storage", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("denied"); });
     expect(loadLayout()).toEqual(EMPTY_LAYOUT);
   });
-  it("update saves the new layout", () => {
-    useLayout.setState({ layout: EMPTY_LAYOUT });
-    useLayout.getState().update((l) => ({ ...l, bookmarks: ["local/x"] }));
-    expect(useLayout.getState().layout.bookmarks).toEqual(["local/x"]);
-    expect(loadLayout().bookmarks).toEqual(["local/x"]);
+});
+
+describe("layout file", () => {
+  const l = { tree: [{ kind: "session" as const, key: "local/x" }], bookmarks: ["local/x"] };
+  const io = (stored: unknown) => ({ load: vi.fn().mockResolvedValue(stored), save: vi.fn().mockResolvedValue(undefined) });
+  const flush = () => new Promise((r) => setTimeout(r));
+  beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); useLayout.setState({ layout: EMPTY_LAYOUT }); });
+
+  it("loads the saved file and does not rewrite it", async () => {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ tree: [], bookmarks: ["old/y"] }));
+    const f = io(l);
+    await initLayout(f);
+    expect(useLayout.getState().layout).toEqual(l);
+    expect(f.save).not.toHaveBeenCalled();
+  });
+  it("migrates the localStorage layout into a missing file and keeps the old key", async () => {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+    const f = io(null);
+    await initLayout(f);
+    await flush();
+    expect(useLayout.getState().layout).toEqual(l);
+    expect(f.save).toHaveBeenCalledWith(l);
+    expect(localStorage.getItem(LAYOUT_KEY)).not.toBeNull();
+  });
+  it("migrates over a misshapen file", async () => {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+    const f = io({ tree: 3 });
+    await initLayout(f);
+    await flush();
+    expect(f.save).toHaveBeenCalledWith(l);
+  });
+  it("writes nothing when neither the file nor localStorage has a layout", async () => {
+    const f = io(null);
+    await initLayout(f);
+    await flush();
+    expect(useLayout.getState().layout).toEqual(EMPTY_LAYOUT);
+    expect(f.save).not.toHaveBeenCalled();
+  });
+  it("saves every update in order", async () => {
+    const f = io(null);
+    await initLayout(f);
+    useLayout.getState().update((x) => ({ ...x, bookmarks: ["a"] }));
+    useLayout.getState().update((x) => ({ ...x, bookmarks: ["a", "b"] }));
+    await flush();
+    expect(f.save.mock.calls.map((c) => c[0].bookmarks)).toEqual([["a"], ["a", "b"]]);
+    expect(localStorage.getItem(LAYOUT_KEY)).toBeNull();
+  });
+  it("keeps saving after a failed write", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = io(null);
+    f.save.mockRejectedValueOnce(new Error("disk full"));
+    await initLayout(f);
+    useLayout.getState().update((x) => ({ ...x, bookmarks: ["a"] }));
+    useLayout.getState().update((x) => ({ ...x, bookmarks: ["b"] }));
+    await flush();
+    expect(f.save).toHaveBeenCalledTimes(2);
+  });
+  it("falls back to localStorage without writing when the file cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(l));
+    const f = { load: vi.fn().mockRejectedValue(new Error("ipc")), save: vi.fn() };
+    await initLayout(f);
+    expect(useLayout.getState().layout).toEqual(l);
+    useLayout.getState().update((x) => ({ ...x, bookmarks: [] }));
+    await flush();
+    expect(f.save).not.toHaveBeenCalled();
   });
 });
 

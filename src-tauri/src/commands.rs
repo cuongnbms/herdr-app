@@ -4,6 +4,7 @@ use crate::{
     complete::{self, SlashCommand},
     error::AppError,
     herdr::rpc,
+    layout::LayoutStore,
     machines::MachineManager,
     sshconfig,
     transcript::{self, ChatEvent, ChatItem, ChatManager, Located},
@@ -579,4 +580,24 @@ pub async fn quota_fetch(
     provider: crate::quota::Provider,
 ) -> Result<crate::quota::QuotaOutcome, AppError> {
     Ok(crate::quota::fetch(provider).await)
+}
+
+/// The saved sidebar layout, or `null` when none was saved yet.
+#[tauri::command]
+pub async fn layout_load(store: State<'_, Arc<LayoutStore>>) -> Result<Option<Value>, AppError> {
+    let store = store.inner().clone();
+    tokio::task::spawn_blocking(move || store.load())
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))
+}
+
+#[tauri::command]
+pub async fn layout_save(
+    store: State<'_, Arc<LayoutStore>>,
+    layout: Value,
+) -> Result<(), AppError> {
+    let store = store.inner().clone();
+    tokio::task::spawn_blocking(move || store.save(&layout))
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))?
 }
