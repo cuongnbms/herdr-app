@@ -678,7 +678,7 @@ impl MachineManager {
             return Ok(());
         }
         // Reconnecting: stop watchers and release the old sockets first.
-        self.teardown(id, false, false).await;
+        self.teardown(id, false, false, false).await;
         self.connect_core(&cfg, epoch).await
     }
 
@@ -830,7 +830,8 @@ impl MachineManager {
     /// Stop watchers, close terminals and release forwarded sockets. `clear` also forgets the Sessions.
     /// `close_all` also closes Machine-level terminals (the interactive ssh master);
     /// a connect must not kill the master the user just authenticated.
-    async fn teardown(&self, id: &str, clear: bool, close_all: bool) {
+    /// `quitting` forgets the forwards instead (`Transport::forget_socket`).
+    async fn teardown(&self, id: &str, clear: bool, close_all: bool, quitting: bool) {
         let released = self
             .with_machine(id, |m| {
                 m.abort_supervisors();
@@ -857,7 +858,12 @@ impl MachineManager {
         if let Some((Some(t), entries)) = released {
             // Every Session, running or not: one that stopped outside the app may still hold a forward.
             for e in entries {
-                if let Err(err) = t.release_socket(&e).await {
+                let res = if quitting {
+                    t.forget_socket(&e).await
+                } else {
+                    t.release_socket(&e).await
+                };
+                if let Err(err) = res {
                     tracing::error!("release_socket {id}/{}: {err}", e.name);
                 }
             }
@@ -867,12 +873,18 @@ impl MachineManager {
     /// Explicit disconnect: forgets the Sessions and, for ssh, ends the master.
     /// Bumps the epoch first, so a connect in flight abandons itself (and its master).
     pub async fn disconnect(&self, id: &str) {
+        self.disconnect_with(id, false).await
+    }
+
+    /// `quitting`: the app is exiting, so forwards are dropped locally and left to the
+    /// master's exit instead of being cancelled one by one.
+    async fn disconnect_with(&self, id: &str, quitting: bool) {
         let _ = self.with_machine(id, |m| {
             m.epoch += 1;
             m.last_herdr = None;
         });
         self.cancel_reconnect(id);
-        self.teardown(id, true, true).await;
+        self.teardown(id, true, true, quitting).await;
         if let Some(c) = self.chats.lock().unwrap().clone() {
             c.close_machine(id);
         }
@@ -919,8 +931,8 @@ impl MachineManager {
         }
     }
 
-    /// Disconnect every ssh Machine (app exit).
-    pub async fn disconnect_all_ssh(&self) {
+    /// Disconnect every ssh Machine concurrently (app exit).
+    pub async fn disconnect_all_ssh(self: &Arc<Self>) {
         let ids: Vec<String> = self
             .machines
             .lock()
@@ -929,8 +941,15 @@ impl MachineManager {
             .filter(|m| m.cfg.id != LOCAL)
             .map(|m| m.cfg.id.clone())
             .collect();
-        for id in ids {
-            self.disconnect(&id).await;
+        let tasks: Vec<_> = ids
+            .into_iter()
+            .map(|id| {
+                let me = self.clone();
+                tokio::spawn(async move { me.disconnect_with(&id, true).await })
+            })
+            .collect();
+        for t in tasks {
+            let _ = t.await;
         }
     }
 
@@ -952,7 +971,7 @@ impl MachineManager {
         if !go {
             return;
         }
-        self.teardown(id, false, false).await;
+        self.teardown(id, false, false, false).await;
         self.emit_now(id);
         if let Some(me) = self.me.upgrade() {
             let h = tokio::spawn(me.reconnect_loop(id.to_string()));
@@ -2562,6 +2581,85 @@ mod tests {
         );
         let v = mgr.views().into_iter().find(|v| v.id == "local").unwrap();
         assert_eq!(v.state, MachineState::Error);
+    }
+
+    /// One stopped Session; counts releases and forgets, each forget taking 300 ms.
+    struct ExitT {
+        released: Arc<std::sync::atomic::AtomicU32>,
+        forgot: Arc<std::sync::atomic::AtomicU32>,
+    }
+    #[async_trait::async_trait]
+    impl Transport for ExitT {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let list = "name status directory socket\nold stopped /y /y/herdr.sock\n";
+            let out = if argv.join(" ").contains("HERDR=") {
+                probe_reply(list)
+            } else {
+                String::new()
+            };
+            vec!["printf".into(), "%s".into(), out]
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            Ok(s.socket.clone().into())
+        }
+        async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> {
+            self.released
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        async fn forget_socket(&self, _: &SessionEntry) -> AppResult<()> {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            self.forgot
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    type Counter = Arc<std::sync::atomic::AtomicU32>;
+
+    async fn exit_mgr(ids: &[&str]) -> (Arc<MachineManager>, Counter, Counter, tempfile::TempDir) {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let (released, forgot): (Counter, Counter) = Default::default();
+        let (r, f) = (released.clone(), forgot.clone());
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(ExitT {
+                released: r.clone(),
+                forgot: f.clone(),
+            }) as Arc<dyn Transport>
+        }));
+        for id in ids {
+            mgr.add(id.to_string(), None, None).await.unwrap();
+            mgr.connect(id).await.unwrap();
+        }
+        (mgr, released, forgot, d)
+    }
+
+    #[tokio::test]
+    async fn exit_forgets_forwards_instead_of_releasing_them() {
+        let (mgr, released, forgot, _d) = exit_mgr(&["box"]).await;
+        mgr.disconnect_all_ssh().await;
+        let n = |c: &Counter| c.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!((n(&released), n(&forgot)), (0, 1));
+        let v = mgr.views().into_iter().find(|v| v.id == "box").unwrap();
+        assert_eq!(v.state, MachineState::Disconnected);
+        // A plain disconnect still releases each forward.
+        mgr.connect("box").await.unwrap();
+        mgr.disconnect("box").await;
+        assert_eq!((n(&released), n(&forgot)), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn exit_disconnects_machines_concurrently() {
+        let (mgr, _, forgot, _d) = exit_mgr(&["box-a", "box-b"]).await;
+        let t = std::time::Instant::now();
+        mgr.disconnect_all_ssh().await;
+        assert_eq!(forgot.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(
+            t.elapsed() < std::time::Duration::from_millis(500),
+            "{:?}",
+            t.elapsed()
+        );
     }
 
     #[tokio::test]

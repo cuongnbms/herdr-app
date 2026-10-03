@@ -40,6 +40,10 @@ pub trait Transport: Send + Sync {
     /// A local Unix socket path that reaches the session's herdr socket.
     async fn local_socket(&self, session: &SessionEntry) -> AppResult<PathBuf>;
     async fn release_socket(&self, session: &SessionEntry) -> AppResult<()>;
+    /// Release locally only, for when the whole connection is about to end anyway.
+    async fn forget_socket(&self, session: &SessionEntry) -> AppResult<()> {
+        self.release_socket(session).await
+    }
 }
 
 /// Run `argv` on the Machine with stdin closed, capturing output, 30 s timeout.
