@@ -706,11 +706,23 @@ kbd {
 
 .composer { flex: none; padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; }
 .composer-box {
-  display: flex; flex-direction: column; gap: 4px; padding: 10px 10px 8px 14px;
+  position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 10px 8px 14px;
   background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-lg);
   box-shadow: var(--shadow-composer); transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent), var(--shadow-composer); }
+.composer-menu {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5;
+  max-height: calc(8 * 36px + 12px); overflow-y: auto; list-style: none; margin: 0; padding: 6px;
+  background: color-mix(in srgb, var(--surface-2) 94%, transparent); backdrop-filter: blur(24px);
+  border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow-dialog);
+}
+.composer-menu .hit { cursor: pointer; }
+.composer-menu-name { font-weight: 600; white-space: nowrap; }
+.composer-menu-dir, .composer-menu-desc { color: var(--fg-3); }
+.composer-menu-dir { white-space: nowrap; margin-right: -10px; }
+.composer-menu-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.composer-menu-note { padding: 10px; color: var(--fg-3); }
 .composer textarea {
   resize: none; padding: 0; border: 0; background: none; color: var(--fg); font-size: var(--chat-font); line-height: 1.5;
 }
