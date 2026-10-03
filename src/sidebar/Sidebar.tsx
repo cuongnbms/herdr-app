@@ -204,7 +204,8 @@ function BookmarksSection({ bookmarks }: { bookmarks: RSession[] }) {
     <section aria-label="Bookmarks" className={indicatorClass(drag, "bookmarks").trim()} {...dnd}>
       <SectionHeader id="bookmarks" label="Bookmarks" icon={<StarIcon className="icon star-icon" />} />
       {open && (
-        <ul className="tree">
+        // Indented like a group's sessions.
+        <ul className="tree children">
           {bookmarks.map((n, i) => <SessionRow key={n.key} node={n} bookmark nextKey={bookmarks[i + 1]?.key ?? null} />)}
         </ul>
       )}
