@@ -737,7 +737,43 @@ kbd {
 }
 .blocked-head { display: flex; align-items: center; gap: 10px; color: var(--amber); font-size: 12.5px; font-weight: 600; }
 .blocked-screen { height: 220px; padding: 8px; background: var(--surface-term); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-.blocked-open { margin-left: auto; }
+.blocked-open { margin-left: auto; display: flex; gap: 6px; }
+.prompt-title { color: var(--fg); }
+.prompt-question { margin: 0; color: var(--fg); font-size: 13.5px; line-height: 1.5; }
+.prompt-body {
+  margin: 0; max-height: 200px; overflow: auto; padding: 8px 10px; white-space: pre-wrap;
+  background: var(--surface-0); border: 1px solid var(--line); border-radius: var(--r-md);
+  color: var(--fg-2); font: 12px/1.5 var(--mono);
+}
+.prompt-options { display: flex; flex-direction: column; gap: 6px; }
+.prompt-options.keys { flex-direction: row; flex-wrap: wrap; }
+.prompt-option {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; text-align: left;
+  border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--surface-1); color: var(--fg);
+  cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast);
+}
+.prompt-option:hover:not(:disabled), .prompt-option.checked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); }
+.prompt-option:disabled { opacity: 0.55; cursor: default; }
+.prompt-option input[type="checkbox"] { margin: 2px 0 0; accent-color: var(--accent); }
+.prompt-num {
+  flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px;
+  background: var(--surface-3); color: var(--fg-2); font-size: 11.5px; font-weight: 600;
+}
+.prompt-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prompt-option-label { font-size: 13px; font-weight: 500; }
+.prompt-option-desc { font-size: 12px; color: var(--fg-3); line-height: 1.45; }
+.prompt-tag {
+  margin-left: 8px; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 600;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.prompt-submit { align-self: flex-start; }
+.prompt-custom { display: flex; gap: 6px; }
+.prompt-custom input {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface-0); color: var(--fg); font-size: 13px;
+}
+.prompt-custom input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.prompt-custom input::placeholder { color: var(--fg-3); }
 
 /* highlight.js theme, scoped to the chat; colors are --hl-* tokens */
 .chat-assistant .hljs { color: var(--hl-fg); background: transparent; }
