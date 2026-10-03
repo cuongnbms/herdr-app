@@ -19,6 +19,29 @@ const machine: MachineView = {
 
 describe("app store", () => {
   beforeEach(() => useApp.setState({ machines: {}, order: [], selected: null }));
+  it("keeps the store untouched by an identical view", () => {
+    useApp.getState().upsertMachine(machine);
+    const before = useApp.getState();
+    useApp.getState().upsertMachine(structuredClone(machine));
+    const after = useApp.getState();
+    expect(after.machines).toBe(before.machines);
+    expect(after.doneSeen).toBe(before.doneSeen);
+    expect(after.lensOverride).toBe(before.lensOverride);
+  });
+  it("reuses the unchanged parts of a changed view", () => {
+    const two = structuredClone(machine);
+    two.sessions[0].workspaces.push({ ...structuredClone(machine.sessions[0].workspaces[0]), workspace_id: "w2" });
+    useApp.getState().upsertMachine(two);
+    const prev = useApp.getState().machines.local;
+    const next = structuredClone(two);
+    next.sessions[0].workspaces[0].tabs[0].panes[1].status = "idle";
+    useApp.getState().upsertMachine(next);
+    const cur = useApp.getState().machines.local;
+    expect(cur).not.toBe(prev);
+    expect(cur.sessions[0].workspaces[0].tabs[0].panes[1].status).toBe("idle");
+    expect(cur.sessions[0].workspaces[0].tabs[0].panes[0]).toBe(prev.sessions[0].workspaces[0].tabs[0].panes[0]);
+    expect(cur.sessions[0].workspaces[1]).toBe(prev.sessions[0].workspaces[1]);
+  });
   it("drops folders of workspaces that left a running session", () => {
     setFolder({ machine_id: "local", session: "default", workspace_id: "w1" }, "/x");
     setFolder({ machine_id: "local", session: "default", workspace_id: "w7" }, "/gone");
