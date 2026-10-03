@@ -797,7 +797,7 @@ impl MachineManager {
             // Every Session, running or not: one that stopped outside the app may still hold a forward.
             for e in entries {
                 if let Err(err) = t.release_socket(&e).await {
-                    tracing::warn!("release_socket {id}/{}: {err}", e.name);
+                    tracing::error!("release_socket {id}/{}: {err}", e.name);
                 }
             }
         }
@@ -1171,7 +1171,7 @@ impl MachineManager {
             Err(e) => return Err(e),
         }
         if let Err(e) = t.release_socket(&entry).await {
-            tracing::warn!("release_socket {id}/{name}: {e}");
+            tracing::error!("release_socket {id}/{name}: {e}");
         }
         self.refresh_sessions(id).await
     }
