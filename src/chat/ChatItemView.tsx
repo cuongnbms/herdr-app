@@ -1,9 +1,9 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatItem } from "../lib/types";
-import { ChevronIcon } from "../ui/icons";
+import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
@@ -136,18 +136,46 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
   );
 }
 
-export const ChatItemView = memo(function ChatItemView({ item, result }: { item: ChatItem; result?: ToolResult }) {
+/** Copies the text and says so for a moment. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      className="chat-copy"
+      aria-label={copied ? "Copied" : "Copy"}
+      title={copied ? "Copied" : "Copy"}
+      onClick={() =>
+        navigator.clipboard.writeText(text).then(
+          () => setCopied(true),
+          (e) => console.error("copy failed", e),
+        )
+      }
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
+  );
+}
+
+/** `copy`: offer a copy button on a user message or an answer (not on narration inside a work block). */
+export const ChatItemView = memo(function ChatItemView({ item, result, copy = false }: { item: ChatItem; result?: ToolResult; copy?: boolean }) {
   switch (item.kind) {
     case "user":
       return (
         <div className="chat-row chat-user">
           <div className="chat-bubble">{item.text}</div>
+          {copy && <CopyButton text={item.text} />}
         </div>
       );
     case "assistant_text":
       return (
         <div className="chat-row chat-assistant">
           <Markdown rehypePlugins={rehypePlugins} components={mdComponents}>{item.markdown}</Markdown>
+          {copy && <CopyButton text={item.markdown} />}
         </div>
       );
     case "thinking":

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ChatItemView } from "./ChatItemView";
 describe("ChatItemView", () => {
   it("renders markdown", () => {
@@ -31,6 +31,22 @@ describe("ChatItemView", () => {
     fireEvent.click(screen.getByRole("button", { name: /MultiEdit/ }));
     expect(screen.getByText("- c")).toBeTruthy();
     expect(screen.getByText("+ d")).toBeTruthy();
+  });
+  it("copies a user message and an answer's markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { unmount } = render(<ChatItemView item={{ kind: "user", text: "fix the bug" }} copy />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenLastCalledWith("fix the bug");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    unmount();
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "Done **now**" }} copy />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenLastCalledWith("Done **now**");
+  });
+  it("offers no copy unless asked (narration in a work block)", () => {
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "Looking at the file" }} />);
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
   });
   it("highlights fenced code", () => {
     const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: "```js\nconst a = 1;\n```" }} />);

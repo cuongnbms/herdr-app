@@ -59,7 +59,14 @@ export const AlertIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M12 8v4.5M12 16h.01" />
   </Icon>
 );
-export const StopIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" /></Icon>;
+export const CopyIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+  </Icon>
+);
+export const CheckIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M5 12l5 5 9-10" /></Icon>;
+export const StopIcon =(p: SVGProps<SVGSVGElement>) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" /></Icon>;
 export const SendIcon =(p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Icon>;
 export const LayersIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>

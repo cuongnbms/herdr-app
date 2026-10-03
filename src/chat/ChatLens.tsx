@@ -195,6 +195,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                 ) : (
                   <ChatItemView
                     item={row.item}
+                    copy
                     result={row.item.kind === "tool_call" ? results.get(row.item.id) : undefined}
                   />
                 )}
