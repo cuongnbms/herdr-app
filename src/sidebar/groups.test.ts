@@ -52,6 +52,10 @@ describe("moveNode", () => {
     expect(moveNode(l, S("x"), { kind: "before", ref: S("x") })).toBe(l);
     expect(canMove(l, G("a"), { kind: "into", groupId: "b" })).toBe(false);
     expect(canMove(l, S("x"), { kind: "into", groupId: null })).toBe(true);
+    // A node dropped on its own row is a no-op, so it is not a valid drop.
+    expect(canMove(l, S("x"), { kind: "before", ref: S("x") })).toBe(false);
+    expect(canMove(l, S("x"), { kind: "after", ref: S("x") })).toBe(false);
+    expect(canMove(l, G("a"), { kind: "after", ref: G("a") })).toBe(false);
   });
   it("is a no-op for an unknown target", () => {
     const l = L(s("x"));

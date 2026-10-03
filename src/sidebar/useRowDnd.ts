@@ -165,6 +165,7 @@ export function useBookmarkRowDnd(key: SessionKey, nextKey: SessionKey | null): 
       e.stopPropagation();
       if (s.dragging) e.dataTransfer.dropEffect = "none";
       hide(s, id);
+      hide(s, "bookmarks");
       return;
     }
     e.preventDefault();

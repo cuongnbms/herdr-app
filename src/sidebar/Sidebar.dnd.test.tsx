@@ -72,8 +72,36 @@ describe("Sidebar drag and drop", () => {
     useLayout.setState({ layout: { tree: [{ kind: "group", id: "a", label: "A", children: [{ kind: "group", id: "b", label: "B", children: [] }] }], bookmarks: [] } });
     const before = useLayout.getState().layout;
     render(<Sidebar />);
-    drag(rowOf("A"), rowOf("B"));
+    const dataTransfer = dt();
+    fireEvent.dragStart(rowOf("A"), { dataTransfer });
+    fireEvent.dragEnter(rowOf("B"), { dataTransfer });
+    fireEvent.dragOver(rowOf("B"), { dataTransfer });
+    expect(document.querySelector(".drop-into, .drop-before, .drop-after")).toBeNull();
+    fireEvent.drop(rowOf("B"), { dataTransfer });
+    fireEvent.dragEnd(rowOf("A"), { dataTransfer });
     expect(useLayout.getState().layout).toBe(before);
+  });
+  it("shows no indicator for a session dragged over its own row", () => {
+    useLayout.setState({ layout: { tree: [{ kind: "session", key: kx }, { kind: "session", key: ky }], bookmarks: [] } });
+    render(<Sidebar />);
+    const dataTransfer = dt();
+    fireEvent.dragStart(rowOf("x"), { dataTransfer });
+    fireEvent.dragOver(rowOf("x"), { dataTransfer });
+    expect(document.querySelector(".drop-into, .drop-before, .drop-after")).toBeNull();
+    expect(dataTransfer.dropEffect).toBe("none");
+    fireEvent.dragEnd(rowOf("x"), { dataTransfer });
+  });
+  it("clears the Bookmarks highlight when a session drag moves onto a bookmark row", () => {
+    useLayout.setState({ layout: { tree: [], bookmarks: [ky] } });
+    render(<Sidebar />);
+    const bm = screen.getByRole("region", { name: "Bookmarks" });
+    const dataTransfer = dt();
+    fireEvent.dragStart(rowOf("x"), { dataTransfer });
+    fireEvent.dragOver(within(bm).getByText("Bookmarks"), { dataTransfer });
+    expect(document.querySelector(".drop-into")).not.toBeNull();
+    fireEvent.dragOver(within(bm).getByText("y").closest("button")!, { dataTransfer });
+    expect(document.querySelector(".drop-into, .drop-before, .drop-after")).toBeNull();
+    fireEvent.dragEnd(rowOf("x"), { dataTransfer });
   });
   it("bookmarks a session dropped on the Bookmarks header and reorders bookmarks", () => {
     render(<Sidebar />);

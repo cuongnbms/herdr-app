@@ -110,10 +110,12 @@ const refOfTarget = (t: Target): NodeRef | null =>
   t.kind === "into" ? (t.groupId === null ? null : { kind: "group", id: t.groupId }) : t.ref;
 
 export function canMove(layout: Layout, node: NodeRef, target: Target): boolean {
+  const ref = refOfTarget(target);
+  // A node dropped on its own row would not move.
+  if (ref && sameRef(node, ref)) return false;
   if (node.kind !== "group") return true;
   const self = findGroup(layout.tree, node.id);
   if (!self) return true;
-  const ref = refOfTarget(target);
   if (!ref) return true;
   if (matches(self, ref)) return false;
   return find(self.children, ref) === null;
@@ -121,8 +123,6 @@ export function canMove(layout: Layout, node: NodeRef, target: Target): boolean 
 
 export function moveNode(layout: Layout, node: NodeRef, target: Target, unplaced: SessionKey[] = []): Layout {
   if (!canMove(layout, node, target)) return layout;
-  const ref = refOfTarget(target);
-  if (ref && sameRef(node, ref)) return layout;
 
   const known = new Set<SessionKey>();
   const collect = (nodes: LayoutNode[]) => {
