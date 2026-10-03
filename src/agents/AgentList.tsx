@@ -7,6 +7,7 @@ import { ActionsProvider, useActions } from "../sidebar/actions";
 import { CloseIcon, PlusIcon } from "../ui/icons";
 import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
+import { useTabReorder } from "./tabDnd";
 
 export interface PaneEntry {
   pane: PaneView;
@@ -45,7 +46,10 @@ const BADGE:Record<AgentStatus, string> = {
   unknown: "—",
 };
 
-function AgentCard({ machineId, session, entry }: { machineId: string; session: string; entry: PaneEntry }) {
+type Reorder = ReturnType<typeof useTabReorder>;
+
+/** `tabRow` when this card is its Tab's whole row (a single-pane Tab), so it is also the drop target. */
+function AgentCard({ machineId, session, entry, reorder, tabRow }: { machineId: string; session: string; entry: PaneEntry; reorder: Reorder; tabRow?: boolean }) {
   const { pane, workspace: ws, tab } = entry;
   const ref = { machine_id: machineId, session, pane_id: pane.pane_id };
   const active = useApp((s) => s.selected !== null && paneKey(s.selected) === paneKey(ref));
@@ -65,8 +69,12 @@ function AgentCard({ machineId, session, entry }: { machineId: string; session: 
       ]
     : [];
   return (
-    <li className="agent-card-item">
+    <li
+      className={"agent-card-item" + (tabRow ? reorder.indicatorClass(tab.tab_id) : "")}
+      {...(tabRow ? reorder.target(tab.tab_id) : {})}
+    >
       <button
+        {...reorder.source(tab.tab_id)}
         className={"agent-card" + (active ? " active" : "") + (pane.status === "blocked" ? " blocked" : "")}
         onClick={() => select(ref)}
         onContextMenu={(e) => a?.menu(e, items)}
@@ -93,6 +101,10 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   const ref = { machine_id: machineId, session, workspace_id: ws.workspace_id };
   const folder = useFolder(ref);
   const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
+  const reorder = useTabReorder(
+    ws.tabs.map((t) => t.tab_id),
+    (tab_id, insert_index) => a?.guard(call("tab.move", { tab_id, insert_index })),
+  );
   const items: MenuItem[] = a
     ? [
         { label: "New agent…", onSelect: () => a.newAgent(machineId, session, ws) },
@@ -114,15 +126,21 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
         <ul className="agent-cards">
           {tabRuns(entries).map((run) =>
             run.length > 1 ? (
-              <li key={run[0].tab.tab_id} role="group" aria-label={`Tab ${run[0].tab.label}`} className="tab-group">
+              <li
+                key={run[0].tab.tab_id}
+                role="group"
+                aria-label={`Tab ${run[0].tab.label}`}
+                className={"tab-group" + reorder.indicatorClass(run[0].tab.tab_id)}
+                {...reorder.target(run[0].tab.tab_id)}
+              >
                 <ul className="agent-cards">
                   {run.map((e) => (
-                    <AgentCard key={e.pane.pane_id} machineId={machineId} session={session} entry={e} />
+                    <AgentCard key={e.pane.pane_id} machineId={machineId} session={session} entry={e} reorder={reorder} />
                   ))}
                 </ul>
               </li>
             ) : (
-              <AgentCard key={run[0].pane.pane_id} machineId={machineId} session={session} entry={run[0]} />
+              <AgentCard key={run[0].pane.pane_id} machineId={machineId} session={session} entry={run[0]} reorder={reorder} tabRow />
             ),
           )}
         </ul>
