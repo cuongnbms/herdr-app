@@ -6,6 +6,10 @@ import { paneKey, type ImageRef, type PaneRef } from "../lib/types";
 /** The Pane whose Transcript is on screen; images fetch their bytes through it. */
 export const ChatPaneContext = createContext<PaneRef | null>(null);
 
+/** Counts the times the Pane's Transcript was (re)opened, i.e. each `reset` event: an image that
+ * failed while the tail was gone (Machine reconnect, a chosen Transcript) asks again then. */
+export const ChatOpenContext = createContext(0);
+
 type Entry = { promise: Promise<string>; url: string | null };
 const cache = new Map<string, Entry>();
 
@@ -46,6 +50,8 @@ export function useChatImage(pane: PaneRef, image: ImageRef): { url: string | nu
   const k = `${paneKey(pane)}\n${image.ref}`;
   const peek = cache.get(k)?.url ?? null;
   const [state, setState] = useState<{ k: string; url: string | null; failed: boolean }>({ k, url: peek, failed: false });
+  // A failure left the cache, so a reopen fetches it again; a loaded image is served from the cache.
+  const opened = useContext(ChatOpenContext);
   useEffect(() => {
     let live = true;
     load(pane, image).promise.then(
@@ -55,7 +61,7 @@ export function useChatImage(pane: PaneRef, image: ImageRef): { url: string | nu
     return () => {
       live = false;
     };
-  }, [k, image.media_type]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [k, image.media_type, opened]); // eslint-disable-line react-hooks/exhaustive-deps
   // A state left over from another image is ignored; an already-resolved entry shows at once.
   return state.k === k ? state : { url: peek, failed: false };
 }

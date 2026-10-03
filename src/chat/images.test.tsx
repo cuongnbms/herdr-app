@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ chatImage: vi.fn() }));
 import { chatImage } from "../lib/ipc";
-import { ChatImages, ChatPaneContext, revokeChatImages } from "./images";
+import { ChatImages, ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
 const key = "devtuf/default/w1:p1";
@@ -77,6 +77,26 @@ describe("ChatImages", () => {
     vi.mocked(chatImage).mockReturnValue(new Promise(() => {}));
     const { container } = show();
     expect(container.querySelector(".chat-image")).toBeTruthy();
+  });
+
+  it("retries a failed image when the chat is reopened, but not a loaded one", async () => {
+    const gif = { ref: "u2:0", media_type: "image/gif" };
+    vi.mocked(chatImage).mockImplementation((_, ref) =>
+      ref === gif.ref ? Promise.reject({ code: "not_found", message: "no open chat for this pane" }) : Promise.resolve(new Uint8Array([1]).buffer));
+    const ui = (opened: number) => (
+      <ChatPaneContext.Provider value={pane}>
+        <ChatOpenContext.Provider value={opened}><ChatImages images={[png, gif]} /></ChatOpenContext.Provider>
+      </ChatPaneContext.Provider>
+    );
+    const { rerender } = render(ui(0));
+    expect(await screen.findByText("Image unavailable")).toBeTruthy();
+    await screen.findByRole("img", { name: "Image 1" });
+    vi.mocked(chatImage).mockClear().mockResolvedValue(new Uint8Array([2]).buffer);
+    rerender(ui(1));
+    expect(await screen.findByRole("img", { name: "Image 2" })).toBeTruthy();
+    expect(screen.queryByText("Image unavailable")).toBeNull();
+    expect(chatImage).toHaveBeenCalledTimes(1);
+    expect(chatImage).toHaveBeenCalledWith(pane, gif.ref);
   });
 
   it("renders the viewer under document.body", async () => {
