@@ -2,6 +2,7 @@ import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
 import { setFolder } from "../workspaces/folder";
 import { AgentChoice } from "../agents/AgentChoice";
+import { startAgent } from "../agents/startAgent";
 
 type Agent = "none" | "claude" | "pi";
 const AGENTS: readonly Agent[] = ["none", "claude", "pi"];
@@ -40,7 +41,7 @@ export function NewWorkspaceDialog({
         setFolder({ machine_id: machineId, session, workspace_id: workspaceId }, cwd);
       }
       if (agent !== "none") {
-        await herdrCall(machineId, session, "agent.start", {
+        await startAgent((m, p) => herdrCall(machineId, session, m, p), {
           name: agent,
           kind: agent,
           pane_id: res.root_pane.pane_id,

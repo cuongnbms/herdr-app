@@ -4,6 +4,7 @@ import type { WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { getFolder, setFolder, suggestFolder } from "../workspaces/folder";
 import { AgentChoice } from "./AgentChoice";
+import { startAgent } from "./startAgent";
 
 type Agent = "claude" | "pi";
 const AGENTS: readonly Agent[] = ["claude", "pi"];
@@ -43,7 +44,7 @@ export function NewAgentDialog({
       });
       const paneId = res.root_pane.pane_id;
       useApp.getState().select({ machine_id: machineId, session, pane_id: paneId });
-      await herdrCall(machineId, session, "agent.start", { name: agent, kind: agent, pane_id: paneId });
+      await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: paneId });
     } catch (e) {
       onError((e as { message?: string }).message ?? String(e));
     }
