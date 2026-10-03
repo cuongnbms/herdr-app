@@ -190,6 +190,8 @@ struct Machine {
     state: MachineState,
     error: Option<AppError>,
     info: Option<MachineInfo>,
+    /// herdr found by the last probe; outlives `info` so a reconnect skips discovery.
+    last_herdr: Option<String>,
     transport: Option<Arc<dyn Transport>>,
     /// The ssh Machine's one transport (its forward cache lives here); created lazily.
     ssh: Option<Arc<SshTransport>>,
@@ -213,6 +215,7 @@ impl Machine {
             state: MachineState::Disconnected,
             error: None,
             info: None,
+            last_herdr: None,
             transport: None,
             ssh: None,
             sessions: Vec::new(),
@@ -749,10 +752,15 @@ impl MachineManager {
         if !self.set_state_at(id, epoch, MachineState::Probing, None) {
             return Err(Fail::Stale);
         }
-        let out = exec(transport.as_ref(), &probe_argv(cfg.herdr_path.as_deref())).await?;
+        let known = self.with_machine(id, |m| m.last_herdr.clone())?;
+        let argv = probe_argv(cfg.herdr_path.as_deref(), known.as_deref());
+        let out = exec(transport.as_ref(), &argv).await?;
         self.current(id, epoch)?;
         let info = parse_probe(&out.stdout)?;
-        self.with_machine(id, |m| m.info = Some(info))?;
+        self.with_machine(id, |m| {
+            m.last_herdr = Some(info.herdr.clone());
+            m.info = Some(info);
+        })?;
         let list = self.list_sessions(id).await?;
         self.current(id, epoch)?;
         Ok(self.apply_list(id, list)?)
@@ -837,7 +845,10 @@ impl MachineManager {
     /// Explicit disconnect: forgets the Sessions and, for ssh, ends the master.
     /// Bumps the epoch first, so a connect in flight abandons itself (and its master).
     pub async fn disconnect(&self, id: &str) {
-        let _ = self.with_machine(id, |m| m.epoch += 1);
+        let _ = self.with_machine(id, |m| {
+            m.epoch += 1;
+            m.last_herdr = None;
+        });
         self.cancel_reconnect(id);
         self.teardown(id, true, true).await;
         if let Some(c) = self.chats.lock().unwrap().clone() {
@@ -1035,7 +1046,10 @@ impl MachineManager {
         let herdr_path = herdr_path
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty());
-        self.with_machine(id, |m| m.cfg.herdr_path = herdr_path)?;
+        self.with_machine(id, |m| {
+            m.cfg.herdr_path = herdr_path;
+            m.last_herdr = None;
+        })?;
         self.persist()?;
         // A failed connect is reported through the Machine's state and error.
         let _ = self.connect(id).await;
@@ -2379,6 +2393,65 @@ mod tests {
         async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> {
             Ok(())
         }
+    }
+
+    /// Fake transport with no sessions that records the last two argv elements of each
+    /// probe: the herdr override and the known path.
+    struct ProbeLog {
+        log: Arc<Mutex<Vec<(String, String)>>>,
+    }
+    #[async_trait::async_trait]
+    impl Transport for ProbeLog {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let out = if argv.join(" ").contains("HERDR=") {
+                let n = argv.len();
+                self.log
+                    .lock()
+                    .unwrap()
+                    .push((argv[n - 2].clone(), argv[n - 1].clone()));
+                "HOME=/h\nHERDR=/h/herdr\nPI_DIR=/p\nVERSION=0.9.3\nPROTOCOL=22\n"
+            } else {
+                "name status directory socket\n"
+            };
+            vec!["printf".into(), "%s".into(), out.into()]
+        }
+        async fn local_socket(&self, s: &SessionEntry) -> AppResult<PathBuf> {
+            Ok(s.socket.clone().into())
+        }
+        async fn release_socket(&self, _: &SessionEntry) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_probe_passes_the_known_path() {
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let l = log.clone();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(ProbeLog { log: l.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.add("box".into(), None, None).await.unwrap();
+        mgr.connect("box").await.unwrap();
+        mgr.connect("box").await.unwrap(); // a reconnect
+        mgr.update("box", Some("/o/herdr".into())).await.unwrap();
+        mgr.update("box", None).await.unwrap(); // the override removed
+        mgr.connect("box").await.unwrap();
+        mgr.disconnect("box").await;
+        mgr.connect("box").await.unwrap();
+        let p = |o: &str, k: &str| (o.to_string(), k.to_string());
+        assert_eq!(
+            *log.lock().unwrap(),
+            [
+                p("", ""),
+                p("", "/h/herdr"),
+                p("/o/herdr", ""),
+                p("", ""),
+                p("", "/h/herdr"),
+                p("", ""),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -176,6 +176,7 @@ pub fn herdr_argv(info: &MachineInfo, session: &str, args: &[&str]) -> Vec<Strin
 }
 
 pub const PROBE_SCRIPT: &str = r#"H="$1"
+[ -n "$H" ] || { [ -x "$2" ] && H="$2"; }
 [ -n "$H" ] || H=$("${SHELL:-sh}" -lc 'command -v herdr' 2>/dev/null | tail -n 1)
 case "$H" in /*) ;; *) H=$("${SHELL:-sh}" -ic 'command -v herdr' 2>/dev/null </dev/null | tail -n 1) ;; esac
 case "$H" in /*) ;; *) H="" ;; esac
@@ -192,13 +193,16 @@ echo "VERSION=$("$H" --version 2>/dev/null | sed 's/^herdr //')"
 echo "PROTOCOL=$("$H" api schema 2>/dev/null | sed -n 's/^protocol: //p')"
 "#;
 
-pub fn probe_argv(herdr_override: Option<&str>) -> Vec<String> {
+/// `$1` is the user's override (used as is); `$2` the herdr found last time, used while
+/// still executable so a reconnect skips the login-shell discovery.
+pub fn probe_argv(herdr_override: Option<&str>, known: Option<&str>) -> Vec<String> {
     vec![
         "sh".into(),
         "-c".into(),
         PROBE_SCRIPT.into(),
         "probe".into(),
         herdr_override.unwrap_or("").into(),
+        known.unwrap_or("").into(),
     ]
 }
 
@@ -560,9 +564,73 @@ broken               running  /only-one-path\n";
         std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(verify_private_dir(d.path()).is_ok());
     }
+    /// A fake `herdr` in a fresh temp dir; the dir is also the probe's `$HOME`.
+    fn fake_herdr() -> (tempfile::TempDir, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path().join("herdr");
+        std::fs::write(
+            &h,
+            "#!/bin/sh\ncase \"$1\" in\n--version) echo 'herdr 0.9.9' ;;\napi) echo 'protocol: 22' ;;\nsession) printf 'name status directory socket\\ndefault running /d /d/herdr.sock\\n' ;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&h, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let h = h.to_string_lossy().into_owned();
+        (d, h)
+    }
+
+    /// Run the probe as the transports do, without a usable login shell.
+    fn run_probe(
+        home: &std::path::Path,
+        herdr_override: Option<&str>,
+        known: Option<&str>,
+    ) -> String {
+        let argv = probe_argv(herdr_override, known);
+        let out = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("SHELL", "/bin/false")
+            .env("HOME", home)
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    fn line<'a>(out: &'a str, key: &str) -> &'a str {
+        out.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .unwrap_or_else(|| panic!("no {key} in {out}"))
+    }
+
+    #[test]
+    fn probe_uses_the_known_path_without_a_login_shell() {
+        let (d, h) = fake_herdr();
+        let out = run_probe(d.path(), None, Some(&h));
+        assert_eq!(line(&out, "HERDR="), h);
+        assert_eq!(line(&out, "PROTOCOL="), "22");
+    }
+
+    #[test]
+    fn probe_falls_back_to_discovery_for_a_stale_known_path() {
+        let d = tempfile::tempdir().unwrap();
+        let out = run_probe(d.path(), None, Some("/nonexistent/herdr"));
+        assert_ne!(line(&out, "HERDR="), "/nonexistent/herdr");
+    }
+
+    #[test]
+    fn probe_keeps_the_override_over_the_known_path() {
+        let (d, h) = fake_herdr();
+        let out = run_probe(d.path(), Some("/nonexistent/x"), Some(&h));
+        assert_eq!(line(&out, "HERDR="), "/nonexistent/x");
+        assert_eq!(
+            parse_probe(&out).unwrap_err().code,
+            "incompatible",
+            "a broken override is reported, not replaced"
+        );
+    }
+
     #[tokio::test]
     async fn local_exec_runs_probe() {
-        let out = exec(&local::LocalTransport, &probe_argv(None))
+        let out = exec(&local::LocalTransport, &probe_argv(None, None))
             .await
             .unwrap();
         assert_eq!(out.status, 0);
