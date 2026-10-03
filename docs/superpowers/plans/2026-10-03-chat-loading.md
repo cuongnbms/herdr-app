@@ -17,7 +17,7 @@
 - Conventional Commits, scope `chat` (e.g. `fix(chat): ...`, `perf(chat): ...`). No attribution lines.
 - Values the spec pins: `RESET_ITEMS` 500 (unchanged); first-Reset inactivity limit `QUIET` = 2 s (1 s under `cfg!(test)`, longer than the old 300 ms cap so tests tell them apart); webview trims to 1000 items once over 2000; tool-input strings capped at 64 KiB; Mermaid cache 50 entries; 3 parked tails; parked image budget 16 MiB; open image budget 64 MiB (`IMAGE_BUDGET`, unchanged).
 - Truncation marker is the existing `"\n… (truncated)"` for both results and inputs, made by one shared helper.
-- Never lock the image store while parsing; never hold `ChatManager`'s map lock while locking a tail's image store or dropping a `TailHandle`.
+- Never lock the image store while parsing. Never hold `ChatManager`'s map lock while locking a tail's image store (which `attach`/`detach` do) or while dropping a `TailHandle`: take the entry out of the map, act on it, then put it back.
 - Do not commit anything under `tmp/` or the benchmark harness (`src-tauri/src/transcript/bench.rs`).
 - Comments follow the repo: short, saying why, not what.
 
@@ -227,7 +227,7 @@ git commit -m "perf(chat): keep the newest 1000 items while following the bottom
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_image_store_is_free_while_a_line_parses() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("t.jsonl");
@@ -253,7 +253,7 @@ git commit -m "perf(chat): keep the newest 1000 items while following the bottom
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `cargo test --lib transcript::tail::tests::the_image_store_is_free_while_a_line_parses`
-Expected: FAIL, "the store is locked during the parse". The test may also hang the current-thread runtime: today the parse blocks the tokio worker, which is the bug.
+Expected: FAIL on the `try_lock` assertion ("the store is locked during the parse").
 
 - [ ] **Step 3: Implement**
 
@@ -288,7 +288,7 @@ In `mod.rs` tests:
 ```rust
     #[test]
     fn caps_each_input_string_and_keeps_every_field() {
-        let big = "é".repeat(40 * 1024); // 80 KiB, a 2-byte char straddles the cut
+        let big = format!("a{}", "é".repeat(40 * 1024)); // 80 KiB; the leading byte makes a 2-byte char straddle the cut
         let v = serde_json::json!({"file_path": "/a", "edits": [{"old_string": big, "new_string": "x"}], "n": 3});
         let out = cap_input(v);
         let old = out["edits"][0]["old_string"].as_str().unwrap();
