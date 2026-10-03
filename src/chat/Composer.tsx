@@ -11,6 +11,7 @@ import { modelLabel } from "./modelLabel";
 import { ModelMenu } from "./ModelMenu";
 import { useClaudeSuggestion } from "./useClaudeSuggestion";
 import { useCompletions } from "./useCompletions";
+import { IMAGE_EXTS } from "../terminal/imagePaste";
 
 // Key names verified against herdr's key parser (pane.send_keys accepts esc, ctrl+c,
 // shift+tab, enter, up, down, 1; unknown names fail with `invalid_key`).
@@ -19,13 +20,6 @@ const KEYS: { label: string; key: string }[] = [
   { label: "Ctrl+C", key: "ctrl+c" },
   { label: "⇧Tab", key: "shift+tab" },
 ];
-
-const IMAGE_EXTS: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-};
 
 // Agents whose TUI turns a bracketed-pasted image path into an image attachment (as when
 // pasting a screenshot in a terminal); `agent.prompt` frames text and path as one paste,

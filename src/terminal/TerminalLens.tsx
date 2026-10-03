@@ -5,13 +5,15 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useReducer, useRef } from "react";
 import "../fonts/fonts.css";
-import { attachKeyString, termAck, termOpen, termRelease, termResize, termWrite } from "../lib/ipc";
+import { attachKeyString, imageSaveTemp, termAck, termOpen, termRelease, termResize, termWrite } from "../lib/ipc";
 import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
+import { showToast } from "../ui/Toast";
 import { Banner } from "./Banner";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
+import { createImagePaste } from "./imagePaste";
 import { createKeyHandler } from "./keyHandler";
 import { disposesOnEvent, endsOpen, initialLensState, lensReducer } from "./lensState";
 import { applyOsc52 } from "./osc52";
@@ -170,7 +172,19 @@ export function TerminalLens({ pane, terminalId }: Props) {
     });
     ro.observe(container);
 
+    // Capture phase: ahead of xterm's own paste handler on its textarea.
+    const onPaste = createImagePaste(
+      (bytes, ext) => imageSaveTemp(pane.machine_id, bytes, ext),
+      (text) => term.paste(text),
+      (message) => {
+        console.error(message);
+        showToast(message);
+      },
+    );
+    container.addEventListener("paste", onPaste, true);
+
     return () => {
+      container.removeEventListener("paste", onPaste, true);
       live = false;
       output.setVisible(false);
       cancelAnimationFrame(frame);
