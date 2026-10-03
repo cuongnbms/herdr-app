@@ -5,6 +5,8 @@ import type { MachineView, WorkspaceView } from "../lib/types";
 import { useApp } from "../store/app";
 import { ConfirmDialog, ContextMenu, TextDialog } from "./ContextMenu";
 import type { MenuItem } from "./ContextMenu";
+import { MoveToGroupDialog } from "./MoveToGroupDialog";
+import type { SessionKey } from "./groups";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
 import { NewAgentDialog } from "../agents/NewAgentDialog";
 import { setFolder } from "../workspaces/folder";
@@ -18,6 +20,7 @@ type Dialog =
   | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
   | { kind: "agent"; machineId: string; session: string; workspace: WorkspaceView }
   | { kind: "folder"; ref: WorkspaceRef; initial: string }
+  | { kind: "move"; key: SessionKey }
   | { kind: "add-machine" }
   | { kind: "connect"; machine: MachineView };
 
@@ -28,6 +31,7 @@ export interface Actions {
   newWorkspace: (machineId: string, session: string) => void;
   newAgent: (machineId: string, session: string, workspace: WorkspaceView) => void;
   changeFolder: (ref: WorkspaceRef, initial: string) => void;
+  moveToGroup: (key: SessionKey) => void;
   addMachine: () => void;
   connect: (machine: MachineView) => void;
   guard: (run: () => Promise<unknown>) => void;
@@ -73,6 +77,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       confirm: (title, message, confirmLabel, run) => setDialog({ kind: "confirm", title, message, confirmLabel, run }),
       newAgent: (machineId, session, workspace) => setDialog({ kind: "agent", machineId, session, workspace }),
       changeFolder: (ref, initial) => setDialog({ kind: "folder", ref, initial }),
+      moveToGroup: (key) => setDialog({ kind: "move", key }),
       addMachine: () => setDialog({ kind: "add-machine" }),
       // Batch first (key or agent); the dialog opens only when that needs the user.
       connect: (machine) => {
@@ -120,6 +125,8 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       <TextDialog title="Workspace folder" initial={dialog.initial} submitLabel="Save" onClose={closeDialog}
         onSubmit={(v) => v.trim() && setFolder(dialog.ref, v)} />
     );
+  } else if (dialog?.kind === "move") {
+    modal = <MoveToGroupDialog sessionKey={dialog.key} onClose={closeDialog} />;
   } else if (dialog?.kind === "add-machine") {
     modal = (
       <AddMachineDialog
