@@ -43,10 +43,8 @@ export function NewWorkspaceDialog({
         setFolder({ machine_id: machineId, session, workspace_id: workspaceId }, cwd);
       }
       if (agent !== "none") {
-        // Claude has no transcript until the first prompt: open on the Terminal rather than fall back to it.
-        if (agent === "claude") {
-          useApp.getState().setLensOverride(paneKey({ machine_id: machineId, session, pane_id: res.root_pane.pane_id }), "terminal");
-        }
+        // A new agent opens on the Terminal; useTranscriptProbe turns it to Chat once its transcript exists.
+        useApp.getState().setLensOverride(paneKey({ machine_id: machineId, session, pane_id: res.root_pane.pane_id }), "terminal");
         await startAgent((m, p) => herdrCall(machineId, session, m, p), {
           name: agent,
           kind: agent,

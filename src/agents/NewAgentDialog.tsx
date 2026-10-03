@@ -49,9 +49,8 @@ export function NewAgentDialog({
         focus: false,
       });
       const pane = { machine_id: machineId, session, pane_id: res.root_pane.pane_id };
-      // Claude writes its transcript only after the first prompt: show the Terminal from the start
-      // instead of a Chat lens that falls back to it a few seconds later.
-      if (agent === "claude") useApp.getState().setLensOverride(paneKey(pane), "terminal");
+      // A new agent opens on the Terminal; useTranscriptProbe turns it to Chat once its transcript exists.
+      if (agent !== "shell") useApp.getState().setLensOverride(paneKey(pane), "terminal");
       useApp.getState().select(pane);
       if (agent === "shell") return;
       await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: pane.pane_id });

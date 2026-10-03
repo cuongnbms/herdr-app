@@ -36,4 +36,13 @@ describe("NewWorkspaceDialog", () => {
     expect(onError).not.toHaveBeenCalled();
     expect(useApp.getState().lensOverride[paneKey({ machine_id: "local", session: "default", pane_id: "w8:p1" })]).toBe("terminal");
   });
+  it("opens a new pi agent on the Terminal too", async () => {
+    vi.mocked(herdrCall).mockImplementation((_m, _s, method) =>
+      Promise.resolve(method === "workspace.create" ? { type: "workspace_created", workspace: { workspace_id: "w9" }, root_pane: { pane_id: "w9:p1" } } : undefined));
+    render(<NewWorkspaceDialog machineId="local" session="default" defaultCwd="/srv/api" onClose={() => {}} onError={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: "pi" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "pi", kind: "pi", pane_id: "w9:p1" }));
+    expect(useApp.getState().lensOverride[paneKey({ machine_id: "local", session: "default", pane_id: "w9:p1" })]).toBe("terminal");
+  });
 });
