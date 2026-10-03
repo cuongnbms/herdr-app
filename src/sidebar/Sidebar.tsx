@@ -185,9 +185,8 @@ function MachineNode({ machine }: { machine: MachineView }) {
 function AddMachine() {
   const a = useActions();
   return (
-    <button className="add-machine" onClick={() => a?.addMachine()}>
+    <button className="section-action" aria-label="Add machine" title="Add machine" onClick={() => a?.addMachine()}>
       <PlusIcon />
-      Add machine
     </button>
   );
 }
@@ -262,18 +261,16 @@ export const Sidebar = memo(function Sidebar() {
       <DragContext.Provider value={dragState}>
         <DashboardEntry />
         {(bookmarks.length > 0 || (draggingSession && emptyBookmarksShown)) && <BookmarksSection bookmarks={bookmarks} />}
-        <section aria-label="Groups">
-          <GroupTree />
-        </section>
-        <section aria-label="Machines">
-          <SectionHeader id="machines" label="Machines" />
+        <GroupTree />
+        <section aria-label="Machines" className="machines-section">
+          <div className="section-head">
+            <SectionHeader id="machines" label="Machines" />
+            <AddMachine />
+          </div>
           {machinesOpen && (
-            <>
-              <ul className="tree">
-                {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
-              </ul>
-              <AddMachine />
-            </>
+            <ul className="tree">
+              {order.map((id) => machines[id] && <MachineNode key={id} machine={machines[id]} />)}
+            </ul>
           )}
         </section>
       </DragContext.Provider>

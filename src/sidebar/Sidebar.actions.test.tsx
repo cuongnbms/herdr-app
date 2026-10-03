@@ -113,7 +113,9 @@ describe("Sidebar machine actions", () => {
   it("creates, renames, nests and deletes groups", async () => {
     set([local]);
     render(<Sidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "New group" }));
+    expect(screen.queryByRole("button", { name: "New group" })).toBeNull();
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Groups" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
     fireEvent.change(screen.getByRole("textbox", { name: "New group" }), { target: { value: " Work " } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await screen.findByText("Work");

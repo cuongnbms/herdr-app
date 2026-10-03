@@ -7,7 +7,7 @@ import type { RGroup, RNode } from "./groups";
 import { Chevron, SessionRow } from "./Sidebar";
 import { useDragState } from "./dnd";
 import { indicatorClass, useTreeEndDnd, useTreeRowDnd } from "./useRowDnd";
-import { FolderIcon, PlusIcon } from "../ui/icons";
+import { FolderIcon } from "../ui/icons";
 
 function GroupRow({ group }: { group: RGroup }) {
   const key = `group:${group.id}`;
@@ -69,19 +69,22 @@ export function GroupTree() {
   const a = useActions();
   const endDnd = useTreeEndDnd();
   const drag = useDragState();
+  // Right-click on the area's empty space; a row's own menu (which prevents default) wins.
+  const onMenu = (e: MouseEvent) => {
+    if (e.defaultPrevented) return;
+    a?.menu(e, [
+      {
+        label: "New group",
+        onSelect: () => a.rename("New group", "", async (label) => useLayout.getState().update((l) => addGroup(l, null, label).layout), "Create"),
+      },
+    ]);
+  };
   return (
-    <>
+    <section aria-label="Groups" className="groups-section" onContextMenu={onMenu}>
       <ul className="tree">
         {tree.map((n) => (n.kind === "group" ? <GroupRow key={n.id} group={n} /> : <SessionRow key={n.key} node={n} />))}
       </ul>
       <div className={"tree-end" + indicatorClass(drag, "tree-end")} {...endDnd} />
-      <button
-        className="add-group"
-        onClick={() => a?.rename("New group", "", async (label) => useLayout.getState().update((l) => addGroup(l, null, label).layout), "Create")}
-      >
-        <PlusIcon />
-        New group
-      </button>
-    </>
+    </section>
   );
 }
