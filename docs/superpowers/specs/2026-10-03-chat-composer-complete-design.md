@@ -112,7 +112,8 @@ JSON is skipped silently. No working directory: `complete_files` returns an empt
   - `activeTrigger(text, caret, { skills })` returns
     `{ kind: "slash" | "file", prefix?: "$", query, start, end } | null`.
     `/` triggers only at the start of a line with a query of `[\p{L}\p{N}_:-]*`;
-    `@` anywhere, followed by at least one non-space character; `$` (only with `skills`)
+    `@` at the start of a word (line start or after whitespace), followed by at least one
+    non-space character; `$` (only with `skills`)
     at the start of a word.
   - `applyCompletion(text, trigger, replacement)` returns `{ text, caret }`.
 - `src/chat/complete.ts`:
