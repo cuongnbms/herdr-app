@@ -475,7 +475,16 @@ kbd {
 .settings-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .settings-head .icon-btn { font-size: 18px; line-height: 1; }
 .settings-body .note { margin: 0; }
-.settings-foot { display: flex; justify-content: flex-end; margin-top: auto; }
+.settings-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
+.quick-reply-list { display: flex; flex-direction: column; gap: 6px; }
+.quick-reply-row { display: flex; align-items: center; gap: 6px; }
+.quick-reply-row input {
+  flex: 1; min-width: 0; height: 28px; padding: 0 8px; box-sizing: border-box;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface-0); color: var(--fg);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.quick-reply-row input:focus { border-color: var(--accent); box-shadow: var(--ring); }
+.quick-reply-row input::placeholder { color: var(--fg-3); }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .setting-row > span { white-space: nowrap; }
 .font-picker { position: relative; width: 220px; min-width: 0; }
@@ -660,6 +669,7 @@ kbd {
 }
 .chat-tool-row:hover { background: var(--hover); }
 .chat-tool-row .chev { width: 12px; height: 12px; }
+.chat-tool-icon { flex: none; width: 14px; height: 14px; color: var(--fg-3); }
 .chat-tool-name { font-weight: 700; color: var(--link); flex: none; }
 .chat-tool-sep { color: var(--fg-3); flex: none; }
 .chat-tool-summary { color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -720,6 +730,14 @@ kbd {
   background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-lg);
   box-shadow: var(--shadow-composer); transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
+.composer-quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.composer-quick-reply {
+  flex: none; max-width: 220px; height: 24px; padding: 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-1); color: var(--fg-2);
+  font-size: 12px; cursor: pointer; transition: background var(--t-fast), color var(--t-fast);
+}
+.composer-quick-reply:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.composer-quick-reply:disabled { opacity: 0.5; cursor: default; }
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent), var(--shadow-composer); }
 .composer-menu-wrap {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 5; display: flex; flex-direction: column;

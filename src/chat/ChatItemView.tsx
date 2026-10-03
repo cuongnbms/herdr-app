@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import type { ChatItem } from "../lib/types";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
+import { toolIcon } from "./toolIcon";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
 function codeLanguage(node: unknown): string | null {
@@ -93,12 +94,14 @@ function Checklist({ rows }: { rows: ChecklistRow[] }) {
 function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_call" }>; result?: ToolResult }) {
   const [open, setOpen] = useState(false);
   const input = (item.input ?? {}) as Record<string, unknown>;
+  const ToolIcon = toolIcon(item.name);
   const todos = checklist(item.input);
   if (todos) {
     return (
       <div className="chat-tool">
         <button className="chat-tool-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <ChevronIcon className={"icon chev" + (open ? " open" : "")} />
+          <ToolIcon className="icon chat-tool-icon" />
           <span className="chat-tool-name">{item.name}</span>
           <span className="chat-tool-sep"> · </span>
           <span className="chat-tool-summary">{checklistSummary(todos)}</span>
@@ -118,6 +121,7 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
     <div className="chat-tool">
       <button className="chat-tool-row" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ChevronIcon className={"icon chev" + (open ? " open" : "")} />
+        <ToolIcon className="icon chat-tool-icon" />
         <span className="chat-tool-name">{item.name}</span>
         <span className="chat-tool-sep"> · </span>
         <span className="chat-tool-summary">{item.input_summary}</span>

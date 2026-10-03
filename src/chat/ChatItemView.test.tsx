@@ -14,6 +14,11 @@ describe("ChatItemView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Bash/ }));
     expect(screen.getByText("a.txt")).toBeTruthy();
   });
+  it("marks a tool row with the tool's icon", () => {
+    render(<ChatItemView item={{ kind: "tool_call", id: "t1", name: "Bash", input_summary: "ls", input: { command: "ls" } }} />);
+    const row = screen.getByRole("button", { name: /Bash/ });
+    expect(row.querySelector("svg.chat-tool-icon")).toBeTruthy();
+  });
   it("renders Edit as a diff", () => {
     render(<ChatItemView item={{ kind: "tool_call", id: "t2", name: "Edit", input_summary: "/a.rs", input: { file_path: "/a.rs", old_string: "let a = 1;", new_string: "let a = 2;" } }} />);
     fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
