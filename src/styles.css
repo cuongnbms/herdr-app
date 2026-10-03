@@ -366,7 +366,11 @@ kbd {
   transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .agent-card:hover { background: var(--hover); }
-.agent-card.active { background: var(--surface-3); border-color: var(--line-2); box-shadow: var(--shadow-card); }
+.agent-card.active { background: var(--accent-soft); border-color: var(--accent-line); }
+.agent-card.active::before {
+  content: ""; position: absolute; left: -1px; top: 7px; bottom: 7px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent);
+}
 .agent-card.blocked {
   background: color-mix(in srgb, var(--amber) 7%, transparent);
   border-color: color-mix(in srgb, var(--amber) 35%, transparent);
