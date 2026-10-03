@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+vi.mock("../lib/ipc", () => ({ chatImage: vi.fn().mockResolvedValue(new Uint8Array([1]).buffer) }));
 import { ChatItemView } from "./ChatItemView";
+import { ChatPaneContext } from "./images";
 describe("ChatItemView", () => {
   it("renders markdown", () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Hello **world**" }} />);
@@ -56,5 +58,13 @@ describe("ChatItemView", () => {
   it("highlights fenced code", () => {
     const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: "```js\nconst a = 1;\n```" }} />);
     expect(container.querySelector("code.hljs, code .hljs-keyword")).toBeTruthy();
+  });
+  it("shows a user turn's images above an image-only bubble", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    render(<ChatPaneContext.Provider value={{ machine_id: "m", session: "s", pane_id: "p" }}>
+      <ChatItemView item={{ kind: "user", text: "", images: [{ ref: "u:0", media_type: "image/png" }] }} copy />
+    </ChatPaneContext.Provider>);
+    expect(await screen.findByRole("img", { name: "Image 1" })).toBeTruthy();
+    expect(document.querySelector(".chat-bubble")).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import { onOpenFailure, openChat, watchMachine } from "./chatSession";
 import { PromptPanel } from "./PromptPanel";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
+import { ChatPaneContext, revokeChatImages } from "./images";
 import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
 import { Composer } from "./Composer";
@@ -94,6 +95,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       generation.current++;
       handle.current?.close();
       handle.current = null;
+      revokeChatImages(key);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -170,6 +172,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
 
   const err = openError ?? state.error;
   return (
+    <ChatPaneContext.Provider value={pane}>
     <div className="chat-lens">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
@@ -212,5 +215,6 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       <WorkingIndicator status={view.status} />
       {view.status === "blocked" ? <PromptPanel pane={pane} view={view} /> : <Composer pane={pane} agent={view.agent} status={view.status} meta={state.meta} />}
     </div>
+    </ChatPaneContext.Provider>
   );
 }
