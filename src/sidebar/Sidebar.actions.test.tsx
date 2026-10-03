@@ -6,7 +6,7 @@ vi.mock("../lib/ipc", () => ({
   sessionStart: vi.fn().mockRejectedValue({ code: "timeout", message: "session x did not start within 10s" }),
   sessionDelete: vi.fn().mockResolvedValue(undefined),
 }));
-import { machineConnect, sessionDelete, sessionsRefresh } from "../lib/ipc";
+import { machineConnect, sessionDelete, sessionsRefresh, sessionStart } from "../lib/ipc";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { useApp } from "../store/app";
 import { EMPTY_LAYOUT, sessionKey, useLayout } from "./groups";
@@ -42,6 +42,23 @@ describe("Sidebar machine actions", () => {
     fireEvent.contextMenu(within(screen.getByRole("region", { name: "Machines" })).getByText("local"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Refresh sessions" }));
     expect(sessionsRefresh).toHaveBeenCalledWith("local");
+  });
+  it("creates a new session from the machine context menu", () => {
+    set([local]);
+    render(<Sidebar />);
+    fireEvent.contextMenu(within(screen.getByRole("region", { name: "Machines" })).getByText("local"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "x" } });
+    expect(screen.getByText(/already exists/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "api" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(sessionStart).toHaveBeenCalledWith("local", "api");
+  });
+  it("offers no New session on a machine that is not connected", () => {
+    set([{ ...local, id: "box", label: "box", kind: "ssh", state: "disconnected", sessions: [] }]);
+    render(<Sidebar />);
+    fireEvent.contextMenu(within(screen.getByRole("region", { name: "Machines" })).getByText("box"));
+    expect(screen.queryByRole("menuitem", { name: "New session…" })).toBeNull();
   });
   it("shows a failed inline Start", async () => {
     set([local]);
