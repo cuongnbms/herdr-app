@@ -1,13 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ sessionStart: vi.fn().mockResolvedValue(undefined) }));
 import { sessionStart } from "../lib/ipc";
 import { useApp } from "../store/app";
+import { EMPTY_LAYOUT, sessionKey, useLayout } from "./groups";
 import { Sidebar } from "./Sidebar";
 import type { MachineView } from "../lib/types";
 
 const m: MachineView = {
-  id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "working",
+  id: "box", label: "devtuf", kind: "ssh", state: "connected", error: null, version: "0.9.3", status: "working",
   sessions: [
     { name: "default", running: true, status: "working", error: null, workspaces: [
       { workspace_id: "w1", label: "herdr-app", number: 1, status: "working", tabs: [
@@ -16,31 +17,62 @@ const m: MachineView = {
     { name: "ai-radar", running: false, status: "unknown", error: null, workspaces: [] },
   ],
 };
+const row = (name: string) => screen.getAllByText(name)[0].closest("button")!;
+const work = { kind: "group" as const, id: "g1", label: "Work", children: [{ kind: "session" as const, key: sessionKey("box", "default") }] };
 
 describe("Sidebar", () => {
-  beforeEach(() => { useApp.setState({ machines: { local: m }, order: ["local"], selected: null, viewed: null, expanded: {} }); });
-  it("shows machines and sessions only; workspaces and panes live in the Agents column", () => {
+  beforeEach(() => {
+    useApp.setState({ machines: { box: m }, order: ["box"], selected: null, viewed: null, expanded: {} });
+    useLayout.setState({ layout: EMPTY_LAYOUT });
+  });
+  it("shows sessions with a machine badge and machines without sessions", () => {
     render(<Sidebar />);
-    expect(screen.getByText("local")).toBeTruthy();
-    expect(screen.getByText("default")).toBeTruthy();
+    expect(row("default").querySelector(".badge-label")?.textContent).toBe("devtuf");
+    expect(row("default").querySelector(".badge [aria-label='status working']")).toBeTruthy();
+    expect(row("ai-radar").querySelector(".badge .dot")).toBeNull();
+    const machines = screen.getByRole("region", { name: "Machines" });
+    expect(within(machines).getByText("devtuf")).toBeTruthy();
+    expect(within(machines).queryByText("default")).toBeNull();
     expect(screen.queryByText("herdr-app")).toBeNull();
-    expect(screen.queryByText("Rewrite")).toBeNull();
-    expect(screen.getAllByLabelText("status working").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("region", { name: "Bookmarks" })).toBeNull();
+  });
+  it("renders sessions inside their group and collapses it", () => {
+    useLayout.setState({ layout: { tree: [work], bookmarks: [] } });
+    render(<Sidebar />);
+    expect(row("default").closest("li.group")?.textContent).toContain("Work");
+    fireEvent.click(screen.getByText("Work"));
+    expect(useApp.getState().expanded["group:g1"]).toBe(false);
+    expect(screen.queryByText("default")).toBeNull();
+    expect(screen.getByText("ai-radar")).toBeTruthy();
+  });
+  it("shows a bookmarked session in Bookmarks and in its place", () => {
+    useLayout.setState({ layout: { tree: [work], bookmarks: [sessionKey("box", "default")] } });
+    render(<Sidebar />);
+    const bm = screen.getByRole("region", { name: "Bookmarks" });
+    expect(within(bm).getByText("default")).toBeTruthy();
+    expect(screen.getAllByText("default")).toHaveLength(2);
   });
   it("views a running session on click", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("default"));
-    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "default" });
-    expect(screen.getByText("default").closest("button")?.className).toContain("active");
+    expect(useApp.getState().viewed).toEqual({ machine_id: "box", session: "default" });
+    expect(row("default").className).toContain("active");
   });
   it("selecting a pane views its session", () => {
-    useApp.getState().select({ machine_id: "local", session: "default", pane_id: "w1:p1" });
-    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "default" });
+    useApp.getState().select({ machine_id: "box", session: "default", pane_id: "w1:p1" });
+    expect(useApp.getState().viewed).toEqual({ machine_id: "box", session: "default" });
   });
   it("starts and views a stopped session on click", async () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("ai-radar"));
-    expect(sessionStart).toHaveBeenCalledWith("local", "ai-radar");
-    await waitFor(() => expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "ai-radar" }));
+    expect(sessionStart).toHaveBeenCalledWith("box", "ai-radar");
+    await waitFor(() => expect(useApp.getState().viewed).toEqual({ machine_id: "box", session: "ai-radar" }));
+  });
+  it("ignores clicks on sessions of a machine that is not connected", () => {
+    useApp.setState({ machines: { box: { ...m, state: "disconnected" } } });
+    render(<Sidebar />);
+    fireEvent.click(screen.getByText("default"));
+    expect(useApp.getState().viewed).toBeNull();
+    expect(row("default").getAttribute("aria-disabled")).toBe("true");
   });
 });
