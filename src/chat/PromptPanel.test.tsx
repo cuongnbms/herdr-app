@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
 import type { PaneView } from "../lib/types";
-import { PromptPanel } from "./PromptPanel";
+import { PROMPT_POLL_MS, PromptPanel } from "./PromptPanel";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
 const view = { status: "blocked", agent: "claude", title: "claude" } as PaneView;
@@ -65,6 +65,26 @@ describe("PromptPanel", () => {
         ["agent.send_keys", { target: "w1:p1", keys: ["enter"] }],
       ]),
     );
+  });
+
+  it("does not re-read the screen while the window is hidden", async () => {
+    vi.useFakeTimers();
+    let hidden = true;
+    const spy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+    try {
+      render(<PromptPanel pane={pane} view={view} />);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      const reads = () => vi.mocked(herdrCall).mock.calls.filter(([, , m]) => m === "pane.read").length;
+      const atMount = reads();
+      await act(() => vi.advanceTimersByTimeAsync(PROMPT_POLL_MS * 3));
+      expect(reads()).toBe(atMount);
+      hidden = false;
+      await act(() => vi.advanceTimersByTimeAsync(PROMPT_POLL_MS));
+      expect(reads()).toBe(atMount + 1);
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("reads the screen as plain text for the card", async () => {
