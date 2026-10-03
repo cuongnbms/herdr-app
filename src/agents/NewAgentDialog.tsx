@@ -71,7 +71,7 @@ export function NewAgentDialog({
         {stored === null && (
           <label>
             Folder
-            <input autoFocus value={folder} placeholder="/path/to/project" onChange={(e) => setFolderValue(e.target.value)} />
+            <input spellCheck={false} autoCorrect="off" autoCapitalize="off" autoFocus value={folder} placeholder="/path/to/project" onChange={(e) => setFolderValue(e.target.value)} />
           </label>
         )}
         <div className="actions">

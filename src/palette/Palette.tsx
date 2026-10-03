@@ -29,6 +29,9 @@ export function Palette({ onClose }: { onClose: () => void }) {
         <div className="palette-search">
           <SearchIcon />
           <input
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             ref={input}
             value={query}
             placeholder="Jump to pane…"

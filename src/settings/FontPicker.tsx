@@ -45,6 +45,8 @@ export function FontPicker({ label, value, onChange }: { label: string; value: s
           aria-autocomplete="list"
           aria-activedescendant={open && shown[hi] ? `${listId}-${hi}` : undefined}
           spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           value={open ? query : value}
           placeholder={value}
           style={{ fontFamily: open ? undefined : `"${value}", monospace` }}

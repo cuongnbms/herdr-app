@@ -141,6 +141,9 @@ function ChatSettings() {
         {q.replies.map((r, i) => (
           <div key={i} className="quick-reply-row">
             <input
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
               aria-label={`Quick reply ${i + 1}`}
               value={r}
               maxLength={QUICK_REPLY_MAX_CHARS}

@@ -104,6 +104,9 @@ export function TextDialog({
   return (
     <Modal title={title} onClose={onClose}>
       <input
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         ref={ref}
         autoFocus
         value={value}

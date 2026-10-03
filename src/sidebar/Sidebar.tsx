@@ -115,6 +115,9 @@ function HerdrPathEdit({ machineId }: { machineId: string }) {
   return (
     <div className="machine-actions">
       <input
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
         aria-label="herdr path"
         value={path}
         placeholder="/path/to/herdr"

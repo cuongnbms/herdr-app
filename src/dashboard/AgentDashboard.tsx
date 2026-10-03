@@ -164,6 +164,9 @@ export function AgentDashboard() {
         <label className="dash-search">
           <SearchIcon />
           <input
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             ref={search}
             placeholder="Search agent, workspace, session, or machine…"
             value={query}

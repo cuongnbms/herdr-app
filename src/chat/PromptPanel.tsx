@@ -163,6 +163,9 @@ function PromptCard({
       {prompt.custom_option_index !== null && (
         <div className="prompt-custom">
           <input
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             value={custom}
             disabled={pending}
             aria-label="Your own answer"

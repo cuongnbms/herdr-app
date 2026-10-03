@@ -73,11 +73,11 @@ export function NewWorkspaceDialog({
         <h3>New workspace in {session}</h3>
         <label>
           Directory
-          <input autoFocus value={cwd} placeholder="/path/to/project" onChange={(e) => setCwd(e.target.value)} />
+          <input spellCheck={false} autoCorrect="off" autoCapitalize="off" autoFocus value={cwd} placeholder="/path/to/project" onChange={(e) => setCwd(e.target.value)} />
         </label>
         <label>
           Label (optional)
-          <input value={label} onChange={(e) => setLabel(e.target.value)} />
+          <input spellCheck={false} autoCorrect="off" autoCapitalize="off" value={label} onChange={(e) => setLabel(e.target.value)} />
         </label>
         <AgentChoice options={AGENTS} value={agent} onChange={setAgent} />
         <div className="actions">

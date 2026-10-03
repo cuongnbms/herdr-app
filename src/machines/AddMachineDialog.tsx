@@ -50,6 +50,9 @@ export function AddMachineDialog({ onClose, onNeedAuth }: { onClose: () => void;
       <label>
         SSH target
         <input
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           autoFocus
           value={target}
           placeholder="user@host or an ssh config alias"
@@ -68,13 +71,13 @@ export function AddMachineDialog({ onClose, onNeedAuth }: { onClose: () => void;
       )}
       <label>
         Label (optional)
-        <input value={label} onChange={(e) => setLabel(e.target.value)} />
+        <input spellCheck={false} autoCorrect="off" autoCapitalize="off" value={label} onChange={(e) => setLabel(e.target.value)} />
       </label>
       <details>
         <summary>Advanced</summary>
         <label>
           herdr path
-          <input value={herdrPath} placeholder="found automatically" onChange={(e) => setHerdrPath(e.target.value)} />
+          <input spellCheck={false} autoCorrect="off" autoCapitalize="off" value={herdrPath} placeholder="found automatically" onChange={(e) => setHerdrPath(e.target.value)} />
         </label>
       </details>
       {error && <p className="error dialog-error" role="alert">{error}</p>}
