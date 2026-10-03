@@ -41,6 +41,7 @@ pub const ALLOWED_METHODS: &[&str] = &[
     "tab.create",
     "tab.close",
     "tab.rename",
+    "tab.move",
     "workspace.create",
     "workspace.close",
     "workspace.rename",
