@@ -676,8 +676,8 @@ kbd {
 .chat-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 /* The outline rail takes the right margin of a wide chat, so the column sits nearer the middle. */
 .chat-outline {
-  flex: none; width: 240px; min-height: 0; display: flex; flex-direction: column;
-  border-left: 1px solid var(--line); padding: 16px 0 16px 0; box-sizing: border-box;
+  flex: none; width: clamp(200px, 18cqw, 280px); min-height: 0; display: flex; flex-direction: column;
+  padding: 16px 0; box-sizing: border-box;
 }
 @container (max-width: 1100px) { .chat-outline { display: none; } }
 .chat-outline-head { padding: 0 16px 8px; color: var(--fg-3); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
