@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { herdrCall } from "../lib/ipc";
-import { paneKey, type WorkspaceView } from "../lib/types";
-import { useApp } from "../store/app";
+import type { WorkspaceView } from "../lib/types";
 import { getFolder, setFolder, suggestFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
-import { startAgent } from "./startAgent";
-
-type Agent = "claude" | "pi" | "shell";
-const AGENTS: readonly Agent[] = ["claude", "pi", "shell"];
-
-interface TabCreated {
-  root_pane: { pane_id: string };
-}
+import { AGENTS, openAgentTab, type Agent } from "./openAgentTab";
 
 export function NewAgentDialog({
   machineId,
@@ -42,18 +33,7 @@ export function NewAgentDialog({
     onClose();
     try {
       if (stored === null) setFolder(ref, cwd);
-      const res = await herdrCall<TabCreated>(machineId, session, "tab.create", {
-        workspace_id: workspace.workspace_id,
-        cwd,
-        label: agent,
-        focus: false,
-      });
-      const pane = { machine_id: machineId, session, pane_id: res.root_pane.pane_id };
-      // A new agent opens on the Terminal; useTranscriptProbe turns it to Chat once its transcript exists.
-      if (agent !== "shell") useApp.getState().setLensOverride(paneKey(pane), "terminal");
-      useApp.getState().select(pane);
-      if (agent === "shell") return;
-      await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: pane.pane_id });
+      await openAgentTab(machineId, session, workspace.workspace_id, agent, cwd);
     } catch (e) {
       onError((e as { message?: string }).message ?? String(e));
     }

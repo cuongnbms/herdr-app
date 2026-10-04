@@ -12,6 +12,7 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
+import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
 import { syncSeenToHerdr } from "./store/seenSync";
@@ -141,6 +142,13 @@ export default function App() {
       if (e.metaKey && e.key.toLowerCase() === "k" && !useApp.getState().dashboardOpen) {
         e.preventDefault();
         setPaletteOpen((o) => !o);
+      }
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        if (e.repeat) return;
+        openNewTabHere().catch((err: unknown) =>
+          showToast(`Could not open a new tab: ${(err as { message?: string } | null)?.message ?? String(err)}`),
+        );
       }
     };
     window.addEventListener("keydown", onKey);

@@ -3,6 +3,8 @@ import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
 import { useLensSettings } from "./lens";
+import { useNewTab } from "./newTab";
+import { AGENTS } from "../agents/openAgentTab";
 import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
@@ -39,8 +41,26 @@ function Stepper({
 
 function GeneralSettings() {
   const [notify, setNotify] = useState(notificationsEnabled);
+  const newTab = useNewTab();
   return (
     <>
+      <div className="setting-row">
+        <span id="new-tab-label">New tab (⌘T) opens</span>
+        <div
+          className="seg seg-n"
+          role="group"
+          aria-labelledby="new-tab-label"
+          style={{ "--n": AGENTS.length, "--i": AGENTS.indexOf(newTab.agent) } as CSSProperties}
+        >
+          <span className="seg-thumb" />
+          {AGENTS.map((a) => (
+            <button key={a} aria-pressed={a === newTab.agent} onClick={() => newTab.setAgent(a)}>
+              {a}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="note">⌘T opens a tab next to the selected pane, in its workspace's folder.</p>
       <label className="switch">
         <span>Notifications</span>
         <input
