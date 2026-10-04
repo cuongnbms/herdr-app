@@ -34,7 +34,7 @@ pub fn session_view(name: &str, snap: &Snapshot) -> SessionView {
                                 .into_iter()
                                 .find_map(|s| s.clone().filter(|s| !s.is_empty()))
                                 .or_else(|| agent.clone())
-                                .unwrap_or_else(|| p.pane_id.clone());
+                                .unwrap_or_else(|| "Terminal".to_string());
                             PaneView {
                                 pane_id: p.pane_id.clone(),
                                 terminal_id: p.terminal_id.clone(),
@@ -156,7 +156,10 @@ mod tests {
             w2.tabs.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(),
             ["1", "logs"]
         );
-        assert_eq!(w2.tabs[1].panes[0].title, "w2:p2");
+        assert_eq!(
+            w2.tabs[1].panes[0].title, "Terminal",
+            "a plain shell with no label or terminal title"
+        );
         assert_eq!(w2.status, AgentStatus::Idle);
     }
     #[test]
