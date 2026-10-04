@@ -18,9 +18,13 @@ export function outline(rows: ChatRow[]): OutlineEntry[] {
   });
 }
 
-/** The entry being read: the last turn starting at or above the top visible row (-1: no turns). */
-export function currentEntry(entries: OutlineEntry[], topRow: number): number {
+/**
+ * The entry being read: the last turn starting at or above the top visible row (-1: no turns).
+ * `atEnd`: scrolled to the bottom, where a short last turn is in view but cannot reach the top.
+ */
+export function currentEntry(entries: OutlineEntry[], topRow: number, atEnd = false): number {
   if (entries.length === 0) return -1;
+  if (atEnd) return entries.length - 1;
   let at = 0;
   for (let i = 0; i < entries.length && entries[i].row <= topRow; i++) at = i;
   return at;

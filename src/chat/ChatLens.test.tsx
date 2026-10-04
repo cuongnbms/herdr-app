@@ -126,4 +126,20 @@ describe("ChatLens", () => {
     const nav = screen.getByRole("navigation", { name: "Conversation outline" });
     expect([...nav.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["fix the header", "now the footer"]);
   });
+
+  it("keeps the turn picked in the outline lit until the transcript is scrolled", () => {
+    const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+    const items = [
+      { kind: "user", text: "fix the header" },
+      { kind: "assistant_text", markdown: "done" },
+      { kind: "user", text: "now the footer" },
+    ];
+    act(() => channels[channels.length - 1].onmessage({ type: "reset", items, total: items.length }));
+    const lit = () => screen.getByRole("navigation", { name: "Conversation outline" }).querySelector("[aria-current]")?.textContent;
+    expect(lit()).toBe("fix the header");
+    fireEvent.click(screen.getByRole("button", { name: "now the footer" }));
+    expect(lit()).toBe("now the footer");
+    fireEvent.wheel(container.querySelector(".chat-scroll")!);
+    expect(lit()).toBe("fix the header");
+  });
 });

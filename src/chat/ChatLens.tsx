@@ -49,6 +49,9 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const [loaded, setLoaded] = useState(false);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
+  // The turn picked in the rail stays lit until the user scrolls: near the end it may not reach
+  // the top, and the end rule would light the last turn instead.
+  const [picked, setPicked] = useState<string | null>(null);
   // The Pane `/model` was sent to: pi waits on its picker idle, so the picker is looked for then.
   const [modelFor, setModelFor] = useState<string | null>(null);
   const picker = usePiModelPicker(pane, modelFor === key && view.agent === "pi", () => setModelFor(null));
@@ -108,6 +111,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
 
   useEffect(() => {
     setChosenOpen(new Map());
+    setPicked(null);
     setLocated(null);
     open(rememberedTranscript(key));
     return () => {
@@ -213,13 +217,18 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     setUnseen(false);
   };
 
-  // The outline rail follows the first row in view.
+  // The outline rail follows the first row in view, or the last turn once at the end.
   const entries = useMemo(() => outline(rows), [rows]);
   const scrollTop = virt.scrollOffset ?? 0;
   const topRow = virt.getVirtualItems().find((v) => v.end > scrollTop)?.index ?? 0;
+  const atEnd = rows.length > 0 && scrollTop + (virt.scrollRect?.height ?? 0) >= virt.getTotalSize() - 40;
+  const pickedAt = picked === null ? -1 : entries.findIndex((e) => e.key === picked);
+  const current = pickedAt >= 0 ? pickedAt : currentEntry(entries, topRow, atEnd);
+  const unpick = () => setPicked(null);
   // Off the bottom before the scroll lands: an append meanwhile would pull the view back down.
   const jumpTo = (row: number) => {
     atBottom.current = false;
+    setPicked(entries.find((e) => e.row === row)?.key ?? null);
     virt.scrollToIndex(row, { align: "start" });
   };
 
@@ -233,7 +242,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
       {!loaded && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
-      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
+      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} onWheel={unpick} onPointerDown={unpick} onKeyDown={unpick}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {
             const row = rows[v.index];
@@ -276,7 +285,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} />
       )}
     </div>
-    <ChatOutline entries={entries} current={currentEntry(entries, topRow)} onJump={jumpTo} />
+    <ChatOutline entries={entries} current={current} onJump={jumpTo} />
     </div>
     </ChatOpenContext.Provider>
     </ChatPaneContext.Provider>

@@ -46,6 +46,11 @@ describe("currentEntry", () => {
     expect(currentEntry(entries, 20)).toBe(2);
   });
 
+  it("is the last turn once scrolled to the end, though it cannot reach the top", () => {
+    expect(currentEntry(entries, 5, true)).toBe(2);
+    expect(currentEntry([], 5, true)).toBe(-1);
+  });
+
   it("is the first turn when the view starts above it, and none without turns", () => {
     expect(currentEntry([{ row: 2, key: "a", label: "a" }], 0)).toBe(0);
     expect(currentEntry([], 3)).toBe(-1);
