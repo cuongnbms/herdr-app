@@ -62,6 +62,13 @@ function createEntry(key: string) {
   };
 }
 
+/** True when the user is typing somewhere else (a dialog, the palette, a composer): showing a terminal must not take that focus. */
+function typingElsewhere(): boolean {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el.classList.contains("xterm-helper-textarea")) return false;
+  return el.isContentEditable || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+}
+
 function toBytes(buf: unknown): Uint8Array | null {
   if (buf instanceof ArrayBuffer) return new Uint8Array(buf);
   if (buf instanceof Uint8Array) return buf;
@@ -97,6 +104,8 @@ export function TerminalLens({ pane, terminalId }: Props) {
     } catch {
       /* container not measurable yet */
     }
+    // A shown terminal takes the keyboard, so a new agent's prompt is ready to type into.
+    if (!typingElsewhere()) term.focus();
     // Only the mounted terminal writes straight through; cached ones batch until shown again.
     output.setVisible(true);
     let frame = 0;

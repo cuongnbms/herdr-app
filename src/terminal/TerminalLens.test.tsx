@@ -39,6 +39,10 @@ class FakeTerminal {
   }
   clearTextureAtlas() {}
   refresh() {}
+  focused = 0;
+  focus() {
+    this.focused++;
+  }
   dispose() {
     this.disposed = true;
   }
@@ -173,5 +177,28 @@ describe("TerminalLens xterm lifetime", () => {
     await settle();
     expect(terms).toHaveLength(1);
     expect(size()).toBe(baseline + 1);
+  });
+});
+
+describe("TerminalLens focus", () => {
+  it("focuses the xterm when it is shown and nothing else has focus", () => {
+    mount();
+    expect(terms[0].focused).toBe(1);
+  });
+
+  it("focuses the xterm when a list button had focus", () => {
+    const button = document.body.appendChild(document.createElement("button"));
+    button.focus();
+    mount();
+    expect(terms[0].focused).toBe(1);
+    button.remove();
+  });
+
+  it("leaves focus in a text field that has it", () => {
+    const input = document.body.appendChild(document.createElement("input"));
+    input.focus();
+    mount();
+    expect(terms[0].focused).toBe(0);
+    input.remove();
   });
 });
