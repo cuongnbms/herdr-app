@@ -33,7 +33,13 @@ export const Header = memo(function Header() {
       <div className={"seg" + (lens === "chat" ? " seg-right" : "")} role="group" aria-label="Lens">
         <span className="seg-thumb" aria-hidden="true" />
         {(["terminal", "chat"] as Lens[]).map((l) => (
-          <button key={l} aria-pressed={lens === l} onClick={() => setLens(key, l)}>
+          <button
+            key={l}
+            aria-pressed={lens === l}
+            disabled={l === "chat" && !sel.pane.agent}
+            title={l === "chat" && !sel.pane.agent ? "No agent in this pane" : undefined}
+            onClick={() => setLens(key, l)}
+          >
             {l === "terminal" ? <TerminalIcon /> : <ChatIcon />}
             {l === "terminal" ? "Terminal" : "Chat"}
           </button>

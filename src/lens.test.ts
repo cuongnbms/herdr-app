@@ -8,5 +8,6 @@ describe("defaultLens", () => {
     expect(defaultLens(p("codex"), undefined)).toBe("terminal");
     expect(defaultLens(p(null), undefined)).toBe("terminal");
     expect(defaultLens(p("claude"), "terminal")).toBe("terminal");
+    expect(defaultLens(p(null), "chat")).toBe("terminal");
   });
 });

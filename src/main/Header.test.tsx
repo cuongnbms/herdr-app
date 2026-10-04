@@ -25,4 +25,13 @@ describe("Header", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chat" }));
     expect(useApp.getState().lens["local/default/w1:p1"]).toBe("chat");
   });
+  it("disables Chat when the pane has no agent", () => {
+    const pane = m.sessions[0].workspaces[0].tabs[0].panes[0];
+    useApp.setState({ machines: { local: { ...m, sessions: [{ ...m.sessions[0], workspaces: [{ ...m.sessions[0].workspaces[0],
+      tabs: [{ ...m.sessions[0].workspaces[0].tabs[0], panes: [{ ...pane, agent: null }] }] }] }] } } });
+    render(<Header />);
+    const chat = screen.getByRole("button", { name: "Chat" }) as HTMLButtonElement;
+    expect(chat.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Terminal" }).getAttribute("aria-pressed")).toBe("true");
+  });
 });

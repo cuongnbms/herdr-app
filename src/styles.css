@@ -459,6 +459,8 @@ kbd {
 .seg button .icon { width: 14px; height: 14px; }
 .seg button:hover { color: var(--fg-2); }
 .seg button[aria-pressed="true"] { color: var(--fg); }
+.seg button:disabled { opacity: 0.4; cursor: default; }
+.seg button:disabled:hover { color: var(--fg-3); }
 /* N options: set --n (count) and --i (selected index) inline. */
 .seg-n { grid-template-columns: repeat(var(--n), 1fr); }
 .seg-n .seg-thumb { width: calc((100% - 4px) / var(--n)); transform: translateX(calc(var(--i) * 100%)); }
