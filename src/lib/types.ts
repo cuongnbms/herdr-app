@@ -104,6 +104,14 @@ export type ChatEvent =
   | ({ type: "meta" } & ChatMeta)
   | { type: "error"; error: AppError };
 
+/** The folder and git branch a Pane works in (`branch` is null outside a repository). */
+export interface GitStatus {
+  folder: string;
+  path: string;
+  branch: string | null;
+  dirty: boolean;
+}
+
 export interface Located {
   agent: string;
   path: string;

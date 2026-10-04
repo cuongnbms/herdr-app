@@ -5,6 +5,7 @@ vi.mock("../lib/ipc", () => ({
   imageSaveTemp: vi.fn(),
   completeCommands: vi.fn(),
   completeFiles: vi.fn(),
+  chatGitStatus: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("./complete", async (orig) => {
   const m = await orig<typeof import("./complete")>();

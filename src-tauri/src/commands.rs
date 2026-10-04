@@ -3,6 +3,7 @@ use crate::{
     attach::{attach_argv, AttachEvent, AttachKey, AttachManager, Sink},
     complete::{self, SlashCommand},
     error::AppError,
+    git::{self, GitStatus},
     herdr::rpc,
     layout::LayoutStore,
     machines::MachineManager,
@@ -483,6 +484,27 @@ pub async fn complete_files(
     let info = mgr.info(&pane_ref.machine_id)?;
     let transport = mgr.transport(&pane_ref.machine_id)?;
     complete::list_files(&*transport, &info.home, &cwd).await
+}
+
+/// The folder and git branch of a Pane's working directory, read on the Pane's Machine.
+#[tauri::command]
+pub async fn chat_git_status(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+) -> Result<Option<GitStatus>, AppError> {
+    let pane_ref = PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    };
+    let pane = find_pane(&mgr, &pane_ref)?;
+    let Some(cwd) = foreground_cwd(&mgr, &pane_ref).await.or(pane.cwd) else {
+        return Ok(None);
+    };
+    let transport = mgr.transport(&pane_ref.machine_id)?;
+    git::git_status(&*transport, &cwd).await.map(Some)
 }
 
 #[tauri::command]

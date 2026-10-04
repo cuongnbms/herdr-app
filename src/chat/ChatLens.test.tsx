@@ -8,6 +8,7 @@ vi.mock("../lib/ipc", () => ({
   imageSaveTemp: vi.fn(),
   completeCommands: vi.fn().mockResolvedValue([]),
   completeFiles: vi.fn().mockResolvedValue([]),
+  chatGitStatus: vi.fn().mockResolvedValue(null),
 }));
 let opened: Promise<unknown> = new Promise(() => {});
 const channels = vi.hoisted(() => [] as { onmessage: (ev: unknown) => void }[]);

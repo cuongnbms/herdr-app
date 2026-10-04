@@ -87,6 +87,14 @@ export const FilterIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="
 export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z" /></Icon>
 );
+export const GitBranchIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <line x1="6" y1="3" x2="6" y2="15" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <path d="M18 9a9 9 0 0 1-9 9" />
+  </Icon>
+);
 export const RefreshIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <path d="M21 12a9 9 0 1 1-2.64-6.36" />

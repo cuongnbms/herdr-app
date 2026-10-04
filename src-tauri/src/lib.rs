@@ -3,6 +3,7 @@ pub mod commands;
 pub mod complete;
 pub mod error;
 pub mod fonts;
+pub mod git;
 pub mod herdr;
 pub mod layout;
 pub mod machines;
@@ -61,6 +62,7 @@ pub fn run() {
             commands::chat_close,
             commands::complete_commands,
             commands::complete_files,
+            commands::chat_git_status,
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,

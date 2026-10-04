@@ -4,6 +4,7 @@ import { paneKey, type AgentStatus, type ChatMeta, type PaneRef, type SlashComma
 import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
+import { GitStatusLine } from "./GitStatus";
 import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
 import { readDraft, useDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
@@ -317,6 +318,7 @@ export function Composer({
               </button>
             ))}
           </div>
+          <GitStatusLine pane={pane} status={status} />
           {agent === "claude" ? (
             // Claude takes /model and /effort with an argument; only while idle, since a turn would
             // queue them and a blocked prompt would take the text as its answer.
