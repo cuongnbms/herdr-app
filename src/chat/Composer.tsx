@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { herdrCall, imageSaveTemp } from "../lib/ipc";
 import { paneKey, type AgentStatus, type ChatMeta, type PaneRef, type SlashCommand } from "../lib/types";
 import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
@@ -78,6 +78,28 @@ export function Composer({
   const live = useRef<Attachment[]>([]);
   live.current = images;
   useEffect(() => () => live.current.forEach(revoke), []);
+
+  // The box grows with its text up to the CSS max-height, then scrolls; `rows` sets its floor.
+  const fit = () => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useLayoutEffect(fit, [text]);
+  // A narrower pane wraps the same text onto more lines.
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
   // Sending clears the text and a failed send restores it, so the draft follows both.

@@ -870,6 +870,7 @@ kbd {
 .composer-menu-note { padding: 10px; color: var(--fg-3); }
 .composer textarea {
   resize: none; padding: 0; border: 0; background: none; color: var(--fg); font-size: var(--chat-font); line-height: 1.5;
+  max-height: calc(1.5em * 12); overflow-y: auto;
 }
 .composer textarea:focus-visible { box-shadow: none; }
 .composer-bar { display: flex; align-items: center; gap: 8px; }
