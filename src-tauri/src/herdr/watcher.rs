@@ -34,7 +34,8 @@ pub enum WatchEvent {
     Closed(AppError),
 }
 
-pub const STRUCTURAL: [&str; 13] = [
+/// Events answered with a refetch. `pane.updated` carries renames and terminal title changes.
+pub const STRUCTURAL: [&str; 14] = [
     "workspace.created",
     "workspace.updated",
     "workspace.closed",
@@ -48,6 +49,7 @@ pub const STRUCTURAL: [&str; 13] = [
     "pane.closed",
     "pane.exited",
     "pane.moved",
+    "pane.updated",
 ];
 
 fn closed() -> AppError {
@@ -138,8 +140,7 @@ fn handle_event(
 }
 
 /// Runs until the stream ends, a call fails, or the receiver is dropped (`None`).
-/// `refetch` asks for a fresh snapshot (e.g. after a rename, which herdr reports only as
-/// `pane.updated`, a type we do not subscribe to).
+/// `refetch` asks for a fresh snapshot (e.g. right after a rename, ahead of its `pane.updated`).
 async fn run(
     name: &str,
     socket: &Path,
@@ -423,6 +424,36 @@ mod tests {
             f.calls_of("events.subscribe"),
             2,
             "pane set changed → resubscribe"
+        );
+    }
+    #[tokio::test]
+    async fn pane_updated_refetches_the_new_terminal_title() {
+        let snap = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!("../../tests/fixtures/snapshot.json"))
+                .unwrap(),
+        ));
+        let (f, mut rx, _h) = started(snap.clone()).await;
+        let subs = f
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(m, _)| m == "events.subscribe")
+            .unwrap()
+            .1
+            .clone();
+        assert!(subs["subscriptions"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"type":"pane.updated"})));
+        snap.lock().unwrap()["panes"][0]["terminal_title_stripped"] = json!("Fix the sidebar");
+        // herdr names the frame `pane_updated` and sends the whole pane.
+        f.emit(
+            "pane_updated",
+            json!({"type":"pane_updated","pane":{"pane_id":"w1:p1","terminal_title_stripped":"Fix the sidebar"}}),
+        );
+        assert!(
+            matches!(next(&mut rx).await, WatchEvent::View(v) if v.workspaces[0].tabs[0].panes[0].title == "Fix the sidebar")
         );
     }
     #[tokio::test]

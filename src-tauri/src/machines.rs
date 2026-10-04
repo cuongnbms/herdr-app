@@ -1323,7 +1323,7 @@ impl MachineManager {
         let socket = self.transport(pane_machine)?.local_socket(&entry).await?;
         let result = rpc::call(&socket, method, params).await?;
         if method == "pane.rename" {
-            // herdr reports a rename only as `pane.updated`, which the watcher does not subscribe to.
+            // Refetch now rather than wait for the rename's `pane.updated` event.
             let _ = self.with_machine(pane_machine, |m| {
                 if let Some(s) = m.sessions.iter().find(|s| s.entry.name == session) {
                     s.refetch.notify_one();
