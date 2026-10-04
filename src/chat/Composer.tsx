@@ -218,15 +218,24 @@ export function Composer({
 
   return (
     <div className="composer">
-      {showQuick && quickReplies.length > 0 && (
-        <div className="composer-quick" role="group" aria-label="Quick replies">
-          {quickReplies.map((reply, i) => (
-            <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
-              {reply}
+      <div className="composer-top">
+        {showQuick && quickReplies.length > 0 && (
+          <div className="composer-quick" role="group" aria-label="Quick replies">
+            {quickReplies.map((reply, i) => (
+              <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
+                {reply}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="composer-keys">
+          {KEYS.map((k) => (
+            <button key={k.key} className="keycap" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: [k.key] }).catch(() => {})}>
+              {k.label}
             </button>
           ))}
         </div>
-      )}
+      </div>
       <div className="composer-box">
         {images.length > 0 && (
           <div className="composer-images">
@@ -311,13 +320,6 @@ export function Composer({
           }}
         />
         <div className="composer-bar">
-          <div className="composer-keys">
-            {KEYS.map((k) => (
-              <button key={k.key} className="keycap" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: [k.key] }).catch(() => {})}>
-                {k.label}
-              </button>
-            ))}
-          </div>
           <GitStatusLine pane={pane} status={status} />
           {agent === "claude" ? (
             // Claude takes /model and /effort with an argument; only while idle, since a turn would
