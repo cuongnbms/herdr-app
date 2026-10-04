@@ -703,3 +703,121 @@ Escape/Ctrl+C to cancel
     expect(parseInteractivePrompt("pi", `${narrow}Some later output\nand more\n`)).toBeNull();
   });
 });
+
+describe("Claude's question with previews", () => {
+  // live-captured from Claude Code 2.1.289: an AskUserQuestion whose options carry a `preview`
+  // draws the options on the left, the cursor option's preview boxed on the right, a notes line
+  // under it, and "Chat about this" unnumbered under a rule; there is no "Type something." row
+  const previews = [
+    ["+------------------------+", "| o  09:00  Started      |", "| |                      |", "| o  09:15  Building     |", "+------------------------+"],
+    ["+------------------------+", "| ( Started   09:00 )    |", "|                        |", "| ( Done      09:30 )    |", "+------------------------+"],
+    ["+------------------------+", "| Started         09:00  |", "| Done            09:30  |", "|                        |", "+------------------------+"],
+  ];
+  const rows = ["Timeline (Recommended)", "Card / pill", "Minimal"];
+  const screenWith = ({ cursor = 0, chat = false, notes = "press n to add notes", editing = false } = {}) => {
+    const box = previews[cursor]!.map((line) => `│ ${line}               │`);
+    const right = ["┌──────────────────────────────────────────┐", ...box, "└──────────────────────────────────────────┘"];
+    const left = rows.map((label, i) => `${i === cursor ? "❯" : " "} ${i + 1}. ${label}`);
+    const body = right.map((line, i) => `${(left[i] ?? "").padEnd(34)}${line}`);
+    return `
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Style
+
+Pick a layout?
+
+${body.join("\n")}
+
+                                  Notes: ${notes}
+
+────────────────────────────────────────────────────────────────────────────────
+${chat ? "❯" : " "} Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · ${editing ? "ctrl+g to edit in Nvim · " : ""}Esc to cancel
+`;
+  };
+
+  test("reads the options from the left column and the cursor option's preview from the box", () => {
+    const prompt = parseInteractivePrompt("claude", screenWith({ cursor: 1 }));
+    expect(prompt).toMatchObject({
+      kind: "question", title: "Style", question: "Pick a layout?", multi_select: false,
+      custom_option_index: null, chat: true, notes: true,
+      preview: { index: 1, text: previews[1]!.join("\n") },
+    });
+    expect(labels(prompt)).toEqual(rows);
+    expect(prompt?.options.every((option) => option.description === null)).toBe(true);
+  });
+
+  test("keeps its id while the cursor, and so the preview, moves", () => {
+    const first = parseInteractivePrompt("claude", screenWith({ cursor: 0 }));
+    expect(parseInteractivePrompt("claude", screenWith({ cursor: 2 }))?.id).toBe(first?.id);
+    expect(parseInteractivePrompt("claude", screenWith({ chat: true }))?.id).toBe(first?.id);
+  });
+
+  test("answers an option, with notes, and Chat about this, from the cursor", () => {
+    const prompt = parseInteractivePrompt("claude", screenWith({ cursor: 1 }))!;
+    expect(answerKeys(prompt, { option_index: 2 })).toEqual([{ keys: ["down"] }, { keys: ["enter"] }]);
+    expect(answerKeys(prompt, { option_index: 0, notes: " keep it\nshort " })).toEqual([
+      { keys: ["up"] }, { keys: ["n"] }, { text: "keep it short" }, { keys: ["enter"] },
+    ]);
+    expect(answerKeys(prompt, { chat: true })).toEqual([{ keys: ["down"] }, { keys: ["down"] }, { keys: ["enter"] }]);
+    expect(() => answerKeys(prompt, { custom_text: "x" })).toThrow();
+  });
+
+  test("counts from Chat about this when the cursor is there, though the last option keeps its ❯", () => {
+    const prompt = parseInteractivePrompt("claude", screenWith({ cursor: 2, chat: true }))!;
+    expect(prompt.preview?.index).toBe(2);
+    expect(answerKeys(prompt, { option_index: 2 })).toEqual([{ keys: ["up"] }, { keys: ["enter"] }]);
+    expect(answerKeys(prompt, { chat: true })).toEqual([{ keys: ["enter"] }]);
+  });
+
+  test("leaves a screen whose notes are being typed to the fallback, where keys would type into them", () => {
+    expect(parseInteractivePrompt("claude", screenWith({ notes: "Add notes on this design…", editing: true }))).toBeNull();
+    expect(parseInteractivePrompt("claude", screenWith({ notes: "hello" }))).toBeNull();
+  });
+
+  test("reads a preview a narrow pane wrapped inside its box", () => {
+    // live-captured in a 70-column pane
+    const narrow = `
+ ☐ Style
+
+Pick a layout?
+
+❯ 1. Timeline (Recommended)       ┌──────────────────────────────────┐
+  2. Card / pill                  │ +------------------------------- │
+  3. Minimal                      │ -------+                         │
+                                  │ | o 09:00  Started session       │
+                                  │        |                         │
+                                  └──────────────────────────────────┘
+
+                                  Notes: press n to add notes
+
+──────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+`;
+    const prompt = parseInteractivePrompt("claude", narrow);
+    expect(labels(prompt)).toEqual(rows);
+    expect(prompt?.preview).toEqual({ index: 0, text: "+-------------------------------\n-------+\n| o 09:00  Started session\n       |" });
+  });
+
+  test("offers Chat about this on a plain single question too", () => {
+    const prompt = parseInteractivePrompt("claude", `
+☐ Route
+
+Which way?
+
+  1. Log in
+❯ 2. Fork
+  3. Type something.
+────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`)!;
+    expect(prompt).toMatchObject({ chat: true });
+    expect(prompt.notes).toBeUndefined();
+    expect(answerKeys(prompt, { chat: true })).toEqual([{ keys: ["down"] }, { keys: ["down"] }, { keys: ["enter"] }]);
+    expect(() => answerKeys(prompt, { option_index: 0, notes: "x" })).toThrow();
+  });
+});

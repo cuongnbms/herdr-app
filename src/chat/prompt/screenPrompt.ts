@@ -46,10 +46,16 @@ export interface ScreenPrompt {
   custom_option_index: number | null;
   /** Read by the fallback reader: a guess at the keys, not a known menu. */
   fallback?: true;
+  /** Claude's "Chat about this" row: it dismisses the question for the user to talk it over. */
+  chat?: true;
+  /** Notes (`n` on Claude's question with previews) can ride along with an option. */
+  notes?: true;
+  /** The preview Claude boxes beside the cursor's option. Not part of `id`: it follows the cursor. */
+  preview?: { index: number; text: string };
 }
 
 export type AnswerStep = { keys?: string[]; text?: string };
-export type PromptAnswer = { option_index?: number; option_indices?: number[]; custom_text?: string };
+export type PromptAnswer = { option_index?: number; option_indices?: number[]; custom_text?: string; chat?: true; notes?: string };
 
 type Responder =
   | "claude-question"
@@ -66,6 +72,8 @@ type ParsedPrompt = ScreenPrompt & {
   selectedIndex: number;
   checkedOptionIndices: number[];
   customMenuIndex: number | null;
+  /** the menu row of "Chat about this", when `chat` is offered */
+  chatMenuIndex?: number;
   /** each option's own steps, for a card whose options are not rows of a menu */
   optionSteps?: AnswerStep[][];
 };
@@ -158,13 +166,14 @@ function hashId(text: string): string {
 
 function finishPrompt(
   agent: string,
-  input: Omit<ScreenPrompt, "id" | "agent">,
+  input: Omit<ScreenPrompt, "id" | "agent" | "preview">,
   internal: Omit<ParsedPrompt, keyof ScreenPrompt>,
+  preview?: ScreenPrompt["preview"],
 ): ParsedPrompt {
-  // Hash all details before applying the display cap. Cursor movement is excluded, but a
-  // different command, plan or option description is stale.
+  // Hash all details before applying the display cap. Cursor movement is excluded (and with it
+  // the preview, which follows the cursor), but a different command, plan or option description is stale.
   const id = hashId(JSON.stringify({ agent, ...input }));
-  return { id, agent, ...input, body: input.body?.slice(0, 12_000) ?? null, ...internal };
+  return { id, agent, ...input, body: input.body?.slice(0, 12_000) ?? null, ...(preview ? { preview } : {}), ...internal };
 }
 
 function publicPrompt(parsed: ParsedPrompt): ScreenPrompt {
@@ -179,6 +188,9 @@ function publicPrompt(parsed: ParsedPrompt): ScreenPrompt {
     multi_select: parsed.multi_select,
     custom_option_index: parsed.custom_option_index,
     ...(parsed.fallback ? { fallback: true as const } : {}),
+    ...(parsed.chat ? { chat: true as const } : {}),
+    ...(parsed.notes ? { notes: true as const } : {}),
+    ...(parsed.preview ? { preview: parsed.preview } : {}),
   };
   parsedByPrompt.set(prompt, parsed);
   return prompt;
@@ -199,20 +211,95 @@ function parseClaudeQuestion(screen: string): ParsedPrompt | null {
   if (!question) return null;
   const optionRows = rows.slice(0, customIndex);
   const multiSelect = optionRows.some((row) => /^\s*(?:[›>❯]\s*)?\d+\.\s+\[[ xX✓]\]/.test(lines[row.lineIndex]!));
-  const current = tabs?.tabs.findIndex((tab) => !tab.answered) ?? -1;
-  // a bar cut off by a narrow pane does not show how many questions there are
-  const title = tabs && current >= 0 ? `${tabs.tabs[current]!.label}${tabs.whole && tabs.tabs.length > 1 ? ` · ${current + 1} of ${tabs.tabs.length}` : ""}`
-    : chip ?? (multiSelect ? "Multiple choice" : "Question");
   return finishPrompt("claude", {
-    kind: "question", title, question, body: null,
+    kind: "question", title: claudeQuestionTitle(tabs, chip, multiSelect), question, body: null,
     options: optionRows.map((row) => ({ label: row.label, description: row.description ?? null })),
     multi_select: multiSelect, custom_option_index: multiSelect ? null : customIndex,
+    // a multiple choice has an unnumbered Submit row on the way to it, so its row is not counted
+    ...(multiSelect ? {} : { chat: true as const }),
   }, {
     responder: "claude-question",
     selectedIndex: rows.findIndex((row) => row.selected),
     checkedOptionIndices: optionRows.flatMap((row, index) => row.checked ? [index] : []),
     customMenuIndex: customIndex,
+    ...(multiSelect ? {} : { chatMenuIndex: chatIndex }),
   });
+}
+
+type ClaudeTabs = ReturnType<typeof claudeTabs>;
+
+function claudeQuestionTitle(tabs: ClaudeTabs, chip: string | null, multiSelect: boolean): string {
+  const current = tabs?.tabs.findIndex((tab) => !tab.answered) ?? -1;
+  // a bar cut off by a narrow pane does not show how many questions there are
+  return tabs && current >= 0 ? `${tabs.tabs[current]!.label}${tabs.whole && tabs.tabs.length > 1 ? ` · ${current + 1} of ${tabs.tabs.length}` : ""}`
+    : chip ?? (multiSelect ? "Multiple choice" : "Question");
+}
+
+const BOX_EDGE_RE = /[┌│└]/;
+const NOTES_RE = /^Notes:\s*(.*)$/;
+
+/**
+ * Claude's question whose options carry previews (Claude Code 2.1.289):
+ *
+ *   ❯ 1. Timeline (Recommended)       ┌────────────────┐
+ *     2. Card / pill                  │ +------------+ │
+ *     3. Minimal                      │ | o 09:00    | │
+ *                                     └────────────────┘
+ *
+ *                                     Notes: press n to add notes
+ *   ────────────────────
+ *     Chat about this
+ *   Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+ *
+ * The box shows the preview of the option the cursor is on, wrapped by the pane's width; its
+ * left edge is the first box character on each line, since a label takes no such character and
+ * the preview's own text sits right of the edge. "Chat about this" is the menu's last row, and
+ * once the cursor is there the last option it left keeps its ❯ (and its preview). While notes are
+ * being typed (a note on the line, or Claude's editor hint) keys land in the note: no card.
+ */
+function parseClaudePreviewQuestion(screen: string): ParsedPrompt | null {
+  const lines = screen.replace(ANSI_RE, "").split(/\r?\n/);
+  const hintIndex = findLastIndex(lines, (_, index) => CLAUDE_ASK_HINT_RE.test(wrapped(lines, index)));
+  if (hintIndex < 0 || !/n to add notes/i.test(wrapped(lines, hintIndex))) return null;
+  if (/ctrl\+g to edit/i.test(wrapped(lines, hintIndex))) return null;
+  const chatLine = findLastIndex(lines.slice(0, hintIndex), (line) => /^(?:[›>❯]\s*)?Chat about this$/.test(cleanLine(line)));
+  if (chatLine < 0) return null;
+  const top = Math.max(0, chatLine - 80);
+  const boxTop = lines.findIndex((line, index) => index >= top && index < chatLine && NUMBERED_OPTION_RE.test(line) && line.includes("┌"));
+  if (boxTop < 0) return null;
+  const boxBottom = lines.findIndex((line, index) => index > boxTop && index < chatLine && /^[^│┌]*└/.test(line));
+  if (boxBottom < 0) return null;
+  const edge = (line: string) => line.search(BOX_EDGE_RE);
+  const box = lines.slice(boxTop, boxBottom + 1);
+  if (box.some((line) => edge(line) < 0)) return null;
+  const notesLine = lines.slice(boxBottom + 1, chatLine).map(cleanLine).find((line) => NOTES_RE.test(line));
+  if (notesLine === undefined || !/^press n to add notes$/i.test(NOTES_RE.exec(notesLine)![1]!)) return null;
+  // the left column: options, and the lines a label wraps onto, with the box cut away
+  const left = lines.map((line, index) => (index >= boxTop && index <= boxBottom ? line.slice(0, edge(line)) : line));
+  const rowsEnd = findLastIndex(left.slice(0, chatLine), (line) => cleanLine(line) !== "" && !isDivider(line) && !NOTES_RE.test(cleanLine(line))) + 1;
+  const rows = parseNumberedRows(left, boxTop, Math.max(rowsEnd, boxTop + 1));
+  if (!sequentialRows(rows) || rows.length < 2 || rows.filter((row) => row.selected).length > 1) return null;
+  const onChat = SELECTED_RE.test(cleanLine(lines[chatLine]!));
+  const cursor = rows.findIndex((row) => row.selected);
+  if (cursor < 0 && !onChat) return null;
+  const tabs = claudeTabs(lines, boxTop);
+  const question = claudeQuestionText(lines, tabs?.index ?? -1, boxTop) ?? nearestQuestion(lines, boxTop);
+  if (!question) return null;
+  const content = box.slice(1, -1).map((line) => line.slice(edge(line) + 1).replace(/\s*│?\s*$/, "").replace(/^ /, ""));
+  const preview = cursor < 0 ? undefined : { index: cursor, text: content.join("\n") };
+  return finishPrompt("claude", {
+    kind: "question", title: claudeQuestionTitle(tabs, tabs === null ? claudeChip(lines, boxTop) : null, false), question, body: null,
+    // labels only: the lines under a row are the label wrapped, never a description
+    options: rows.map((row) => ({
+      label: normalizeText([row.label, ...left.slice(row.lineIndex + 1, rows[rows.indexOf(row) + 1]?.lineIndex ?? rowsEnd).map(cleanLine).filter(Boolean)].join(" ")),
+      description: null,
+    })),
+    multi_select: false, custom_option_index: null, chat: true, notes: true,
+  }, {
+    responder: "claude-question",
+    selectedIndex: onChat ? rows.length : cursor,
+    checkedOptionIndices: [], customMenuIndex: null, chatMenuIndex: rows.length,
+  }, preview);
 }
 
 /** A single question's header chip (`☐ Dataset`), the question's own short name; null when there is none. */
@@ -535,7 +622,7 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
 
 function parsePrompt(agent: string, screen: string): ParsedPrompt | null {
   const candidates = agent === "claude"
-    ? [parseClaudeQuestion(screen), parseClaudeSubmit(screen), parseClaudeApproval(screen), parseClaudeConfirm(screen)]
+    ? [parseClaudeQuestion(screen), parseClaudePreviewQuestion(screen), parseClaudeSubmit(screen), parseClaudeApproval(screen), parseClaudeConfirm(screen)]
     : agent === "pi" ? [parsePiModel(screen)] : [];
   return candidates.find((candidate): candidate is ParsedPrompt => candidate !== null && promptTailIsActive(candidate, screen)) ?? null;
 }
@@ -577,8 +664,16 @@ function keySteps(keys: string[]): AnswerStep[] {
 export function answerKeys(prompt: ScreenPrompt, answer: PromptAnswer): AnswerStep[] {
   const parsed = parsedByPrompt.get(prompt);
   if (!parsed) throw new InvalidAnswer("The prompt was not produced by this reader.");
-  const supplied = [answer.option_index !== undefined, answer.option_indices !== undefined, answer.custom_text !== undefined].filter(Boolean).length;
+  const supplied = [answer.option_index !== undefined, answer.option_indices !== undefined, answer.custom_text !== undefined, answer.chat !== undefined].filter(Boolean).length;
   if (supplied !== 1) throw new InvalidAnswer("Exactly one answer is required.");
+  // notes ride along with an option, typed into the note `n` opens on the cursor's row; its Enter answers
+  const notes = answer.notes === undefined ? "" : normalizeText(answer.notes);
+  if (notes && (!parsed.notes || answer.option_index === undefined)) throw new InvalidAnswer("This prompt does not take notes.");
+
+  if (answer.chat) {
+    if (!parsed.chat || parsed.chatMenuIndex === undefined) throw new InvalidAnswer("This prompt has no Chat about this.");
+    return keySteps([...navigationKeys(parsed.chatMenuIndex - parsed.selectedIndex), KEY.enter]);
+  }
 
   if (answer.custom_text !== undefined) {
     const text = answer.custom_text.trim();
@@ -620,6 +715,7 @@ export function answerKeys(prompt: ScreenPrompt, answer: PromptAnswer): AnswerSt
     throw new InvalidAnswer("A valid option index is required.");
   }
   if (parsed.optionSteps) return parsed.optionSteps[index]!;
+  if (notes) return [...keySteps(navigationKeys(index - parsed.selectedIndex)), { keys: ["n"] }, { text: notes }, ...keySteps([KEY.enter])];
   return keySteps([...navigationKeys(index - parsed.selectedIndex), KEY.enter]);
 }
 

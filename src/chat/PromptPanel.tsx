@@ -9,6 +9,7 @@ import { useApp } from "../store/app";
 import { watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { applyUnicode11 } from "../terminal/unicode";
+import { previewsFor, type AskedQuestion } from "./prompt/askedPreviews";
 import { parseInteractivePrompt, readPrompt, type PromptAnswer, type ScreenPrompt } from "./prompt/screenPrompt";
 import { sendAnswer, type PromptIo } from "./prompt/sendAnswer";
 
@@ -84,15 +85,25 @@ function ScreenMirror({ text }: { text: string }) {
 /** One prompt as buttons, checkboxes and a text field. Keyed by the prompt's id, so a new prompt starts blank. */
 function PromptCard({
   prompt,
+  asked,
   pending,
   onAnswer,
 }: {
   prompt: ScreenPrompt;
+  asked: AskedQuestion[];
   pending: boolean;
   onAnswer: (answer: PromptAnswer) => void;
 }) {
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [custom, setCustom] = useState("");
+  const [notes, setNotes] = useState("");
+  // The option whose preview shows: the one pointed at, else the terminal cursor's. The call's
+  // input has every option's preview whole; the screen only the cursor's, wrapped to the pane.
+  const [pointed, setPointed] = useState<number | null>(null);
+  const previews = previewsFor(prompt, asked);
+  const hasPreview = previews !== null || prompt.preview !== undefined;
+  const previewing = pointed ?? prompt.preview?.index ?? 0;
+  const previewText = previews?.[previewing] ?? (prompt.preview?.index === previewing ? prompt.preview.text : null);
   const toggle = (i: number) =>
     setChecked((cur) => {
       const next = new Set(cur);
@@ -112,6 +123,7 @@ function PromptCard({
       </div>
       {prompt.question !== prompt.title && <p className="prompt-question">{prompt.question}</p>}
       {prompt.body && <pre className="prompt-body">{prompt.body}</pre>}
+      <div className={hasPreview ? "prompt-split" : "prompt-unsplit"}>
       <div
         className={"prompt-options" + (prompt.fallback ? " keys" : "")}
         role={prompt.multi_select ? "group" : undefined}
@@ -140,9 +152,11 @@ function PromptCard({
             <button
               key={i}
               type="button"
-              className={prompt.fallback ? "keycap" : "prompt-option"}
+              className={prompt.fallback ? "keycap" : "prompt-option" + (hasPreview && i === previewing ? " previewing" : "")}
               disabled={pending}
-              onClick={() => onAnswer({ option_index: i })}
+              onMouseEnter={hasPreview ? () => setPointed(i) : undefined}
+              onFocus={hasPreview ? () => setPointed(i) : undefined}
+              onClick={() => onAnswer(notes.trim() ? { option_index: i, notes: notes.trim() } : { option_index: i })}
             >
               {!prompt.fallback && <span className="prompt-num">{i + 1}</span>}
               {prompt.fallback ? option.label : content}
@@ -150,6 +164,35 @@ function PromptCard({
           );
         })}
       </div>
+      {hasPreview && (
+        <figure className="prompt-preview">
+          <figcaption>
+            Preview · {prompt.options[previewing]?.label.replace(RECOMMENDED_RE, "")}
+          </figcaption>
+          {previewText !== null ? (
+            <pre>{previewText}</pre>
+          ) : (
+            <p className="prompt-preview-none">
+              {previews !== null ? "No preview for this option." : "The terminal shows this option's preview once its cursor is there."}
+            </p>
+          )}
+        </figure>
+      )}
+      </div>
+      {prompt.notes && (
+        <div className="prompt-custom">
+          <input
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            value={notes}
+            disabled={pending}
+            aria-label="Notes"
+            placeholder="Notes to send with the option you pick (optional)"
+            onChange={(e) => setNotes(e.currentTarget.value)}
+          />
+        </div>
+      )}
       {prompt.multi_select && (
         <button
           type="button"
@@ -188,6 +231,11 @@ function PromptCard({
           </button>
         </div>
       )}
+      {prompt.chat && (
+        <button type="button" className="btn btn-xs prompt-chat" disabled={pending} onClick={() => onAnswer({ chat: true })}>
+          Chat about this
+        </button>
+      )}
     </>
   );
 }
@@ -199,7 +247,18 @@ function PromptCard({
  * prompt the Agent waits on while idle, such as pi's model picker), only a known reader's card
  * shows: a screen none of them reads keeps the last card rather than guess at keys.
  */
-export function PromptPanel({ pane, view, fallback = true }: { pane: PaneRef; view: PaneView; fallback?: boolean }) {
+export function PromptPanel({
+  pane,
+  view,
+  fallback = true,
+  asked = [],
+}: {
+  pane: PaneRef;
+  view: PaneView;
+  fallback?: boolean;
+  /** the questions of the AskUserQuestion call waiting on the transcript, for their previews */
+  asked?: AskedQuestion[];
+}) {
   const agent = view.agent;
   const [screenText, setScreenText] = useState("");
   const [prompt, setPrompt] = useState<ScreenPrompt | null>(null);
@@ -227,8 +286,13 @@ export function PromptPanel({ pane, view, fallback = true }: { pane: PaneRef; vi
     (text: string) => {
       if (!live.current) return;
       const next = fallback ? readPrompt(agent, text) : parseInteractivePrompt(agent ?? "", text);
-      // the same prompt keeps its card (and what was ticked or typed on it)
-      setPrompt((cur) => (next === null || cur?.id === next.id ? cur : next));
+      // the same prompt keeps its card (and what was ticked or typed on it); only the preview
+      // the terminal's cursor moved to is taken from it
+      setPrompt((cur) =>
+        next === null || (cur?.id === next.id && cur.preview?.index === next.preview?.index && cur.preview?.text === next.preview?.text)
+          ? cur
+          : next,
+      );
       return next;
     },
     [agent, fallback],
@@ -312,7 +376,7 @@ export function PromptPanel({ pane, view, fallback = true }: { pane: PaneRef; vi
   return (
     <div className="blocked-panel" aria-busy={pending}>
       {prompt ? (
-        <PromptCard key={prompt.id} prompt={prompt} pending={pending} onAnswer={(a) => void answer(a)} />
+        <PromptCard key={prompt.id} prompt={prompt} asked={asked} pending={pending} onAnswer={(a) => void answer(a)} />
       ) : (
         <div className="blocked-head">
           <span className="dot dot-blocked" aria-hidden="true" />
