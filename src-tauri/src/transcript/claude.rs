@@ -52,6 +52,29 @@ fn user_text(text: &str) -> Option<String> {
 
 /// A model id from its display name, as `/model` reports it: `Sonnet 5.5` → `claude-sonnet-5-5`.
 /// Parenthesised notes such as `(1M context)` are dropped.
+/// A message typed while the agent is mid-turn is recorded as a
+/// `queued_command` attachment, not a user record: rewrite it as the user
+/// record it stands for. Other queued prompts (a subagent's hand-back, a task
+/// notification) are not the user's words.
+fn queued_prompt(v: &Value) -> Option<Value> {
+    let a = v.get("attachment")?;
+    let human = a.get("type")?.as_str()? == "queued_command"
+        && a.get("commandMode").and_then(Value::as_str) == Some("prompt")
+        && a.get("origin")
+            .and_then(|o| o.get("kind"))
+            .and_then(Value::as_str)
+            == Some("human");
+    human.then(|| {
+        serde_json::json!({
+            "type": "user",
+            "uuid": v.get("uuid"),
+            "timestamp": v.get("timestamp"),
+            "isSidechain": v.get("isSidechain"),
+            "message": {"content": a.get("prompt")},
+        })
+    })
+}
+
 fn model_id(display: &str) -> Option<String> {
     let name = display.split(" (").next()?.trim();
     if name.is_empty() {
@@ -83,7 +106,7 @@ impl ClaudeParser {
 impl Parser for ClaudeParser {
     fn push_line(&mut self, line: &str, images: &mut dyn ImageSink) -> ParserOutput {
         let v: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
+            Ok(v) => queued_prompt(&v).unwrap_or(v),
             Err(e) => {
                 tracing::debug!("skipping non-JSON transcript line: {e}");
                 return ParserOutput::None;
@@ -481,6 +504,48 @@ mod tests {
     }
     fn png(data: &str) -> serde_json::Value {
         serde_json::json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":data}})
+    }
+    fn queued(prompt: serde_json::Value, kind: &str) -> String {
+        serde_json::json!({"type":"attachment","uuid":"q1","timestamp":"2026-10-04T08:51:36.240Z","isSidechain":false,"attachment":{"type":"queued_command","prompt":prompt,"commandMode":"prompt","origin":{"kind":kind}}}).to_string()
+    }
+    #[test]
+    fn shows_messages_sent_mid_turn() {
+        let (items, _, _) = run_with(&queued("ssh lên demo2 để check".into(), "human"));
+        assert_eq!(
+            items,
+            vec![User {
+                ts: Some("2026-10-04T08:51:36.240Z".into()),
+                text: "ssh lên demo2 để check".into(),
+                skills: vec![],
+                images: vec![],
+            }]
+        );
+        let with_image = queued(
+            serde_json::json!([{"type":"text","text":"[Image #1] look"}, png("AQID")]),
+            "human",
+        );
+        let (items, sink, _) = run_with(&with_image);
+        assert_eq!(
+            items,
+            vec![User {
+                ts: Some("2026-10-04T08:51:36.240Z".into()),
+                text: "[Image #1] look".into(),
+                skills: vec![],
+                images: vec![ImageRef {
+                    reference: "q1:1".into(),
+                    media_type: "image/png".into()
+                }],
+            }]
+        );
+        assert_eq!(sink.len(), 1);
+        // A subagent's hand-back rides the same queue but is not the user's words.
+        assert_eq!(
+            run(&queued(
+                "<agent-message>done</agent-message>".into(),
+                "peer"
+            )),
+            vec![]
+        );
     }
     #[test]
     fn image_beside_text_attaches_to_the_user_item() {
