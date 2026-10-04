@@ -672,7 +672,24 @@ kbd {
 .palette-foot kbd { margin-right: 3px; }
 
 /* ---------- Chat lens ---------- */
-.chat-lens { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--surface-0); }
+.chat-lens { flex: 1; min-height: 0; display: flex; background: var(--surface-0); container-type: inline-size; }
+.chat-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* The outline rail takes the right margin of a wide chat, so the column sits nearer the middle. */
+.chat-outline {
+  flex: none; width: 240px; min-height: 0; display: flex; flex-direction: column;
+  border-left: 1px solid var(--line); padding: 16px 0 16px 0; box-sizing: border-box;
+}
+@container (max-width: 1100px) { .chat-outline { display: none; } }
+.chat-outline-head { padding: 0 16px 8px; color: var(--fg-3); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.chat-outline ol { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0 8px; }
+.chat-outline button {
+  display: block; width: 100%; padding: 5px 8px; border: 0; border-left: 2px solid transparent; border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: none; color: var(--fg-3); font: inherit; font-size: 12px; line-height: 1.4; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.chat-outline button:hover { background: var(--hover); color: var(--fg); }
+.chat-outline button[aria-current="true"] { border-left-color: var(--accent); color: var(--fg); }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
 /* A user turn stacks its images, the bubble line and its Skill chips, all at the right edge. */

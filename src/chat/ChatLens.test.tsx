@@ -114,4 +114,16 @@ describe("ChatLens", () => {
     act(() => channels[channels.length - 1].onmessage({ type: "error", error: { code: "io", message: "gone" } }));
     expect(screen.queryByText("Loading transcript…")).toBeNull();
   });
+
+  it("outlines the user turns beside the transcript", () => {
+    render(<ChatLens pane={pane} view={idlePi} />);
+    const items = [
+      { kind: "user", text: "fix the header" },
+      { kind: "assistant_text", markdown: "done" },
+      { kind: "user", text: "now the footer" },
+    ];
+    act(() => channels[channels.length - 1].onmessage({ type: "reset", items, total: items.length }));
+    const nav = screen.getByRole("navigation", { name: "Conversation outline" });
+    expect([...nav.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["fix the header", "now the footer"]);
+  });
 });

@@ -11,6 +11,8 @@ import { ChatItemView } from "./ChatItemView";
 import { ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
 import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
+import { ChatOutline } from "./ChatOutline";
+import { currentEntry, outline } from "./outline";
 import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { usePiModelPicker } from "./usePiModelPicker";
@@ -209,11 +211,22 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     setUnseen(false);
   };
 
+  // The outline rail follows the first row in view.
+  const entries = useMemo(() => outline(rows), [rows]);
+  const scrollTop = virt.scrollOffset ?? 0;
+  const topRow = virt.getVirtualItems().find((v) => v.end > scrollTop)?.index ?? 0;
+  // Off the bottom before the scroll lands: an append meanwhile would pull the view back down.
+  const jumpTo = (row: number) => {
+    atBottom.current = false;
+    virt.scrollToIndex(row, { align: "start" });
+  };
+
   const err = openError ?? state.error;
   return (
     <ChatPaneContext.Provider value={pane}>
     <ChatOpenContext.Provider value={opened}>
     <div className="chat-lens">
+    <div className="chat-main">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
@@ -260,6 +273,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       ) : (
         <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} />
       )}
+    </div>
+    <ChatOutline entries={entries} current={currentEntry(entries, topRow)} onJump={jumpTo} />
     </div>
     </ChatOpenContext.Provider>
     </ChatPaneContext.Provider>
