@@ -57,14 +57,24 @@ describe("PathInput", () => {
     const onDocKey = vi.fn();
     document.addEventListener("keydown", onDocKey);
     render(<Field initial="/home/u/" />);
-    fireEvent.focus(input());
+    fireEvent.keyDown(input(), { key: "ArrowDown" });
     await screen.findByRole("option", { name: "api/" });
+    onDocKey.mockClear();
     fireEvent.keyDown(input(), { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(onDocKey).not.toHaveBeenCalled();
     fireEvent.keyDown(input(), { key: "Escape" });
     expect(onDocKey).toHaveBeenCalled();
     document.removeEventListener("keydown", onDocKey);
+  });
+
+  it("stays closed when the field is focused with a prefilled path, until typing, ↓ or a click", async () => {
+    render(<Field initial="/home/u/" />);
+    fireEvent.focus(input());
+    await new Promise((r) => setTimeout(r, 200));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.mouseDown(input());
+    await screen.findByRole("option", { name: "api/" });
   });
 
   it("shows no folders when the listing fails", async () => {

@@ -113,7 +113,8 @@ export function PathInput({ machineId, label, value, onChange, placeholder, auto
         onChange(e.target.value);
         setOpen(true);
       }}
-      onFocus={() => setOpen(true)}
+      // Not on focus: the dialogs focus the field on open, and a dropdown then would cover their buttons.
+      onMouseDown={() => setOpen(true)}
       onBlur={() => setOpen(false)}
       onKeyDown={keyDown}
     />
@@ -145,7 +146,7 @@ export function PathInput({ machineId, label, value, onChange, placeholder, auto
               {basename(p)}/
             </li>
           ))}
-          {!items.length && <li className="muted">{loading ? "Loading…" : "No folders"}</li>}
+          {!items.length && <li className="muted" onMouseDown={(e) => e.preventDefault()}>{loading ? "Loading…" : "No folders"}</li>}
         </ul>
       )}
     </div>
