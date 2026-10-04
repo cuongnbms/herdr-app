@@ -876,7 +876,7 @@ kbd {
 .composer-bar { display: flex; align-items: center; gap: 8px; }
 .composer-model { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: 11.5px; }
 .composer-git {
-  margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 4px;
+  min-width: 0; display: flex; align-items: center; gap: 4px;
   overflow: hidden; white-space: nowrap; color: var(--fg-3); font-size: 11.5px;
 }
 .composer-git .icon { flex: none; width: 12px; height: 12px; }
@@ -886,7 +886,6 @@ kbd {
 .composer-git-mark { flex: none; font-size: 10px; }
 .composer-git-mark.clean { color: var(--green); }
 .composer-git-mark.dirty { color: var(--amber); }
-.composer-git + .composer-model { margin-left: 0; }
 button.composer-model { padding: 2px 6px; margin-right: -6px; border: 0; border-radius: 5px; background: none; cursor: pointer; }
 button.composer-model:hover:not(:disabled), button.composer-model[aria-expanded="true"] { background: var(--active); color: var(--fg-2); }
 button.composer-model:disabled { cursor: default; }
@@ -929,7 +928,7 @@ button.composer-model:disabled { cursor: default; }
 }
 .stop:hover { background: color-mix(in srgb, var(--err) 22%, transparent); }
 .stop svg { fill: currentColor; }
-.stop + .send, .composer-model + .send, .composer-model + .stop, .composer-git + .send, .composer-git + .stop { margin-left: 0; }
+.stop + .send, .composer-model + .send, .composer-model + .stop { margin-left: 0; }
 .composer-error { font-size: 12px; padding: 0 4px; }
 
 .blocked-panel {
