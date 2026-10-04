@@ -12,6 +12,7 @@ import { showToast } from "../ui/Toast";
 import { Banner } from "./Banner";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
+import { applyCopyOnSelect } from "./copyOnSelect";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { createImagePaste } from "./imagePaste";
 import { createKeyHandler } from "./keyHandler";
@@ -37,13 +38,14 @@ function createEntry(key: string) {
     // No smooth scroll: at 100ms trackpad scrolling lagged behind the fingers and felt rubbery.
     smoothScrollDuration: 0,
     allowProposedApi: true,
-    // herdr turns on mouse reporting, so a plain drag never selects; Option+drag selects for Cmd+C.
+    // herdr turns on mouse reporting, so a plain drag never selects; Option+drag selects and copies.
     macOptionClickForcesSelection: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
   applyUnicode11(term);
   applyOsc52(term, (text) => void writeText(text).catch((e) => console.error("OSC 52 copy failed", e)));
+  const stopCopyOnSelect = applyCopyOnSelect(term, (text) => void writeText(text).catch((e) => console.error("selection copy failed", e)));
   term.attachCustomKeyEventHandler(createKeyHandler((text) => term.input(text)));
   applyWheelScroll(term);
   const unwatchFont = watchTermFont(term, fit);
@@ -55,6 +57,7 @@ function createEntry(key: string) {
     output,
     cleanup: () => {
       output.dispose();
+      stopCopyOnSelect();
       forgetWebgl(key);
       unwatchFont();
       unwatchTheme();
