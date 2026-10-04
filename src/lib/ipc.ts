@@ -101,6 +101,8 @@ export const completeCommands = (p: PaneRef) =>
   invoke<SlashCommand[]>("complete_commands", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const completeFiles = (p: PaneRef) =>
   invoke<string[]>("complete_files", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
+/** Folder names inside `dir` (absolute or `~/…`) on a Machine; empty when it is missing. */
+export const completeDirs = (machineId: string, dir: string) => invoke<string[]>("complete_dirs", { machineId, dir });
 export const chatGitStatus = (p: PaneRef) =>
   invoke<GitStatus | null>("chat_git_status", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const chatPage = (p: PaneRef, before: number) =>

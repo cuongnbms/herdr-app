@@ -106,7 +106,7 @@ describe("AgentList", () => {
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
     expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New agent…", "Change folder…", "Rename workspace…", "Close workspace"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Change folder…" }));
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "/srv/web" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(within(screen.getByRole("group", { name: "web" })).getByText("web", { selector: ".ws-folder" })).toBeTruthy();
   });

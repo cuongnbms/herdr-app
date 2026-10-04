@@ -486,6 +486,18 @@ pub async fn complete_files(
     complete::list_files(&*transport, &info.home, &cwd).await
 }
 
+/// The folders inside `dir` (which may start with `~`) on a Machine, for folder fields.
+#[tauri::command]
+pub async fn complete_dirs(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    dir: String,
+) -> Result<Vec<String>, AppError> {
+    let info = mgr.info(&machine_id)?;
+    let transport = mgr.transport(&machine_id)?;
+    complete::list_dirs(&*transport, &info.home, &dir).await
+}
+
 /// The folder and git branch of a Pane's working directory, read on the Pane's Machine.
 #[tauri::command]
 pub async fn chat_git_status(

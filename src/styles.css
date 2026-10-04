@@ -602,6 +602,20 @@ kbd {
 }
 .dialog input:focus, .dialog select:focus { border-color: var(--accent); box-shadow: var(--ring); }
 .dialog input::placeholder, .composer textarea::placeholder, .palette input::placeholder { color: var(--fg-3); }
+.path-input { position: relative; display: flex; flex-direction: column; }
+.path-input input { font-family: var(--mono); font-size: 12px; }
+.path-suggestions {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 2; max-height: 220px; overflow-y: auto;
+  margin: 0; padding: 4px; list-style: none; box-sizing: border-box;
+  border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--surface-0); box-shadow: var(--shadow-dialog);
+  color: var(--fg); font-weight: 400;
+}
+.path-suggestions li {
+  padding: 5px 8px; border-radius: 4px; cursor: pointer; font-family: var(--mono); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.path-suggestions li.selected { background: var(--active); }
+.path-suggestions li.muted { cursor: default; color: var(--fg-3); font-family: inherit; }
 .dialog fieldset.agent-choice { margin: 0; padding: 0; border: 0; min-width: 0; }
 .agent-choice legend { padding: 0; margin-bottom: 6px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
 .agent-choice .seg { display: grid; grid-template-columns: repeat(var(--n), 1fr); }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import { useApp } from "../store/app";
+import { PathInput } from "../ui/PathInput";
 import { setFolder } from "../workspaces/folder";
 import { AgentChoice } from "../agents/AgentChoice";
 import { startAgent } from "../agents/startAgent";
@@ -69,10 +70,7 @@ export function NewWorkspaceDialog({
         }}
       >
         <h3>New workspace in {session}</h3>
-        <label>
-          Directory
-          <input spellCheck={false} autoCorrect="off" autoCapitalize="off" autoFocus value={cwd} placeholder="/path/to/project" onChange={(e) => setCwd(e.target.value)} />
-        </label>
+        <PathInput machineId={machineId} label="Directory" autoFocus value={cwd} placeholder="/path/to/project" onChange={setCwd} />
         <label>
           Label (optional)
           <input spellCheck={false} autoCorrect="off" autoCapitalize="off" value={label} onChange={(e) => setLabel(e.target.value)} />

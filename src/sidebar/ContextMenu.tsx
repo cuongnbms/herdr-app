@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType, SVGProps } from "react";
+import { PathInput } from "../ui/PathInput";
 
 export interface MenuItem {
   label: string;
@@ -88,12 +89,15 @@ export function TextDialog({
   title,
   initial,
   submitLabel,
+  folderOn,
   onSubmit,
   onClose,
 }: {
   title: string;
   initial: string;
   submitLabel: string;
+  /** Machine whose folders the field suggests, for a folder path. */
+  folderOn?: string;
   onSubmit: (value: string) => void;
   onClose: () => void;
 }) {
@@ -106,17 +110,29 @@ export function TextDialog({
   };
   return (
     <Modal title={title} onClose={onClose}>
-      <input
-        spellCheck={false}
-        autoCorrect="off"
-        autoCapitalize="off"
-        ref={ref}
-        autoFocus
-        value={value}
-        aria-label={title}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-      />
+      {folderOn ? (
+        <PathInput
+          machineId={folderOn}
+          inputRef={ref}
+          autoFocus
+          value={value}
+          aria-label={title}
+          onChange={setValue}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+      ) : (
+        <input
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          ref={ref}
+          autoFocus
+          value={value}
+          aria-label={title}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+      )}
       <div className="actions">
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={submit}>{submitLabel}</button>

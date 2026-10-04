@@ -129,7 +129,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
     );
   } else if (dialog?.kind === "folder") {
     modal = (
-      <TextDialog title="Workspace folder" initial={dialog.initial} submitLabel="Save" onClose={closeDialog}
+      <TextDialog title="Workspace folder" initial={dialog.initial} submitLabel="Save" folderOn={dialog.ref.machine_id} onClose={closeDialog}
         onSubmit={(v) => v.trim() && setFolder(dialog.ref, v)} />
     );
   } else if (dialog?.kind === "move") {
