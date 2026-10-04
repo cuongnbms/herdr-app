@@ -376,7 +376,9 @@ kbd {
   background: none; text-align: left; cursor: pointer;
   transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
 }
-.agent-card:hover { background: var(--hover); }
+/* Hover on the row, not the card: the close button sits outside the card. :where keeps
+   this below .active/.blocked so their backgrounds still win. */
+:where(.agent-card-item:hover) > .agent-card { background: var(--hover); }
 .agent-card.active { background: var(--accent-soft); border-color: var(--accent-line); }
 .agent-card.active::before {
   content: ""; position: absolute; left: -1px; top: 7px; bottom: 7px; width: 3px;
