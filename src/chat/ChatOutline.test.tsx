@@ -22,8 +22,10 @@ describe("ChatOutline", () => {
     expect(onJump).toHaveBeenCalledWith(0);
   });
 
-  it("renders nothing for a single turn", () => {
-    const { container } = render(<ChatOutline entries={entries.slice(0, 1)} current={0} onJump={() => {}} />);
+  it("shows a single turn, and nothing without turns", () => {
+    const { container, rerender } = render(<ChatOutline entries={entries.slice(0, 1)} current={0} onJump={() => {}} />);
+    expect(screen.getByRole("button", { name: "fix the header" }).getAttribute("aria-current")).toBe("true");
+    rerender(<ChatOutline entries={[]} current={-1} onJump={() => {}} />);
     expect(container.innerHTML).toBe("");
   });
 

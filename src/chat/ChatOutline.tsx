@@ -13,7 +13,7 @@ export function ChatOutline({ entries, current, onJump }: { entries: OutlineEntr
     const el = listRef.current?.children[current]?.firstElementChild as HTMLElement | null | undefined;
     el?.scrollIntoView?.({ block: "nearest" });
   }, [current]);
-  if (entries.length < 2) return null;
+  if (entries.length === 0) return null;
 
   const resize = (px: number) => {
     const w = clampOutlineWidth(px);
