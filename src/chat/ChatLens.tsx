@@ -6,6 +6,7 @@ import { paneKey, type AppError, type ChatEvent, type ChatItem, type Located, ty
 import { useApp } from "../store/app";
 import { onOpenFailure, openChat, watchMachine } from "./chatSession";
 import { PromptPanel } from "./PromptPanel";
+import { pendingQuestions } from "./prompt/askedPreviews";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
 import { ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
@@ -129,6 +130,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
 
   // Tool results render inside their call; each turn's work folds into one row.
   const { rows, results } = useMemo(() => buildRows(state.items, state.total - state.items.length), [state.items, state.total]);
+  const asked = useMemo(() => pendingQuestions(state.items), [state.items]);
   const toggle = useCallback((id: string, wasOpen: boolean) => {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
@@ -269,7 +271,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       )}
       <WorkingIndicator status={view.status} />
       {view.status === "blocked" || picker.open ? (
-        <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} />
+        <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />
       ) : (
         <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} />
       )}

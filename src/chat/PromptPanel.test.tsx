@@ -37,6 +37,30 @@ Which datasets?
 Enter to select · ↑/↓ to navigate · Esc to cancel
 `;
 
+
+const withPreviews = (cursor: number) => {
+  const left = ["Timeline (Recommended)", "Card / pill"].map((label, i) => `${i === cursor ? "❯" : " "} ${i + 1}. ${label}`);
+  const right = ["┌────────────┐", `│ preview ${cursor + 1}  │`, "└────────────┘"];
+  return `
+ ☐ Style
+
+Pick a layout?
+
+${right.map((line, i) => `${(left[i] ?? "").padEnd(30)}${line}`).join("\n")}
+
+                              Notes: press n to add notes
+
+────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel
+`;
+};
+const asked = [{ question: "Pick a layout?", options: [
+  { label: "Timeline (Recommended)", preview: "o 09:00\n|\no 09:15" },
+  { label: "Card / pill", preview: "( Started 09:00 )" },
+] }];
+
 let shown = question;
 const sent = () =>
   vi
@@ -61,6 +85,49 @@ describe("PromptPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /YCB-V/ }));
     await waitFor(() =>
       expect(sent()).toEqual([
+        ["agent.send_keys", { target: "w1:p1", keys: ["down"] }],
+        ["agent.send_keys", { target: "w1:p1", keys: ["enter"] }],
+      ]),
+    );
+  });
+
+  it("shows the terminal cursor's preview beside the options, and the one pointed at from the transcript", async () => {
+    shown = withPreviews(1);
+    const { unmount } = render(<PromptPanel pane={pane} view={view} />);
+    expect(await screen.findByText("preview 2")).toBeTruthy();
+    expect(screen.getByText(/Preview · Card \/ pill/)).toBeTruthy();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /Timeline/ }));
+    expect(screen.getByText(/once its cursor is there/)).toBeTruthy();
+    unmount();
+
+    render(<PromptPanel pane={pane} view={view} asked={asked} />);
+    expect(await screen.findByText("( Started 09:00 )")).toBeTruthy();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /Timeline/ }));
+    expect(screen.getByText(/o 09:15/)).toBeTruthy();
+    expect(sent()).toEqual([]);
+  });
+
+  it("sends notes with the option picked, and answers Chat about this", async () => {
+    shown = withPreviews(0);
+    const { unmount } = render(<PromptPanel pane={pane} view={view} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Notes" }), { target: { value: "denser" } });
+    fireEvent.click(screen.getByRole("button", { name: /Card \/ pill/ }));
+    await waitFor(() =>
+      expect(sent()).toEqual([
+        ["agent.send_keys", { target: "w1:p1", keys: ["down"] }],
+        ["agent.send_keys", { target: "w1:p1", keys: ["n"] }],
+        ["pane.send_text", { pane_id: "w1:p1", text: "denser" }],
+        ["agent.send_keys", { target: "w1:p1", keys: ["enter"] }],
+      ]),
+    );
+    unmount();
+    vi.mocked(herdrCall).mockClear();
+
+    render(<PromptPanel pane={pane} view={view} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chat about this" }));
+    await waitFor(() =>
+      expect(sent()).toEqual([
+        ["agent.send_keys", { target: "w1:p1", keys: ["down"] }],
         ["agent.send_keys", { target: "w1:p1", keys: ["down"] }],
         ["agent.send_keys", { target: "w1:p1", keys: ["enter"] }],
       ]),

@@ -947,6 +947,22 @@ button.composer-model:disabled { cursor: default; }
   color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .prompt-submit { align-self: flex-start; }
+.prompt-chat { align-self: flex-start; }
+.prompt-unsplit { display: contents; }
+/* options beside the preview of the one pointed at; the preview drops under them when narrow */
+.prompt-split { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.prompt-split > .prompt-options { flex: 1 1 220px; min-width: 0; }
+.prompt-option.previewing { border-color: color-mix(in srgb, var(--accent) 60%, var(--line-2)); }
+.prompt-preview {
+  flex: 2 1 340px; min-width: 0; margin: 0; display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-0); overflow: hidden;
+}
+.prompt-preview figcaption {
+  padding: 6px 10px; border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: 11.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.prompt-preview pre { margin: 0; padding: 10px 12px; max-height: 340px; overflow: auto; white-space: pre; color: var(--fg-2); font: 12px/1.45 var(--mono); }
+.prompt-preview-none { margin: 0; padding: 10px 12px; color: var(--fg-3); font-size: 12px; }
 .prompt-custom { display: flex; gap: 6px; }
 .prompt-custom input {
   flex: 1; min-width: 0; height: 30px; padding: 0 10px; box-sizing: border-box;
