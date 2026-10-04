@@ -339,16 +339,16 @@ kbd {
 
 /* ---------- Agents column ---------- */
 .agents {
-  flex: 0 0 288px; width: 288px; min-height: 0; overflow-y: auto;
+  flex: 0 0 288px; width: 288px; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column;
   background: var(--surface-chrome); border-right: 1px solid var(--line);
 }
 .agents-head {
-  position: sticky; top: 0; z-index: 1; flex: none;
+  flex: none;
   display: flex; align-items: center; gap: 8px; height: var(--titlebar); padding: 0 16px; box-sizing: border-box;
-  background: var(--surface-chrome); backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
 }
+.agents-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .agents-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .count {
   flex: none; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; display: grid; place-items: center;

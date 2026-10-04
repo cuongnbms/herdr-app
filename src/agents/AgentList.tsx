@@ -171,13 +171,17 @@ export const AgentList = memo(function AgentList() {
         <span className="agents-title">{session.name}</span>
         <span className="count">{total}</span>
       </div>
-      {groups.length === 0 ? (
-        <p className="agents-empty">{session.running ? "No panes" : "Session stopped"}</p>
-      ) : (
-        groups.map((g) => (
-          <WorkspaceGroup key={g.workspace.workspace_id} machineId={viewed.machine_id} session={session.name} workspace={g.workspace} entries={g.entries} />
-        ))
-      )}
+      {/* Only the list scrolls, so the head needs no background of its own: a second layer of the
+          translucent chrome would darken it against the column. */}
+      <div className="agents-list">
+        {groups.length === 0 ? (
+          <p className="agents-empty">{session.running ? "No panes" : "Session stopped"}</p>
+        ) : (
+          groups.map((g) => (
+            <WorkspaceGroup key={g.workspace.workspace_id} machineId={viewed.machine_id} session={session.name} workspace={g.workspace} entries={g.entries} />
+          ))
+        )}
+      </div>
     </ActionsProvider>
   );
 });
