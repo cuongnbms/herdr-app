@@ -1,11 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatOutline } from "./ChatOutline";
 
 const entries = [
   { row: 0, key: "i:0", label: "fix the header" },
   { row: 3, key: "i:5", label: "now the footer" },
 ];
+
+beforeEach(() => localStorage.clear());
+
+const rail = () => screen.getByRole("navigation", { name: "Conversation outline" });
+const handle = () => screen.getByRole("separator", { name: "Resize outline" });
 
 describe("ChatOutline", () => {
   it("marks the turn being read and jumps to the one clicked", () => {
@@ -20,5 +25,33 @@ describe("ChatOutline", () => {
   it("renders nothing for a single turn", () => {
     const { container } = render(<ChatOutline entries={entries.slice(0, 1)} current={0} onJump={() => {}} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("widens as its edge is dragged left, and remembers the width", () => {
+    const { unmount } = render(<ChatOutline entries={entries} current={0} onJump={() => {}} />);
+    expect(rail().style.width).toBe("260px");
+    fireEvent.pointerDown(handle(), { clientX: 1000, pointerId: 1 });
+    fireEvent.pointerMove(handle(), { clientX: 940, pointerId: 1 });
+    expect(rail().style.width).toBe("320px");
+    fireEvent.pointerUp(handle(), { clientX: 940, pointerId: 1 });
+    unmount();
+    render(<ChatOutline entries={entries} current={0} onJump={() => {}} />);
+    expect(rail().style.width).toBe("320px");
+  });
+
+  it("stays within its range, and a double-click restores the default", () => {
+    render(<ChatOutline entries={entries} current={0} onJump={() => {}} />);
+    fireEvent.pointerDown(handle(), { clientX: 1000, pointerId: 1 });
+    fireEvent.pointerMove(handle(), { clientX: 2000, pointerId: 1 });
+    expect(rail().style.width).toBe("200px");
+    fireEvent.pointerUp(handle(), { clientX: 2000, pointerId: 1 });
+    fireEvent.doubleClick(handle());
+    expect(rail().style.width).toBe("260px");
+  });
+
+  it("does not resize on a pointer move without a press", () => {
+    render(<ChatOutline entries={entries} current={0} onJump={() => {}} />);
+    fireEvent.pointerMove(handle(), { clientX: 100, pointerId: 1 });
+    expect(rail().style.width).toBe("260px");
   });
 });
