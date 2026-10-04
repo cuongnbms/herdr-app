@@ -17,3 +17,9 @@ src-tauri/gen/
 .idea
 .DS_Store
 .worktrees/
+
+# Local agent and scratch state
+tmp/
+.claude/
+.superpowers/
+.pi/
