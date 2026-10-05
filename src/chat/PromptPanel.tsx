@@ -358,6 +358,31 @@ export function PromptPanel({
     }
   };
 
+  // Escape on the card cancels the prompt, as it does in the TUI.
+  const cancel = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    try {
+      await io.keys(["esc"]);
+      setError(null);
+      await new Promise((r) => setTimeout(r, SETTLE_MS));
+      await refresh();
+    } catch (e) {
+      console.error("send_keys failed", e);
+      setError(`Send failed: ${message(e)}`);
+    } finally {
+      busy.current = false;
+      if (live.current) setPending(false);
+    }
+  };
+
+  // The Composer this panel replaces took the focus with it; take it back, so Escape reaches the card.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!document.activeElement || document.activeElement === document.body) panelRef.current?.focus({ preventScroll: true });
+  }, []);
+
   const sendKey = (key: string) =>
     void io.keys([key]).then(
       () => setError(null),
@@ -374,7 +399,18 @@ export function PromptPanel({
     if (showScreen) void refresh();
   }, [showScreen, refresh]);
   return (
-    <div className="blocked-panel" aria-busy={pending}>
+    <div
+      className="blocked-panel"
+      aria-busy={pending}
+      ref={panelRef}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !e.nativeEvent.isComposing && !e.defaultPrevented) {
+          e.preventDefault();
+          void cancel();
+        }
+      }}
+    >
       {prompt ? (
         <PromptCard key={prompt.id} prompt={prompt} asked={asked} pending={pending} onAnswer={(a) => void answer(a)} />
       ) : (

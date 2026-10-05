@@ -134,6 +134,17 @@ describe("PromptPanel", () => {
     );
   });
 
+  it("sends Esc to the agent when Escape is pressed on the card, and takes focus from nowhere", async () => {
+    render(<PromptPanel pane={pane} view={view} />);
+    const input = await screen.findByRole("textbox", { name: "Your own answer" });
+    expect(document.activeElement?.classList.contains("blocked-panel")).toBe(true);
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(sent()).toEqual([["agent.send_keys", { target: "w1:p1", keys: ["esc"] }]]));
+    // mid-composition Escape belongs to the IME
+    fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+    expect(sent()).toHaveLength(1);
+  });
+
   it("does not re-read the screen while the window is hidden", async () => {
     vi.useFakeTimers();
     let hidden = true;
