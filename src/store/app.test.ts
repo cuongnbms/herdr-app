@@ -4,6 +4,7 @@ import { paneKey } from "../lib/types";
 import type { MachineView } from "../lib/types";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { EMPTY_LAYOUT, sessionKey, useLayout } from "../sidebar/groups";
+import { useLensSettings } from "../settings/lens";
 
 const machine: MachineView = {
   id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "blocked",
@@ -253,6 +254,7 @@ describe("an agent showing up in the selected pane", () => {
   const key = paneKey(ref);
   beforeEach(() => {
     useApp.setState({ machines: {}, order: [], selected: null, lens: {}, lensOverride: {} });
+    useLensSettings.setState({ newAgentLens: "terminal" });
     useApp.getState().upsertMachine(withAgent(null));
     useApp.getState().select(ref);
   });
@@ -260,6 +262,12 @@ describe("an agent showing up in the selected pane", () => {
   it("keeps a shell pane on the Terminal lens when Claude starts in it", () => {
     useApp.getState().upsertMachine(withAgent("claude"));
     expect(chosenLens(useApp.getState(), key)).toBe("terminal");
+  });
+
+  it("leaves it to open on Chat when new agents open on Chat", () => {
+    useLensSettings.setState({ newAgentLens: "chat" });
+    useApp.getState().upsertMachine(withAgent("claude"));
+    expect(chosenLens(useApp.getState(), key)).toBeUndefined();
   });
 
   it("leaves a lens the user picked", () => {

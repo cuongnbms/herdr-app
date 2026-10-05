@@ -11,7 +11,7 @@ import { showToast } from "../ui/Toast";
  * when the pane is shown and again when its agent starts or finishes work (the moments a
  * transcript appears; blocked/idle flips would only repeat the ssh lookups), each time once
  * more after `retryMs`, since the status can change just before the file is written. Off
- * when the user turned off switching to Chat after the first prompt.
+ * when new agents open on the Terminal: such a pane stays there until the user switches.
  */
 export function useTranscriptProbe(
   pane: PaneRef | null,
@@ -21,7 +21,7 @@ export function useTranscriptProbe(
 ) {
   const key = pane ? paneKey(pane) : "";
   const fallenBack = useApp((s) => (key ? s.lensOverride[key] === "terminal" : false));
-  const enabled = useLensSettings((s) => s.chatAfterFirstPrompt);
+  const enabled = useLensSettings((s) => s.newAgentLens === "chat");
   const phase = status === "working" || status === "done" ? status : "other";
   useEffect(() => {
     if (!pane || !fallenBack || !enabled) return;

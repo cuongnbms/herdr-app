@@ -2,7 +2,7 @@ import { type CSSProperties, memo, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
 import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
-import { useLensSettings } from "./lens";
+import { NEW_AGENT_LENSES, useLensSettings } from "./lens";
 import { useNewTab } from "./newTab";
 import { AGENTS } from "../agents/openAgentTab";
 import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
@@ -142,16 +142,23 @@ function ChatSettings() {
   const isDefault = q.replies.length === DEFAULT_QUICK_REPLIES.length && q.replies.every((r, i) => r === DEFAULT_QUICK_REPLIES[i]);
   return (
     <>
-      <label className="switch">
-        <span>Switch to Chat after the first prompt</span>
-        <input
-          type="checkbox"
-          role="switch"
-          checked={lens.chatAfterFirstPrompt}
-          onChange={(e) => lens.setChatAfterFirstPrompt(e.target.checked)}
-        />
-      </label>
-      <p className="note">A new agent opens on the Terminal. When on, it turns to Chat once its conversation starts; when off, it stays on the Terminal until you switch.</p>
+      <div className="setting-row">
+        <span id="new-agent-lens-label">New agent opens in</span>
+        <div
+          className="seg seg-n"
+          role="group"
+          aria-labelledby="new-agent-lens-label"
+          style={{ "--n": NEW_AGENT_LENSES.length, "--i": NEW_AGENT_LENSES.indexOf(lens.newAgentLens) } as CSSProperties}
+        >
+          <span className="seg-thumb" />
+          {NEW_AGENT_LENSES.map((l) => (
+            <button key={l} aria-pressed={l === lens.newAgentLens} onClick={() => lens.setNewAgentLens(l)}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="note">Terminal keeps a new agent on the Terminal until you switch. Chat opens it on Chat once it has started, where you can type its first prompt.</p>
       <label className="switch">
         <span>Quick replies</span>
         <input type="checkbox" role="switch" checked={q.show} onChange={(e) => q.setShow(e.target.checked)} />

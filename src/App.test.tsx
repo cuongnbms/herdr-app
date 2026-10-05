@@ -3,9 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), Channel: class {} }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+// xterm needs a real window; the Terminal lens is stood in for by its loading overlay.
+vi.mock("./terminal/TerminalLens", async () => {
+  const { StartingOverlay } = await import("./terminal/StartingOverlay");
+  return { TerminalLens: ({ pane }: { pane: import("./lib/types").PaneRef }) => <StartingOverlay pane={pane} /> };
+});
 
 import App from "./App";
 import { useApp } from "./store/app";
+import { useLensSettings } from "./settings/lens";
 
 describe("App shell", () => {
   it("renders the sidebar and the empty main area", () => {
@@ -61,6 +67,24 @@ describe("App shell", () => {
     expect(screen.getByText("Waiting for the shell…")).toBeTruthy();
     expect(screen.queryByText("Select a pane")).toBeNull();
     useApp.setState({ selected: null, starting: {} });
+  });
+
+  it("keeps the loading overlay up while a new agent starts, even when new agents open on Chat", async () => {
+    useLensSettings.setState({ newAgentLens: "chat" });
+    const pane = { machine_id: "local", session: "default", pane_id: "w1:p7" };
+    useApp.setState({
+      machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "idle",
+        sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
+          { workspace_id: "w1", label: "x", number: 1, status: "idle", tabs: [
+            { tab_id: "w1:t1", label: "1", number: 1, status: "idle", panes: [
+              { pane_id: "w1:p7", terminal_id: "t7", title: "sh", cwd: null, agent: null, status: "unknown" } ] } ] } ] }] } },
+      order: ["local"], selected: pane, dashboardOpen: false, lens: {}, lensOverride: {},
+      starting: { "local/default/w1:p7": { agent: "claude", phase: "agent" } },
+    });
+    render(<App />);
+    expect(await screen.findByText("Starting claude…")).toBeTruthy();
+    useApp.setState({ machines: {}, order: [], selected: null, starting: {} });
+    useLensSettings.setState({ newAgentLens: "terminal" });
   });
 
   it("keeps file drops from navigating the webview, leaving sidebar drags alone", () => {

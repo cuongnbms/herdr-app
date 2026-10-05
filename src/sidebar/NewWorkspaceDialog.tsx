@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
+import { newAgentOnTerminal } from "../settings/lens";
 import { useApp } from "../store/app";
 import { PathInput } from "../ui/PathInput";
 import { setFolder } from "../workspaces/folder";
@@ -44,9 +45,9 @@ export function NewWorkspaceDialog({
         setFolder({ machine_id: machineId, session, workspace_id: workspaceId }, cwd);
       }
       if (agent !== "none") {
-        // A new agent opens on the Terminal; useTranscriptProbe turns it to Chat once its transcript exists.
+        // Held on the Terminal when new agents open there; otherwise it opens on Chat once herdr reports it.
         const pane = { machine_id: machineId, session, pane_id: res.root_pane.pane_id };
-        useApp.getState().setLensOverride(paneKey(pane), "terminal");
+        if (newAgentOnTerminal()) useApp.getState().setLensOverride(paneKey(pane), "terminal");
         await launchAgent((m, p) => herdrCall(machineId, session, m, p), pane, agent);
       }
     } catch (e) {

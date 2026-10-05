@@ -1,11 +1,14 @@
 import { create } from "zustand";
+import type { LensName } from "../lens";
 
 /** Shared with store.ts, theme.ts, quickReplies.ts and notify.ts: one JSON object, each writer merges its own keys. */
 const SETTINGS_KEY = "herdr-app:settings";
 
+export const NEW_AGENT_LENSES: readonly LensName[] = ["terminal", "chat"];
+
 export interface LensSettings {
-  /** Whether a pane showing the Terminal for want of a transcript turns to Chat once one exists. */
-  chatAfterFirstPrompt: boolean;
+  /** The lens a new agent opens on. On Chat, a pane that falls back to the Terminal for want of a transcript returns to Chat once one exists. */
+  newAgentLens: LensName;
 }
 
 function readRaw(): Record<string, unknown> {
@@ -27,18 +30,23 @@ function save(patch: Record<string, unknown>): void {
 }
 
 export function loadLensSettings(): LensSettings {
-  const raw = readRaw();
-  return { chatAfterFirstPrompt: typeof raw.chatAfterFirstPrompt === "boolean" ? raw.chatAfterFirstPrompt : true };
+  const v = readRaw().newAgentLens;
+  return { newAgentLens: NEW_AGENT_LENSES.includes(v as LensName) ? (v as LensName) : "terminal" };
 }
 
 interface LensSettingsStore extends LensSettings {
-  setChatAfterFirstPrompt: (on: boolean) => void;
+  setNewAgentLens: (lens: LensName) => void;
 }
 
 export const useLensSettings = create<LensSettingsStore>((setState) => ({
   ...loadLensSettings(),
-  setChatAfterFirstPrompt: (chatAfterFirstPrompt) => {
-    save({ chatAfterFirstPrompt });
-    setState({ chatAfterFirstPrompt });
+  setNewAgentLens: (newAgentLens) => {
+    save({ newAgentLens });
+    setState({ newAgentLens });
   },
 }));
+
+/** Whether a new agent should be held on the Terminal (see `newAgentLens`). */
+export function newAgentOnTerminal(): boolean {
+  return useLensSettings.getState().newAgentLens === "terminal";
+}

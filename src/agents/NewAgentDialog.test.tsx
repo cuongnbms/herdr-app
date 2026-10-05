@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
+import { useLensSettings } from "../settings/lens";
 import { useApp } from "../store/app";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { NewAgentDialog } from "./NewAgentDialog";
@@ -40,7 +41,12 @@ const open = (onError = vi.fn()) => {
 };
 
 describe("NewAgentDialog", () => {
-  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); useApp.setState({ selected: null, lensOverride: {} }); });
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    useApp.setState({ selected: null, lensOverride: {}, starting: {} });
+    useLensSettings.setState({ newAgentLens: "terminal" });
+  });
   const newKey = paneKey({ machine_id: "local", session: "default", pane_id: "w1:p7" });
 
   it("opens a new agent's pane in the Terminal lens, without a note, until its transcript exists", async () => {
@@ -54,6 +60,16 @@ describe("NewAgentDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "claude" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
     expect(lensWhenSelected).toBe("terminal");
+  });
+
+  it("leaves a new agent's pane to open on Chat when new agents open on Chat", async () => {
+    useLensSettings.setState({ newAgentLens: "chat" });
+    setFolder(ref, "/home/me/api");
+    respond();
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "claude" }));
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledTimes(2));
+    expect(useApp.getState().lensOverride[newKey]).toBeUndefined();
   });
 
   it("opens a plain shell tab without starting an agent", async () => {

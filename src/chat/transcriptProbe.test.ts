@@ -17,11 +17,11 @@ describe("useTranscriptProbe", () => {
   beforeEach(() => {
     useApp.setState({ lensOverride: { [key]: "terminal" } });
     vi.mocked(showToast).mockClear();
-    useLensSettings.setState({ chatAfterFirstPrompt: true });
+    useLensSettings.setState({ newAgentLens: "chat" });
   });
 
-  it("stays on the Terminal lens when switching to Chat after the first prompt is turned off", async () => {
-    useLensSettings.setState({ chatAfterFirstPrompt: false });
+  it("stays on the Terminal lens when new agents open on the Terminal", async () => {
+    useLensSettings.setState({ newAgentLens: "terminal" });
     const locate = vi.fn().mockResolvedValue(located);
     renderHook(() => useTranscriptProbe(pane, "working", locate));
     await new Promise((r) => setTimeout(r, 0));

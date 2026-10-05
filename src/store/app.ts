@@ -4,6 +4,7 @@ import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceVie
 import { pruneFolders } from "../workspaces/folder";
 import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
+import { newAgentOnTerminal } from "../settings/lens";
 
 export interface SessionRef {
   machine_id: string;
@@ -186,12 +187,11 @@ export function findPane(machines: Record<string, MachineView>, ref: PaneRef): P
   return undefined;
 }
 
-/** Claude started in the selected pane, shown on the Terminal with no lens chosen: it has no
- *  transcript until the first prompt, so stay on the Terminal the user is typing in rather than
- *  flip to Chat and back. useTranscriptProbe switches to Chat once the transcript exists. */
+/** Claude started in the selected pane, shown on the Terminal with no lens chosen, while new agents
+ *  open on the Terminal: stay on the Terminal the user is typing in until they switch. */
 function claudeStarted(s: Pick<AppState, "machines" | "selected" | "lens" | "lensOverride">, v: MachineView): boolean {
   const sel = s.selected;
-  if (!sel || sel.machine_id !== v.id || chosenLens(s, paneKey(sel))) return false;
+  if (!sel || sel.machine_id !== v.id || chosenLens(s, paneKey(sel)) || !newAgentOnTerminal()) return false;
   const before = findPane(s.machines, sel);
   return !!before && before.agent !== "claude" && findPane({ [v.id]: v }, sel)?.agent === "claude";
 }

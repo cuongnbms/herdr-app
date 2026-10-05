@@ -90,7 +90,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
               break;
             case "fallback":
               // In memory only: a fresh pane's transcript appears after its first prompt, and
-              // useTranscriptProbe returns to Chat then.
+              // useTranscriptProbe returns to Chat then when new agents open on Chat.
               setLensOverride(key, "terminal");
               break;
             case "error":

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/ipc", () => ({
@@ -73,14 +73,14 @@ describe("Settings quick replies", () => {
     expect(useQuickReplies.getState().show).toBe(false);
   });
 
-  it("turns off switching to Chat after the first prompt, and remembers it", () => {
-    useLensSettings.setState({ chatAfterFirstPrompt: true });
+  it("chooses the lens a new agent opens on, and remembers it", () => {
+    useLensSettings.setState({ newAgentLens: "terminal" });
     openChat();
-    const sw = screen.getByRole<HTMLInputElement>("switch", { name: "Switch to Chat after the first prompt" });
-    expect(sw.checked).toBe(true);
-    fireEvent.click(sw);
-    expect(useLensSettings.getState().chatAfterFirstPrompt).toBe(false);
-    expect(loadLensSettings().chatAfterFirstPrompt).toBe(false);
+    const group = screen.getByRole("group", { name: "New agent opens in" });
+    expect(within(group).getByRole("button", { name: "terminal" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(group).getByRole("button", { name: "chat" }));
+    expect(useLensSettings.getState().newAgentLens).toBe("chat");
+    expect(loadLensSettings().newAgentLens).toBe("chat");
   });
 
   it("edits, removes, adds and resets replies", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
+import { useLensSettings } from "../settings/lens";
 import { useApp } from "../store/app";
 import { getFolder } from "../workspaces/folder";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog";
@@ -23,7 +24,11 @@ const started = (params: unknown) => {
 };
 
 describe("NewWorkspaceDialog", () => {
-  beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    useLensSettings.setState({ newAgentLens: "terminal" });
+  });
 
   it("stores the directory as the new workspace's folder", async () => {
     vi.mocked(herdrCall).mockResolvedValue({ type: "workspace_created", workspace: { workspace_id: "w5" }, root_pane: { pane_id: "w5:p1" } });
@@ -59,5 +64,15 @@ describe("NewWorkspaceDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "pi", kind: "pi", pane_id: "w9:p1" }));
     expect(useApp.getState().lensOverride[paneKey({ machine_id: "local", session: "default", pane_id: "w9:p1" })]).toBe("terminal");
+  });
+  it("leaves a new agent to open on Chat when new agents open on Chat", async () => {
+    useLensSettings.setState({ newAgentLens: "chat" });
+    vi.mocked(herdrCall).mockImplementation((_m, _s, method, params) =>
+      method === "workspace.create" ? Promise.resolve({ type: "workspace_created", workspace: { workspace_id: "w10" }, root_pane: { pane_id: "w10:p1" } }) : started(params));
+    render(<NewWorkspaceDialog machineId="local" session="default" defaultCwd="/srv/api" onClose={() => {}} onError={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: "claude" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "claude", kind: "claude", pane_id: "w10:p1" }));
+    expect(useApp.getState().lensOverride[paneKey({ machine_id: "local", session: "default", pane_id: "w10:p1" })]).toBeUndefined();
   });
 });
