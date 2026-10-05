@@ -49,18 +49,18 @@ pub trait Sink: Send + Sync {
     fn event(&self, e: AttachEvent);
 }
 
-/// `herdr [--session S] terminal attach [--takeover] <terminal_id>`.
+/// `herdr [--session S] terminal attach <terminal_id> [--takeover]`. herdr 0.9.3 rejects
+/// `--takeover` ahead of the id ("unknown option: <terminal_id>").
 pub fn attach_argv(
     info: &MachineInfo,
     session: &str,
     terminal_id: &str,
     takeover: bool,
 ) -> Vec<String> {
-    let mut args = vec!["terminal", "attach"];
+    let mut args = vec!["terminal", "attach", terminal_id];
     if takeover {
         args.push("--takeover");
     }
-    args.push(terminal_id);
     herdr_argv(info, session, &args)
 }
 
@@ -929,8 +929,8 @@ mod tests {
                 "ai",
                 "terminal",
                 "attach",
-                "--takeover",
-                "term_x"
+                "term_x",
+                "--takeover"
             ]
         );
         assert_eq!(
