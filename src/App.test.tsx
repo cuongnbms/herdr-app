@@ -54,6 +54,15 @@ describe("App shell", () => {
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
+  it("shows the loading overlay, not the empty state, while a new pane's agent starts before herdr reports the pane", () => {
+    const pane = { machine_id: "local", session: "default", pane_id: "w1:p7" };
+    useApp.setState({ machines: {}, order: [], selected: pane, dashboardOpen: false, starting: { "local/default/w1:p7": { agent: "claude", phase: "shell" } } });
+    render(<App />);
+    expect(screen.getByText("Waiting for the shell…")).toBeTruthy();
+    expect(screen.queryByText("Select a pane")).toBeNull();
+    useApp.setState({ selected: null, starting: {} });
+  });
+
   it("keeps file drops from navigating the webview, leaving sidebar drags alone", () => {
     render(<App />);
     expect(fireEvent.dragOver(document, { dataTransfer: { types: ["Files"] } })).toBe(false);

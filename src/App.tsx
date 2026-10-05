@@ -21,6 +21,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
 import { useTranscriptProbe } from "./chat/transcriptProbe";
 import { AlertIcon, LayersIcon, TerminalIcon } from "./ui/icons";
+import { StartingOverlay } from "./terminal/StartingOverlay";
 
 function EmptyState({ icon, title, children }: { icon: React.ReactNode; title: string; children?: React.ReactNode }) {
   return (
@@ -89,6 +90,7 @@ export default function App() {
   const selected = useApp((s) => s.selected);
   const pane = useApp((s) => selectedPane(s)?.pane ?? null);
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
+  const starting = useApp((s) => (s.selected ? !!s.starting[paneKey(s.selected)] : false));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
   const chatFontSize = useSettings((s) => s.chatFontSize);
@@ -187,6 +189,15 @@ export default function App() {
                 <TerminalLens key={key} pane={ref} terminalId={pane.terminal_id} />
               )}
             </Suspense>
+          </>
+        ) : selRef && starting ? (
+          // herdr reports a new pane only in its next snapshot: keep the loading overlay up until then
+          // rather than flashing the empty state.
+          <>
+            <div className="titlebar" data-tauri-drag-region />
+            <div className="term-lens">
+              <StartingOverlay pane={selRef} />
+            </div>
           </>
         ) : (
           <>

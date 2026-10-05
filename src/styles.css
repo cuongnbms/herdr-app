@@ -469,10 +469,11 @@ kbd {
 
 /* ---------- Terminal lens ---------- */
 .term-lens { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--surface-term); }
-/* Over the Terminal while a new pane's agent starts (launchAgent). */
+/* Over the Terminal while a new pane's agent starts (launchAgent). Opaque from the first frame: a
+   fade-in would show the shell through it, and replay when App swaps its placeholder for the TerminalLens. */
 .term-starting {
   position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 10px;
-  font-size: 13px; color: var(--fg-2); background: var(--surface-term); animation: fade-in var(--t-fast);
+  font-size: 13px; color: var(--fg-2); background: var(--surface-term);
 }
 .term-starting-spinner {
   width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fg-3); border-top-color: transparent;
