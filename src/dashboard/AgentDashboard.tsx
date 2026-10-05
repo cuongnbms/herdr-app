@@ -25,8 +25,12 @@ export function DashboardEntry() {
   const open = useApp((s) => s.dashboardOpen);
   const setOpen = useApp((s) => s.setDashboardOpen);
   const counts = bucketCounts(useCards());
+  // Blocked outranks Done: the row takes one highlight, the more urgent one.
+  const alert = counts.attention > 0 ? " needs-you" : counts.done > 0 ? " has-done" : "";
   return (
-    <button className={"row dash-entry" + (open ? " active" : "")} aria-pressed={open} onClick={() => setOpen(!open)}>
+    <button
+      className={"row dash-entry" + (open ? " active" : "") + alert}
+      aria-pressed={open} onClick={() => setOpen(!open)}>
       <DashboardIcon className="icon machine-icon" />
       <span className="label">Agent Dashboard</span>
       <span className="dash-entry-counts">

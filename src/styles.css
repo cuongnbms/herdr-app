@@ -1055,14 +1055,37 @@ button.composer-model:disabled { cursor: default; }
 @keyframes slide-in { from { opacity: 0; transform: translateX(16px); } }
 
 /* ---------- Agent Dashboard ---------- */
-.dash-entry { margin-bottom: 6px; color: var(--fg); }
+.dash-entry { margin-bottom: 6px; border: 1px solid transparent; color: var(--fg); }
 .dash-entry .label { flex: 1; min-width: 0; }
-.dash-entry-counts { display: flex; align-items: center; gap: 8px; flex: none; }
+.dash-entry-counts { display: flex; align-items: center; gap: 6px; flex: none; }
 .dash-count { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); font-size: 11px; font-weight: 600; }
 .dash-count i { width: 6px; height: 6px; border-radius: 50%; }
 .dash-count-attention i { background: var(--amber); }
 .dash-count-working i { background: var(--blue); }
 .dash-count-done i { background: var(--green); }
+/* Blocked and unseen Done are what the user acts on: a tinted pill with a bigger, breathing dot. */
+.dash-count-attention, .dash-count-done {
+  --c: var(--amber); height: 16px; padding: 0 5px 0 4px; gap: 4px; box-sizing: border-box; border-radius: 999px;
+  color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent);
+}
+.dash-count-done { --c: var(--green); }
+.dash-count-attention i, .dash-count-done i { width: 8px; height: 8px; animation: dash-halo 1.6s ease-out infinite; }
+.dash-count-done i { animation-duration: 2.4s; }
+@keyframes dash-halo {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 70%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 0%, transparent); }
+}
+/* The whole row lights up like a blocked agent card: amber while an agent needs you, green for
+   unseen Done. */
+.dash-entry.needs-you, .dash-entry.has-done {
+  --c: var(--amber);
+  border-color: color-mix(in srgb, var(--c) 35%, transparent);
+  background: color-mix(in srgb, var(--c) 7%, transparent);
+  box-shadow: 0 0 18px -6px color-mix(in srgb, var(--c) 45%, transparent);
+}
+.dash-entry.has-done { --c: var(--green); }
+.dash-entry.needs-you:hover, .dash-entry.has-done:hover { background: color-mix(in srgb, var(--c) 11%, transparent); }
+.dash-entry.needs-you.active, .dash-entry.has-done.active { background: color-mix(in srgb, var(--c) 12%, var(--surface-3)); }
 
 /* Covers the Agents column and the main area; the sidebar stays usable and the panes underneath
    stay mounted. */
