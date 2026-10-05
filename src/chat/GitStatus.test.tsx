@@ -5,7 +5,21 @@ import { chatGitStatus } from "../lib/ipc";
 import { GitStatusLine } from "./GitStatus";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
-const status = (over = {}) => ({ folder: "herdr-app", path: "/Users/me/herdr-app", branch: "main", dirty: false, ...over });
+const status = (over = {}) => ({
+  folder: "herdr-app",
+  path: "/Users/me/herdr-app",
+  branch: "main",
+  dirty: false,
+  upstream: "origin/main",
+  ahead: 0,
+  behind: 0,
+  staged: 0,
+  modified: 0,
+  untracked: 0,
+  changed: 0,
+  changes: [],
+  ...over,
+});
 
 beforeEach(() => {
   vi.mocked(chatGitStatus).mockReset().mockResolvedValue(status());
@@ -20,10 +34,29 @@ describe("GitStatusLine", () => {
     expect(screen.getByTitle(/\/Users\/me\/herdr-app/)).toBeTruthy();
   });
 
-  it("marks uncommitted changes", async () => {
-    vi.mocked(chatGitStatus).mockResolvedValue(status({ dirty: true }));
+  it("counts staged, modified and untracked files, and commits ahead and behind", async () => {
+    vi.mocked(chatGitStatus).mockResolvedValue(
+      status({ dirty: true, ahead: 2, behind: 1, staged: 3, modified: 2, untracked: 0, changed: 4 }),
+    );
     render(<GitStatusLine pane={pane} status="idle" />);
-    expect(await screen.findByLabelText("uncommitted changes")).toBeTruthy();
+    expect((await screen.findByLabelText("2 commits ahead of origin/main")).textContent).toBe("↑2");
+    expect(screen.getByLabelText("1 commit behind origin/main").textContent).toBe("↓1");
+    expect(screen.getByLabelText("3 staged").textContent).toBe("+3");
+    expect(screen.getByLabelText("2 modified").textContent).toBe("~2");
+    expect(screen.queryByLabelText(/untracked/)).toBeNull();
+    expect(screen.queryByLabelText("clean")).toBeNull();
+  });
+
+  it("lists the changed files in the tooltip", async () => {
+    const changes = [
+      { code: " M", path: "src/a.ts" },
+      { code: "??", path: "new.txt" },
+    ];
+    vi.mocked(chatGitStatus).mockResolvedValue(status({ dirty: true, modified: 1, untracked: 1, changed: 17, changes }));
+    render(<GitStatusLine pane={pane} status="idle" />);
+    expect(await screen.findByLabelText("1 untracked")).toBeTruthy();
+    const title = screen.getByTitle(/herdr-app/).getAttribute("title");
+    expect(title).toBe("/Users/me/herdr-app\nmain → origin/main\n\n M src/a.ts\n?? new.txt\n… 15 more");
   });
 
   it("shows only the folder outside a repository", async () => {

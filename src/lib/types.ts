@@ -112,6 +112,15 @@ export interface GitStatus {
   path: string;
   branch: string | null;
   dirty: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  staged: number;
+  modified: number;
+  untracked: number;
+  /** How many files have any change; `changes` lists the first few. */
+  changed: number;
+  changes: { code: string; path: string }[];
 }
 
 export interface Located {

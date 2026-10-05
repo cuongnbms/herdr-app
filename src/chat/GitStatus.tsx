@@ -34,22 +34,43 @@ export function GitStatusLine({ pane, status }: { pane: PaneRef; status?: AgentS
   }, [key, tick]);
 
   if (!git || git.key !== key) return null;
-  const { folder, path, branch, dirty } = git.value;
+  const { folder, path, branch, dirty, upstream, ahead, behind, staged, modified, untracked } = git.value;
+  const upstreamName = upstream ?? "upstream";
+  const marks = [
+    { cls: "ahead", text: `↑${ahead}`, label: `${commits(ahead)} ahead of ${upstreamName}`, n: ahead },
+    { cls: "behind", text: `↓${behind}`, label: `${commits(behind)} behind ${upstreamName}`, n: behind },
+    { cls: "staged", text: `+${staged}`, label: `${staged} staged`, n: staged },
+    { cls: "modified", text: `~${modified}`, label: `${modified} modified`, n: modified },
+    { cls: "untracked", text: `?${untracked}`, label: `${untracked} untracked`, n: untracked },
+  ].filter((m) => m.n > 0);
   return (
-    <span className="composer-git" title={branch ? `${path}\n${branch}${dirty ? " (uncommitted changes)" : ""}` : path}>
+    <span className="composer-git" title={branch ? tooltip(git.value) : path}>
       <FolderIcon />
       <span className="composer-git-folder">{folder}</span>
       {branch && (
         <>
           <GitBranchIcon />
           <span className="composer-git-branch">{branch}</span>
-          {dirty ? (
-            <span className="composer-git-mark dirty" aria-label="uncommitted changes">●</span>
-          ) : (
+          {marks.map((m) => (
+            <span key={m.cls} className={`composer-git-mark ${m.cls}`} aria-label={m.label}>
+              {m.text}
+            </span>
+          ))}
+          {!dirty && ahead + behind === 0 && (
             <span className="composer-git-mark clean" aria-label="clean">✓</span>
           )}
         </>
       )}
     </span>
   );
+}
+
+const commits = (n: number) => `${n} commit${n === 1 ? "" : "s"}`;
+
+/** The path, branch and upstream, then the changed files as `git status --short` lists them. */
+function tooltip({ path, branch, upstream, changed, changes }: GitStatus) {
+  const lines = [path, upstream ? `${branch} → ${upstream}` : `${branch}`];
+  if (changes.length > 0) lines.push("", ...changes.map((c) => `${c.code} ${c.path}`));
+  if (changed > changes.length) lines.push(`… ${changed - changes.length} more`);
+  return lines.join("\n");
 }

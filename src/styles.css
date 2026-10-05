@@ -925,9 +925,13 @@ kbd {
 .composer-git-folder, .composer-git-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-git-branch { color: var(--fg-2); }
 .composer-git-folder + .icon { margin-left: 6px; }
-.composer-git-mark { flex: none; font-size: 10px; }
-.composer-git-mark.clean { color: var(--green); }
-.composer-git-mark.dirty { color: var(--amber); }
+.composer-git-mark { flex: none; font-variant-numeric: tabular-nums; }
+.composer-git-branch + .composer-git-mark { margin-left: 2px; }
+.composer-git-mark.clean { font-size: 10px; color: var(--green); }
+.composer-git-mark.ahead, .composer-git-mark.behind { color: var(--fg-2); }
+.composer-git-mark.staged { color: var(--green); }
+.composer-git-mark.modified { color: var(--amber); }
+.composer-git-mark.untracked { color: var(--fg-3); }
 button.composer-model { padding: 2px 6px; margin-right: -6px; border: 0; border-radius: 5px; background: none; cursor: pointer; }
 button.composer-model:hover:not(:disabled), button.composer-model[aria-expanded="true"] { background: var(--active); color: var(--fg-2); }
 button.composer-model:disabled { cursor: default; }
