@@ -22,11 +22,13 @@ describe("ChatOutline", () => {
     expect(onJump).toHaveBeenCalledWith(0);
   });
 
-  it("shows a single turn, and nothing without turns", () => {
-    const { container, rerender } = render(<ChatOutline entries={entries.slice(0, 1)} current={0} onJump={() => {}} />);
+  it("shows a single turn, and keeps the rail without turns so the chat doesn't shift", () => {
+    const { rerender } = render(<ChatOutline entries={entries.slice(0, 1)} current={0} onJump={() => {}} />);
     expect(screen.getByRole("button", { name: "fix the header" }).getAttribute("aria-current")).toBe("true");
     rerender(<ChatOutline entries={[]} current={-1} onJump={() => {}} />);
-    expect(container.innerHTML).toBe("");
+    expect(rail().style.width).toBe("260px");
+    expect(rail().querySelectorAll("button")).toHaveLength(0);
+    expect(screen.getByText("Your prompts will appear here.")).toBeTruthy();
   });
 
   it("widens as its edge is dragged left, and remembers the width", () => {

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } fr
 import type { OutlineEntry } from "./outline";
 import { clampOutlineWidth, loadOutlineWidth, OUTLINE_DEFAULT, OUTLINE_MAX, OUTLINE_MIN, saveOutlineWidth } from "./outlineWidth";
 
-/** The rail beside a wide chat: one line per user turn, the one being read highlighted. */
+/** The rail beside a wide chat: one line per user turn, the one being read highlighted.
+ *  Shown even before the first turn, so the chat column doesn't shift when it arrives. */
 export function ChatOutline({ entries, current, onJump }: { entries: OutlineEntry[]; current: number; onJump: (row: number) => void }) {
   const listRef = useRef<HTMLOListElement>(null);
   const [width, setWidth] = useState(loadOutlineWidth);
@@ -13,8 +14,6 @@ export function ChatOutline({ entries, current, onJump }: { entries: OutlineEntr
     const el = listRef.current?.children[current]?.firstElementChild as HTMLElement | null | undefined;
     el?.scrollIntoView?.({ block: "nearest" });
   }, [current]);
-  if (entries.length === 0) return null;
-
   const resize = (px: number) => {
     const w = clampOutlineWidth(px);
     setWidth(w);
@@ -59,6 +58,7 @@ export function ChatOutline({ entries, current, onJump }: { entries: OutlineEntr
         onKeyDown={onKeyDown}
       />
       <div className="chat-outline-head">Outline</div>
+      {entries.length === 0 && <p className="chat-outline-empty">Your prompts will appear here.</p>}
       <ol ref={listRef}>
         {entries.map((e, i) => (
           <li key={e.key}>
