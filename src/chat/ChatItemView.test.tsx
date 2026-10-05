@@ -56,6 +56,13 @@ describe("ChatItemView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("Done **now**"));
   });
+  it("copies a code block's source from its head", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "Run:\n\n```sh\necho hi\nls\n```\n" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("echo hi\nls"));
+  });
   it("offers no copy unless asked (narration in a work block)", () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Looking at the file" }} />);
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();

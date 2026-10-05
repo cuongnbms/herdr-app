@@ -784,6 +784,12 @@ kbd {
   color: var(--fg-3); font-family: var(--mono); font-size: 11px; text-transform: lowercase;
 }
 .chat-code pre { margin: 0; border: 0; border-radius: 0; }
+/* A block's own copy sits at the right of its head and shows while the block is hovered. */
+.chat-code-head { justify-content: space-between; }
+.chat-code-actions { display: flex; align-items: center; gap: 8px; }
+.chat-assistant .chat-code-head .chat-copy { width: 20px; height: 20px; margin-right: -6px; border-radius: 4px; opacity: 0; }
+.chat-code-head .chat-copy svg { width: 12px; height: 12px; }
+.chat-code:hover .chat-code-head .chat-copy, .chat-code-head .chat-copy:focus-visible, .chat-code-head .chat-copy[aria-label="Copied"] { opacity: 1; }
 .chat-assistant :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--active); color: var(--code-inline); }
 .chat-assistant a { color: var(--link); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent); }
 .chat-assistant a:hover { border-bottom-color: currentColor; }
@@ -1177,7 +1183,6 @@ button.composer-model:disabled { cursor: default; }
 
 .move-choices { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
 .move-choices button { flex-shrink: 0; justify-content: flex-start; text-align: left; }
-.chat-mermaid .chat-code-head { justify-content: space-between; }
 .chat-mermaid-toggle {
   border: 0; background: none; padding: 0; cursor: pointer;
   color: var(--fg-3); font: inherit; text-transform: none;

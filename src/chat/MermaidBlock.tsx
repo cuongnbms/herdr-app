@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { useTheme } from "../settings/theme";
+import { CopyButton } from "./CopyButton";
 
 /** Wait this long after the last change before rendering, so a streaming reply does not re-render per token. */
 const RENDER_DELAY_MS = 150;
@@ -90,11 +91,14 @@ export function MermaidBlock({ source, children }: { source: string; children: R
     <div className="chat-code chat-mermaid">
       <div className="chat-code-head">
         mermaid
-        {svg !== null && (
-          <button type="button" className="chat-mermaid-toggle" onClick={() => setShowSource(!showSource)}>
-            {showSource ? "Diagram" : "Source"}
-          </button>
-        )}
+        <span className="chat-code-actions">
+          {svg !== null && (
+            <button type="button" className="chat-mermaid-toggle" onClick={() => setShowSource(!showSource)}>
+              {showSource ? "Diagram" : "Source"}
+            </button>
+          )}
+          <CopyButton text={source} label="Copy code" />
+        </span>
       </div>
       {diagram ? <div className="chat-mermaid-svg" dangerouslySetInnerHTML={{ __html: svg }} /> : <pre>{children}</pre>}
     </div>

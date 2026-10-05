@@ -1,10 +1,11 @@
-import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Markdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import type { ChatItem } from "../lib/types";
-import { BrainIcon, CheckIcon, ChevronIcon, CopyIcon } from "../ui/icons";
+import { BrainIcon, ChevronIcon } from "../ui/icons";
+import { CopyButton } from "./CopyButton";
 import { MermaidBlock } from "./MermaidBlock";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
 import { ChatImages } from "./images";
@@ -50,10 +51,14 @@ const InLinkContext = createContext(false);
 const mdComponents: Components = {
   pre({ node, children }) {
     const lang = codeLanguage(node);
-    if (lang === "mermaid") return <MermaidBlock source={nodeText(node).trimEnd()}>{children}</MermaidBlock>;
+    const source = nodeText(node).trimEnd();
+    if (lang === "mermaid") return <MermaidBlock source={source}>{children}</MermaidBlock>;
     return (
       <div className="chat-code">
-        <div className="chat-code-head">{lang ?? "code"}</div>
+        <div className="chat-code-head">
+          {lang ?? "code"}
+          <CopyButton text={source} label="Copy code" />
+        </div>
         <pre>{children}</pre>
       </div>
     );
@@ -180,34 +185,6 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
         </div>
       )}
     </div>
-  );
-}
-
-/** Copies the text and says so for a moment. */
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(t);
-  }, [copied]);
-  return (
-    <button
-      className="chat-copy"
-      aria-label={copied ? "Copied" : "Copy"}
-      title={copied ? "Copied" : "Copy"}
-      onClick={() =>
-        // Through a promise, so a webview without the Clipboard API fails here, not in the handler.
-        Promise.resolve()
-          .then(() => navigator.clipboard.writeText(text))
-          .then(
-          () => setCopied(true),
-          (e) => console.error("copy failed", e),
-        )
-      }
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </button>
   );
 }
 

@@ -23,18 +23,27 @@ describe("mermaid blocks", () => {
 
   it("renders a mermaid fence as a diagram", async () => {
     const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
-    await waitFor(() => expect(container.querySelector(".chat-mermaid svg")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
     expect(mermaid.render).toHaveBeenCalledWith(expect.any(String), "graph TD; A-->B");
     expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: "strict", startOnLoad: false }));
+  });
+
+  it("copies the diagram's source", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; E-->F") }} />);
+    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("graph TD; E-->F"));
   });
 
   it("shows a cached diagram on remount without rendering again", async () => {
     const item = { kind: "assistant_text" as const, markdown: md("graph TD; C-->D") };
     const first = render(<ChatItemView item={item} />);
-    await waitFor(() => expect(first.container.querySelector(".chat-mermaid svg")).not.toBeNull());
+    await waitFor(() => expect(first.container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
     first.unmount();
     const second = render(<ChatItemView item={item} />);
-    expect(second.container.querySelector(".chat-mermaid svg")).not.toBeNull();
+    expect(second.container.querySelector(".chat-mermaid-svg svg")).not.toBeNull();
     expect(mermaid.render).toHaveBeenCalledTimes(1);
   });
 
@@ -50,18 +59,18 @@ describe("mermaid blocks", () => {
     mermaid.render.mockRejectedValue(new Error("boom"));
     const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
     await waitFor(() => expect(mermaid.render).toHaveBeenCalled());
-    expect(container.querySelector(".chat-mermaid svg")).toBeNull();
+    expect(container.querySelector(".chat-mermaid-svg svg")).toBeNull();
     expect(screen.getByText("graph TD; A-->B")).toBeTruthy();
   });
 
   it("toggles between the diagram and its source", async () => {
     const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md("graph TD; A-->B") }} />);
-    await waitFor(() => expect(container.querySelector(".chat-mermaid svg")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     expect(screen.getByText("graph TD; A-->B")).toBeTruthy();
-    expect(container.querySelector(".chat-mermaid svg")).toBeNull();
+    expect(container.querySelector(".chat-mermaid-svg svg")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Diagram" }));
-    expect(container.querySelector(".chat-mermaid svg")).not.toBeNull();
+    expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull();
   });
 
   it("leaves other languages as plain code blocks", () => {
