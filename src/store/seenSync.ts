@@ -5,7 +5,9 @@ type Call = (machineId: string, session: string, method: string, params: unknown
 
 /** Tells herdr about Done panes the user has looked at. herdr keeps a pane `done` until a
  *  focus marks it seen (reads and attaches do not), so each pane newly added to `doneSeen`
- *  gets a `pane.focus`, which turns it `idle` for every client. Returns the unsubscribe. */
+ *  gets a `pane.focus`, which turns it `idle` for every client. The backend takes this call
+ *  as the app's own seen too: it keeps a pane done past herdr's own seen until the app focuses
+ *  it (see `DoneMarks` in src-tauri). Returns the unsubscribe. */
 export function syncSeenToHerdr(call: Call = herdrCall): () => void {
   return useApp.subscribe((s, prev) => {
     if (s.doneSeen === prev.doneSeen) return;

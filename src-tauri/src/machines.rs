@@ -5,7 +5,7 @@ use crate::{
     herdr::{
         rpc,
         types::AgentStatus,
-        watcher::{spawn_watcher, WatchEvent},
+        watcher::{spawn_watcher, SharedMarks, WatchEvent},
     },
     transcript::ChatManager,
     transport::{
@@ -212,6 +212,8 @@ struct Sess {
     supervisor: Option<JoinHandle<()>>,
     /// Asks this Session's watcher for a fresh snapshot.
     refetch: Arc<tokio::sync::Notify>,
+    /// Done marks the app keeps on top of herdr's statuses (see `DoneMarks`).
+    marks: Arc<SharedMarks>,
 }
 
 struct Machine {
@@ -1142,6 +1144,7 @@ impl MachineManager {
                         error: None,
                         supervisor: None,
                         refetch: Arc::default(),
+                        marks: Arc::default(),
                     },
                 };
                 s.entry = entry;
@@ -1154,6 +1157,7 @@ impl MachineManager {
                                 name,
                                 transport.clone(),
                                 s.refetch.clone(),
+                                s.marks.clone(),
                             )));
                         }
                     }
@@ -1321,6 +1325,16 @@ impl MachineManager {
         }
         let entry = self.session(pane_machine, session)?;
         let socket = self.transport(pane_machine)?.local_socket(&entry).await?;
+        if method == "pane.focus" {
+            // Mark the pane seen here before herdr answers with its done → idle.
+            if let Some(pane_id) = params["pane_id"].as_str() {
+                let _ = self.with_machine(pane_machine, |m| {
+                    if let Some(s) = m.sessions.iter().find(|s| s.entry.name == session) {
+                        s.marks.app_focused(pane_id);
+                    }
+                });
+            }
+        }
         let result = rpc::call(&socket, method, params).await?;
         if method == "pane.rename" {
             // Refetch now rather than wait for the rename's `pane.updated` event.
@@ -1355,6 +1369,7 @@ impl MachineManager {
         name: String,
         transport: Arc<dyn Transport>,
         refetch: Arc<tokio::sync::Notify>,
+        marks: Arc<SharedMarks>,
     ) {
         let mut attempt = 0u32;
         loop {
@@ -1366,8 +1381,13 @@ impl MachineManager {
                 Err(e) => e,
                 Ok(socket) => {
                     let (tx, mut rx) = mpsc::unbounded_channel();
-                    let _guard =
-                        AbortOnDrop(spawn_watcher(name.clone(), socket, tx, refetch.clone()));
+                    let _guard = AbortOnDrop(spawn_watcher(
+                        name.clone(),
+                        socket,
+                        tx,
+                        refetch.clone(),
+                        marks.clone(),
+                    ));
                     let mut closed = None;
                     while let Some(ev) = rx.recv().await {
                         match ev {
@@ -2783,6 +2803,67 @@ mod tests {
         .await
         .unwrap();
         assert!(wait_for(|| f.calls_of("session.snapshot") > before).await);
+    }
+
+    #[tokio::test]
+    async fn pane_focus_is_the_apps_own_seen() {
+        let snap: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/snapshot.json")).unwrap();
+        let f = FakeHerdr::start(Arc::new(move |m, _| {
+            if m == "session.snapshot" {
+                Ok(json!({"type":"session_snapshot","snapshot": snap.clone()}))
+            } else {
+                Ok(json!({"type":"ok"}))
+            }
+        }));
+        let d = tempfile::tempdir().unwrap();
+        let mgr = MachineManager::new(d.path().join("m.json"), Arc::new(|_| {}));
+        let sock = f.path.to_string_lossy().to_string();
+        mgr.with_transport_factory(Arc::new(move |_| {
+            Arc::new(FakeT { sock: sock.clone() }) as Arc<dyn Transport>
+        }));
+        mgr.connect("local").await.unwrap();
+        assert!(wait_for(|| f.calls_of("events.subscribe") >= 1).await);
+        let status = |pane: &str| {
+            mgr.views()
+                .into_iter()
+                .flat_map(|m| m.sessions)
+                .flat_map(|s| s.workspaces)
+                .flat_map(|w| w.tabs)
+                .flat_map(|t| t.panes)
+                .find(|p| p.pane_id == pane)
+                .map(|p| p.status)
+        };
+        // herdr turns w1:p1's run straight to idle; the app keeps it done until it focuses it.
+        f.emit(
+            "pane.agent_status_changed",
+            json!({"pane_id":"w1:p1","agent_status":"idle"}),
+        );
+        assert!(wait_for(|| status("w1:p1") == Some(AgentStatus::Done)).await);
+        mgr.call("local", "default", "pane.focus", json!({"pane_id":"w1:p1"}))
+            .await
+            .unwrap();
+        assert!(wait_for(|| status("w1:p1") == Some(AgentStatus::Idle)).await);
+        // herdr's own done → idle only counts after the app's focus.
+        f.emit(
+            "pane.agent_status_changed",
+            json!({"pane_id":"w1:p2","agent_status":"done"}),
+        );
+        assert!(wait_for(|| status("w1:p2") == Some(AgentStatus::Done)).await);
+        f.emit(
+            "pane.agent_status_changed",
+            json!({"pane_id":"w1:p2","agent_status":"idle"}),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            status("w1:p2"),
+            Some(AgentStatus::Done),
+            "seen elsewhere keeps done"
+        );
+        mgr.call("local", "default", "pane.focus", json!({"pane_id":"w1:p2"}))
+            .await
+            .unwrap();
+        assert!(wait_for(|| status("w1:p2") == Some(AgentStatus::Idle)).await);
     }
 
     #[tokio::test]
