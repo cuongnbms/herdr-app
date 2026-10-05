@@ -53,4 +53,23 @@ describe("createKeyHandler", () => {
     expect(createKeyHandler(send)(key("keydown", { key: "Enter", keyCode: 13, shiftKey: true, ctrlKey: true }))).toBe(true);
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("sends Home and End as Ctrl+A and Ctrl+E, the line start and end keys of zsh, Claude and pi", () => {
+    const send = vi.fn();
+    const handle = createKeyHandler(send);
+    const home = key("keydown", { key: "Home", keyCode: 36 });
+    expect(handle(home)).toBe(false);
+    expect(home.defaultPrevented).toBe(true);
+    expect(handle(key("keyup", { key: "Home", keyCode: 36 }))).toBe(true);
+    expect(handle(key("keydown", { key: "End", keyCode: 35 }))).toBe(false);
+    expect(send.mock.calls).toEqual([["\x01"], ["\x05"]]);
+  });
+
+  it("leaves Home and End with modifiers to xterm", () => {
+    const send = vi.fn();
+    const handle = createKeyHandler(send);
+    expect(handle(key("keydown", { key: "Home", keyCode: 36, shiftKey: true }))).toBe(true);
+    expect(handle(key("keydown", { key: "End", keyCode: 35, ctrlKey: true }))).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
 });
