@@ -973,7 +973,8 @@ button.composer-model:disabled { cursor: default; }
   background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); cursor: pointer;
   transition: background var(--t-fast);
 }
-.stop:hover { background: color-mix(in srgb, var(--err) 22%, transparent); }
+.stop:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 22%, transparent); }
+.stop:disabled { border-color: transparent; background: var(--active); color: var(--fg-3); cursor: default; }
 .stop svg { fill: currentColor; }
 .stop + .send, .composer-model + .send, .composer-model + .stop { margin-left: 0; }
 .composer-error { font-size: 12px; padding: 0 4px; }

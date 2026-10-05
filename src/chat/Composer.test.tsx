@@ -85,11 +85,13 @@ describe("Composer", () => {
     expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.send_keys", { target: "w1:p1", keys: ["esc"] });
   });
 
-  it("shows Stop only while the agent works, and Stop sends Esc", () => {
+  it("enables Stop only while the agent works, and Stop sends Esc", () => {
+    const stop = () => screen.getByRole("button", { name: "Stop" }) as HTMLButtonElement;
     const { rerender } = render(<Composer pane={pane} agent="claude" status="idle" />);
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(stop().disabled).toBe(true);
     rerender(<Composer pane={pane} agent="claude" status="working" />);
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(stop().disabled).toBe(false);
+    fireEvent.click(stop());
     expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.send_keys", { target: "w1:p1", keys: ["esc"] });
     // Text typed while the agent works still sends: the agent queues it.
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "also check the docs" } });

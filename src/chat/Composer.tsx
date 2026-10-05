@@ -372,12 +372,17 @@ export function Composer({
             )
           )}
           {/* Esc interrupts the agent's turn without killing it the way Ctrl+C can. Send stays
-              usable beside it: the agent queues text sent while it works. */}
-          {status === "working" && (
-            <button className="stop" aria-label="Stop" title="Stop (Esc)" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: ["esc"] }).catch(() => {})}>
-              <StopIcon />
-            </button>
-          )}
+              usable beside it: the agent queues text sent while it works. Stop stays mounted,
+              disabled while idle, so the row doesn't shift when a turn starts or ends. */}
+          <button
+            className="stop"
+            aria-label="Stop"
+            title="Stop (Esc)"
+            disabled={status !== "working"}
+            onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: ["esc"] }).catch(() => {})}
+          >
+            <StopIcon />
+          </button>
           <button className="send" aria-label="Send" disabled={!canSend} onClick={send}>
             <SendIcon />
           </button>
