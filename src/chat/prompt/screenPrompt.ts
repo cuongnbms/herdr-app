@@ -620,7 +620,26 @@ function promptTailIsActive(prompt: ParsedPrompt, screen: string): boolean {
   }
 }
 
-function parsePrompt(agent: string, screen: string): ParsedPrompt | null {
+// Claude's background agents panel: `⏺ main` (● off macOS), then a row per agent
+const CLAUDE_AGENTS_HEAD_RE = /^[⏺●]\s+main$/;
+const CLAUDE_AGENTS_ROW_RE = /^[◯◉○●⏺]\s+\S/;
+
+/**
+ * The screen without the panel Claude draws under everything while background agents run
+ * (`⏺ main` and a row per agent, their counters ticking), so a prompt over it still ends the
+ * screen. Only a panel that ends the screen goes.
+ */
+function withoutClaudeAgents(screen: string): string {
+  const lines = screen.replace(ANSI_RE, "").split(/\r?\n/);
+  const head = findLastIndex(lines, (line) => CLAUDE_AGENTS_HEAD_RE.test(cleanLine(line)));
+  if (head < 0) return screen;
+  const rows = lines.slice(head + 1).map(cleanLine).filter(Boolean);
+  if (rows.length === 0 || !rows.every((line) => CLAUDE_AGENTS_ROW_RE.test(line))) return screen;
+  return lines.slice(0, head).join("\n");
+}
+
+function parsePrompt(agent: string, raw: string): ParsedPrompt | null {
+  const screen = agent === "claude" ? withoutClaudeAgents(raw) : raw;
   const candidates = agent === "claude"
     ? [parseClaudeQuestion(screen), parseClaudePreviewQuestion(screen), parseClaudeSubmit(screen), parseClaudeApproval(screen), parseClaudeConfirm(screen)]
     : agent === "pi" ? [parsePiModel(screen)] : [];

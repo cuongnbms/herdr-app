@@ -337,6 +337,64 @@ cancel
   });
 });
 
+describe("Claude's prompt over its background agents", () => {
+  // Claude Code 2.1.289 with background agents running draws their panel under whatever owns
+  // the screen's end, the prompt's hint included; its counters tick on every redraw (live)
+  const agents = (seconds = 58) => `
+  ⏺ main
+  ◯ Explore  Checking set_passcode and PhoneNormalizable.normalize      5m ${seconds}s · ↓ 130.5k tokens
+  ◯ Explore  Reading LimitService tier_limit resolution                 5m ${seconds}s · ↓ 165.5k tokens
+`;
+  const question = `
+ ☐ Scope
+
+Bạn muốn phạm vi cập nhật đến đâu?
+
+❯ 1. Sửa cái đang có (Recommended)
+     Cho 6 workflow + utils + load scripts chạy đúng với BE hiện tại.
+  2. Sửa + viết workflow mới
+     Như trên, thêm script cho tính năng mới của BE.
+  3. Type something.
+────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+`;
+
+  test("reads the question under the panel as it reads it without one, whatever the counters say", () => {
+    const plain = parseInteractivePrompt("claude", question);
+    const prompt = parseInteractivePrompt("claude", question + agents());
+    expect(prompt).toMatchObject({ kind: "question", title: "Scope", question: "Bạn muốn phạm vi cập nhật đến đâu?", custom_option_index: 2, chat: true });
+    expect(labels(prompt)).toEqual(["Sửa cái đang có (Recommended)", "Sửa + viết workflow mới"]);
+    expect(prompt?.id).toBe(plain?.id);
+    expect(parseInteractivePrompt("claude", question + agents(59))?.id).toBe(prompt?.id);
+    expect(answerKeys(prompt!, { option_index: 1 })).toEqual([{ keys: ["down"] }, { keys: ["enter"] }]);
+  });
+
+  test("reads an approval under the panel", () => {
+    const approval = parseInteractivePrompt("claude", `
+Bash command
+
+  curl -I https://example.com
+  Fetch HTTP headers.
+
+This command requires approval
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+
+Esc to cancel · Tab to amend · ctrl+e to explain
+${agents()}`);
+    expect(approval?.kind).toBe("approval");
+    expect(labels(approval)).toEqual(["Yes", "No"]);
+  });
+
+  test("still takes an answered question above later output for no prompt", () => {
+    expect(parseInteractivePrompt("claude", `${question}\n● Done.\n\n> \n${agents()}`)).toBeNull();
+  });
+});
+
 describe("Claude's unnumbered menus", () => {
   // Claude Code 2.1.285 on a folder it has not seen, as herdr's pane read shows it (live)
   const trust = (selected: 0 | 1 = 0, after = "") => `
