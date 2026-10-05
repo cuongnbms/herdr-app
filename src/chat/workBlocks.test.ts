@@ -16,7 +16,9 @@ function shape(rows: ChatRow[]): string[] {
         : it.kind === "thinking" ? `think:${it.text}`
           : it.kind === "tool_call" ? `call:${it.id}`
             : it.kind === "tool_result" ? `result:${it.call_id}`
-              : `system:${it.text}`;
+              : it.kind === "shell_command" ? `shell:${it.command}`
+                : it.kind === "shell_output" ? `out:${it.stdout}`
+                  : `system:${it.text}`;
   return rows.map((r) => (r.kind === "item" ? one(r.item) : `work[${r.block.items.map(one).join(",")}]`));
 }
 
@@ -46,6 +48,11 @@ describe("buildRows", () => {
   it("starts a new turn at a system line", () => {
     const { rows } = buildRows([user("go"), call("a"), say("ok"), { kind: "system", text: "Agent finished" }, call("b"), say("done")]);
     expect(shape(rows)).toEqual(["user:go", "work[call:a]", "say:ok", "system:Agent finished", "work[call:b]", "say:done"]);
+  });
+
+  it("keeps a shell command and its output out of the agent's work", () => {
+    const { rows } = buildRows([user("go"), call("a"), say("ok"), { kind: "shell_command", command: "ls" }, { kind: "shell_output", stdout: "a.txt", stderr: "" }, call("b"), say("done")]);
+    expect(shape(rows)).toEqual(["user:go", "work[call:a]", "say:ok", "shell:ls", "out:a.txt", "work[call:b]", "say:done"]);
   });
 
   it("keeps a result whose call is not loaded inside the block", () => {

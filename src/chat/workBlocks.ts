@@ -32,7 +32,12 @@ function blockId(items: ChatItem[]): string {
   return `${first.kind}:${first.ts ?? ""}:${first.kind === "thinking" ? first.text.slice(0, 64) : ""}`;
 }
 
-/** Splits loaded items into rows; a user or system item opens a turn. `offset` is the absolute index of `items[0]`, so item keys survive prepends and trims. */
+/** What the user or the CLI put in the chat rather than the Agent: each opens a turn. */
+function opensTurn(it: ChatItem): boolean {
+  return it.kind === "user" || it.kind === "system" || it.kind === "shell_command" || it.kind === "shell_output";
+}
+
+/** Splits loaded items into rows; a user, system or shell item opens a turn. `offset` is the absolute index of `items[0]`, so item keys survive prepends and trims. */
 export function buildRows(items: ChatItem[], offset = 0): { rows: ChatRow[]; results: Map<string, ToolResult> } {
   const calls = new Set<string>();
   const results = new Map<string, ToolResult>();
@@ -66,7 +71,7 @@ export function buildRows(items: ChatItem[], offset = 0): { rows: ChatRow[]; res
     bodyAt = [];
   };
   items.forEach((it, index) => {
-    if (it.kind === "user" || it.kind === "system") {
+    if (opensTurn(it)) {
       flush();
       lastBlock = -1;
       opener = it;

@@ -15,6 +15,11 @@ describe("outline", () => {
     for (const e of entries) expect(rows[e.row]).toMatchObject({ kind: "item", item: { kind: "user" } });
   });
 
+  it("lists a shell command as a turn", () => {
+    const { rows } = buildRows([user("first"), { kind: "shell_command", command: "git status" }, { kind: "shell_output", stdout: "clean", stderr: "" }], 0);
+    expect(outline(rows).map((e) => e.label)).toEqual(["first", "!git status"]);
+  });
+
   it("labels a turn by its first non-empty line", () => {
     const { rows } = buildRows([user("\n\n  fix the header  \nthen the footer")], 0);
     expect(outline(rows)[0].label).toBe("fix the header");

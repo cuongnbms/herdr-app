@@ -44,6 +44,29 @@ describe("ChatItemView", () => {
     expect(screen.getByText("- c")).toBeTruthy();
     expect(screen.getByText("+ d")).toBeTruthy();
   });
+  it("renders a shell command as a monospace bubble that copies the command", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const { container } = render(<ChatItemView item={{ kind: "shell_command", command: "ls -la" }} copy />);
+    expect(container.querySelector(".chat-bubble.chat-shell-command")?.textContent).toBe("!ls -la");
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("ls -la"));
+  });
+  it("renders shell output with stderr marked as an error", () => {
+    const { container } = render(<ChatItemView item={{ kind: "shell_output", stdout: "a.txt", stderr: "denied" }} />);
+    expect(screen.getByText("a.txt").className).toBe("chat-result");
+    expect(screen.getByText("denied").className).toBe("chat-result error");
+    expect(container.querySelector(".chat-shell-more")).toBeNull();
+  });
+  it("folds long shell output until expanded", () => {
+    const stdout = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n");
+    render(<ChatItemView item={{ kind: "shell_output", stdout, stderr: "" }} />);
+    expect(screen.getByText(/line 12$/)).toBeTruthy();
+    expect(screen.queryByText(/line 13/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 18 more lines" }));
+    expect(screen.getByText(/line 30$/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /more lines/ })).toBeNull();
+  });
   it("copies a user message and an answer's markdown", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });

@@ -96,6 +96,8 @@ export type ChatItem = (
   | { kind: "tool_call"; id: string; name: string; input_summary: string; input: unknown }
   | { kind: "tool_result"; call_id: string; output: string; is_error: boolean; images?: ImageRef[] }
   | { kind: "system"; text: string }
+  | { kind: "shell_command"; command: string }
+  | { kind: "shell_output"; stdout: string; stderr: string }
 ) & { ts?: string };
 
 export type ChatEvent =

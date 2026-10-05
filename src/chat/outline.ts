@@ -7,11 +7,13 @@ export interface OutlineEntry {
   label: string;
 }
 
-/** The user turns among `rows`, each labeled by its first line (or its Skill, or its image). */
+/** The user turns among `rows`, each labeled by its first line (or its Skill, or its image); a shell command by itself. */
 export function outline(rows: ChatRow[]): OutlineEntry[] {
   return rows.flatMap((r, row) => {
-    if (r.kind !== "item" || r.item.kind !== "user") return [];
+    if (r.kind !== "item") return [];
     const it = r.item;
+    if (it.kind === "shell_command") return [{ row, key: r.key, label: `!${it.command.split("\n")[0]}` }];
+    if (it.kind !== "user") return [];
     const line = it.text.split("\n").map((l) => l.trim()).find((l) => l !== "");
     const label = line ?? (it.skills?.length ? `/${it.skills[0].name}` : it.images?.length ? "Image" : "");
     return label === "" ? [] : [{ row, key: r.key, label }];

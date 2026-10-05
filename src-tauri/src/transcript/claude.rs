@@ -50,6 +50,36 @@ fn user_text(text: &str) -> Option<String> {
     Some(text.to_string())
 }
 
+/// The chat item for a user record's text: a `!` shell command and its
+/// output get their own items, anything else reads as the user's words.
+fn user_item(text: &str, ts: &Option<String>) -> Option<ChatItem> {
+    if text.starts_with("<bash-input>") {
+        let command = tag(text, "bash-input")?;
+        return Some(ChatItem::ShellCommand {
+            ts: ts.clone(),
+            command: command.to_string(),
+        });
+    }
+    if text.starts_with("<bash-stdout>") || text.starts_with("<bash-stderr>") {
+        let stdout = tag(text, "bash-stdout").unwrap_or("");
+        let stderr = tag(text, "bash-stderr").unwrap_or("");
+        if stdout.is_empty() && stderr.is_empty() {
+            return None;
+        }
+        return Some(ChatItem::ShellOutput {
+            ts: ts.clone(),
+            stdout: truncate(stdout.to_string()),
+            stderr: truncate(stderr.to_string()),
+        });
+    }
+    user_text(text).map(|text| ChatItem::User {
+        images: vec![],
+        skills: vec![],
+        ts: ts.clone(),
+        text,
+    })
+}
+
 /// A model id from its display name, as `/model` reports it: `Sonnet 5.5` → `claude-sonnet-5-5`.
 /// Parenthesised notes such as `(1M context)` are dropped.
 /// A message typed while the agent is mid-turn is recorded as a
@@ -167,14 +197,7 @@ impl Parser for ClaudeParser {
         match content {
             Some(Value::String(s)) if kind == "user" => {
                 self.read_command_output(s);
-                if let Some(text) = user_text(s) {
-                    items.push(ChatItem::User {
-                        images: vec![],
-                        skills: vec![],
-                        ts: ts.clone(),
-                        text,
-                    });
-                }
+                items.extend(user_item(s, &ts));
             }
             Some(Value::Array(blocks)) => {
                 let uuid = v.get("uuid").and_then(Value::as_str);
@@ -182,18 +205,11 @@ impl Parser for ClaudeParser {
                 for (index, b) in blocks.iter().enumerate() {
                     let bt = b.get("type").and_then(Value::as_str).unwrap_or("");
                     match (kind, bt) {
-                        ("user", "text") => {
-                            if let Some(text) =
-                                b.get("text").and_then(Value::as_str).and_then(user_text)
-                            {
-                                items.push(ChatItem::User {
-                                    images: vec![],
-                                    skills: vec![],
-                                    ts: ts.clone(),
-                                    text,
-                                });
-                            }
-                        }
+                        ("user", "text") => items.extend(
+                            b.get("text")
+                                .and_then(Value::as_str)
+                                .and_then(|t| user_item(t, &ts)),
+                        ),
                         ("user", "tool_result") => items.push(ChatItem::ToolResult {
                             images: vec![],
                             ts: ts.clone(),
@@ -441,6 +457,47 @@ mod tests {
         );
         let stdout = serde_json::json!({"type":"user","message":{"content":"<local-command-stdout></local-command-stdout>"}}).to_string();
         assert_eq!(run(&stdout), vec![]);
+    }
+    #[test]
+    fn shows_shell_commands_and_their_output() {
+        let input = serde_json::json!({"type":"user","message":{"content":"<bash-input> ls -la ~/x</bash-input>"}}).to_string();
+        assert_eq!(
+            run(&input),
+            vec![ShellCommand {
+                ts: None,
+                command: "ls -la ~/x".into()
+            }]
+        );
+        let out = serde_json::json!({"type":"user","message":{"content":"<bash-stdout>a\nb</bash-stdout><bash-stderr>oops</bash-stderr>"}}).to_string();
+        assert_eq!(
+            run(&out),
+            vec![ShellOutput {
+                ts: None,
+                stdout: "a\nb".into(),
+                stderr: "oops".into()
+            }]
+        );
+        let block = serde_json::json!({"type":"user","message":{"content":[{"type":"text","text":"<bash-input>pwd</bash-input>"}]}}).to_string();
+        assert_eq!(
+            run(&block),
+            vec![ShellCommand {
+                ts: None,
+                command: "pwd".into()
+            }]
+        );
+        let empty = serde_json::json!({"type":"user","message":{"content":"<bash-stdout></bash-stdout><bash-stderr></bash-stderr>"}}).to_string();
+        assert_eq!(run(&empty), vec![]);
+    }
+    #[test]
+    fn truncates_long_shell_output() {
+        let big = "x".repeat(20_000);
+        let line = serde_json::json!({"type":"user","message":{"content":format!("<bash-stdout>{big}</bash-stdout><bash-stderr></bash-stderr>")}}).to_string();
+        match &run(&line)[..] {
+            [ShellOutput { stdout, .. }] => {
+                assert!(stdout.len() < 17_000 && stdout.ends_with("(truncated)"))
+            }
+            other => panic!("{other:?}"),
+        }
     }
     #[test]
     fn skips_system_prompts() {

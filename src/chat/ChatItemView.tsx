@@ -188,6 +188,25 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
   );
 }
 
+/** Shell output past this many lines folds behind a "Show more" button. */
+const SHELL_FOLD_LINES = 12;
+
+function ShellText({ text, error }: { text: string; error?: boolean }) {
+  const [all, setAll] = useState(false);
+  const lines = text.split("\n");
+  const hidden = all ? 0 : Math.max(0, lines.length - SHELL_FOLD_LINES);
+  return (
+    <>
+      <pre className={error ? "chat-result error" : "chat-result"}>{hidden ? lines.slice(0, SHELL_FOLD_LINES).join("\n") : text}</pre>
+      {hidden > 0 && (
+        <button className="chat-shell-more" onClick={() => setAll(true)}>
+          Show {hidden} more {hidden === 1 ? "line" : "lines"}
+        </button>
+      )}
+    </>
+  );
+}
+
 /** `copy`: offer a copy button on a user message or an answer (not on narration inside a work block). */
 export const ChatItemView = memo(function ChatItemView({ item, result, copy = false }: { item: ChatItem; result?: ToolResult; copy?: boolean }) {
   switch (item.kind) {
@@ -233,5 +252,21 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
       );
     case "system":
       return <div className="chat-row chat-system">{item.text}</div>;
+    case "shell_command":
+      return (
+        <div className="chat-row chat-user">
+          <div className="chat-user-line">
+            <div className="chat-bubble chat-shell-command"><span className="chat-shell-bang">!</span>{item.command}</div>
+            {copy && <CopyButton text={item.command} />}
+          </div>
+        </div>
+      );
+    case "shell_output":
+      return (
+        <div className="chat-row chat-shell-output">
+          {item.stdout !== "" && <ShellText text={item.stdout} />}
+          {item.stderr !== "" && <ShellText text={item.stderr} error />}
+        </div>
+      );
   }
 });

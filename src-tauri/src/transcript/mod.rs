@@ -86,6 +86,18 @@ pub enum ChatItem {
         #[serde(skip_serializing_if = "Option::is_none")]
         ts: Option<String>,
     },
+    /// A command the user ran in the agent's own shell (Claude Code's `!`).
+    ShellCommand {
+        command: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
+    },
+    ShellOutput {
+        stdout: String,
+        stderr: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ts: Option<String>,
+    },
 }
 
 impl ChatItem {
@@ -97,7 +109,9 @@ impl ChatItem {
             | ChatItem::Thinking { ts, .. }
             | ChatItem::ToolCall { ts, .. }
             | ChatItem::ToolResult { ts, .. }
-            | ChatItem::System { ts, .. } => ts.as_deref(),
+            | ChatItem::System { ts, .. }
+            | ChatItem::ShellCommand { ts, .. }
+            | ChatItem::ShellOutput { ts, .. } => ts.as_deref(),
         }
     }
 }
