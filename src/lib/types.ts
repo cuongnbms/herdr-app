@@ -130,6 +130,8 @@ export interface Located {
   candidates: string[];
   /** The file does not exist yet: Claude writes it on the first prompt, at `path`. */
   pending: boolean;
+  /** Reopened on the Pane's running tail without locating again: check it after. */
+  cached?: boolean;
 }
 
 export interface SlashCommand {

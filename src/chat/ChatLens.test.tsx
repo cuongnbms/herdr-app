@@ -12,15 +12,17 @@ vi.mock("../lib/ipc", () => ({
 }));
 let opened: Promise<unknown> = new Promise(() => {});
 const channels = vi.hoisted(() => [] as { onmessage: (ev: unknown) => void }[]);
+const openedPaths = vi.hoisted(() => [] as (string | null)[]);
 vi.mock("./chatSession", () => ({
-  openChat: (_p: unknown, _path: unknown, ch: { onmessage: (ev: unknown) => void }) => {
+  openChat: (_p: unknown, path: string | null, ch: { onmessage: (ev: unknown) => void }) => {
     channels.push(ch);
+    openedPaths.push(path);
     return { opened, close: () => {} };
   },
   onOpenFailure: () => "error",
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
-import { herdrCall } from "../lib/ipc";
+import { chatLocate, herdrCall } from "../lib/ipc";
 import type { PaneView } from "../lib/types";
 import { ChatLens } from "./ChatLens";
 
@@ -43,6 +45,8 @@ beforeEach(() => {
   localStorage.clear();
   opened = new Promise(() => {});
   channels.length = 0;
+  openedPaths.length = 0;
+  vi.mocked(chatLocate).mockClear();
   shown = "";
   vi.mocked(herdrCall)
     .mockReset()
@@ -103,6 +107,31 @@ describe("ChatLens", () => {
     rerender(<ChatLens pane={pane} view={idlePi} />);
     await new Promise((r) => setTimeout(r, 20));
     expect(vi.mocked(herdrCall).mock.calls.filter(([, , m]) => m === "pane.read")).toEqual([]);
+  });
+
+  it("locates a transcript reopened from the running tail again, and follows it when it moved", async () => {
+    const was = { agent: "claude", path: "/h/old.jsonl", ambiguous: false, candidates: ["/h/old.jsonl"], pending: false };
+    const moved = { ...was, path: "/h/new.jsonl", candidates: ["/h/new.jsonl"] };
+    opened = Promise.resolve({ ...was, cached: true });
+    vi.mocked(chatLocate).mockResolvedValueOnce(moved);
+    render(<ChatLens pane={pane} view={idlePi} />);
+    await waitFor(() => expect(openedPaths).toEqual([null, "/h/new.jsonl"]));
+    expect(chatLocate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not locate again after an open that located, or a reattach to the same file", async () => {
+    const at = { agent: "claude", path: "/h/a.jsonl", ambiguous: false, candidates: ["/h/a.jsonl"], pending: false };
+    opened = Promise.resolve(at);
+    const first = render(<ChatLens pane={pane} view={idlePi} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(chatLocate).not.toHaveBeenCalled();
+    first.unmount();
+    opened = Promise.resolve({ ...at, cached: true });
+    vi.mocked(chatLocate).mockResolvedValueOnce(at);
+    render(<ChatLens pane={pane} view={idlePi} />);
+    await waitFor(() => expect(chatLocate).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(openedPaths).toEqual([null, null]);
   });
 
   it("says the transcript is loading until the first reset or error", () => {

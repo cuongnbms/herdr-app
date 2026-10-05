@@ -13,6 +13,9 @@ pub struct Located {
     pub candidates: Vec<String>,
     /// The file does not exist yet: Claude writes it on the first prompt, at `path`.
     pub pending: bool,
+    /// Reopened on the Pane's running tail without locating again: the lens checks it after.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
 }
 
 fn java_string_hash(s: &str) -> i32 {
@@ -176,6 +179,7 @@ pub async fn locate_in(
         ambiguous,
         candidates,
         pending: false,
+        cached: false,
     };
 
     if session["kind"] == "path" {

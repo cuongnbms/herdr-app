@@ -414,6 +414,7 @@ async fn locate_pane(
             ambiguous: false,
             candidates: Vec::new(),
             pending: false,
+            cached: false,
         },
         None => {
             let info = mgr.info(machine_id)?;
@@ -556,6 +557,15 @@ pub async fn chat_open(
         session,
         pane_id,
     };
+    let sink: transcript::Sink = Arc::new(move |e: ChatEvent| {
+        if let Err(err) = events.send(e) {
+            tracing::warn!("chat event send failed: {err}");
+        }
+    });
+    // Locating costs round trips to the Machine: a Pane still tailing its transcript skips it.
+    if let Some(l) = chats.reattach_cached(&pane_ref, path.as_deref(), sink.clone()) {
+        return Ok(Located { cached: true, ..l });
+    }
     let located = locate_pane(&mgr, &pane_ref, path).await?;
     let transport = mgr.transport(&machine_id)?;
     let parser = transcript::parser_for(&located.agent).ok_or_else(|| {
@@ -564,18 +574,14 @@ pub async fn chat_open(
             format!("no transcript parser for agent '{}'", located.agent),
         )
     })?;
-    let sink = Arc::new(move |e: ChatEvent| {
-        if let Err(err) = events.send(e) {
-            tracing::warn!("chat event send failed: {err}");
-        }
-    });
     if !chats.reattach(&pane_ref, &located.path, sink.clone()) {
         chats.insert(
-            pane_ref,
+            pane_ref.clone(),
             located.path.clone(),
             transcript::spawn_tail(transport, located.path.clone(), parser, sink),
         );
     }
+    chats.set_located(&pane_ref, &located);
     Ok(located)
 }
 

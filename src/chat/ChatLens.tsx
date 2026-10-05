@@ -1,7 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { chatPage } from "../lib/ipc";
+import { chatLocate, chatPage } from "../lib/ipc";
 import { paneKey, type AppError, type ChatEvent, type ChatItem, type Located, type PaneRef, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { onOpenFailure, openChat, watchMachine } from "./chatSession";
@@ -57,8 +57,9 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const picker = usePiModelPicker(pane, modelFor === key && view.agent === "pi", () => setModelFor(null));
   useEffect(() => setModelFor(null), [key]);
 
+  // `known`: where `path` was located, when the caller already knows (kept over what opening returns).
   const open = useCallback(
-    (path: string | null) => {
+    (path: string | null, known?: Located) => {
       const gen = ++generation.current;
       setOpenError(null);
       setLoaded(false);
@@ -78,7 +79,19 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       h.opened
         .then((l) => {
           if (gen !== generation.current || !l) return;
-          setLocated(l);
+          setLocated(known ?? l);
+          // Reopened on the running tail without locating: the agent may since have moved on to
+          // another transcript, so locate it now, off the open's path.
+          if (l.cached && path === null) {
+            chatLocate(pane).then(
+              (fresh) => {
+                if (gen !== generation.current) return;
+                if (fresh.path !== l.path) open(fresh.path, fresh);
+                else setLocated(fresh);
+              },
+              () => {},
+            );
+          }
         })
         .catch((e: AppError) => {
           if (gen !== generation.current) return;

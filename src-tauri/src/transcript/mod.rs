@@ -207,6 +207,8 @@ pub const PARKED_TAILS: usize = 3;
 
 struct Entry {
     path: String,
+    /// Where `path` came from, once `set_located` recorded it.
+    located: Option<Located>,
     handle: TailHandle,
 }
 
@@ -232,7 +234,14 @@ impl ChatManager {
             if let Some(i) = t.parked.iter().position(|(p, _)| p == &pane) {
                 gone.extend(t.parked.remove(i).map(|(_, e)| e));
             }
-            t.open.insert(pane, Entry { path, handle });
+            t.open.insert(
+                pane,
+                Entry {
+                    path,
+                    located: None,
+                    handle,
+                },
+            );
             gone
         };
         drop(gone);
@@ -264,6 +273,38 @@ impl ChatManager {
         let replaced = self.tails.lock().unwrap().open.insert(pane.clone(), entry);
         drop(replaced);
         true
+    }
+
+    /// Records how the Pane's open tail was located, when it tails `l.path`.
+    pub fn set_located(&self, pane: &PaneRef, l: &Located) {
+        if let Some(e) = self.tails.lock().unwrap().open.get_mut(pane) {
+            if e.path == l.path {
+                e.located = Some(l.clone());
+            }
+        }
+    }
+
+    /// Reopens the Pane's running tail onto `sink` without locating its transcript again,
+    /// returning how it was located. Only a tail whose transcript was found (not pending)
+    /// qualifies, and only when it tails `path`, if given. None: locate and open as usual.
+    pub fn reattach_cached(
+        &self,
+        pane: &PaneRef,
+        path: Option<&str>,
+        sink: Sink,
+    ) -> Option<Located> {
+        let located = {
+            let t = self.tails.lock().unwrap();
+            let entry = t
+                .open
+                .get(pane)
+                .or_else(|| t.parked.iter().find(|(p, _)| p == pane).map(|(_, e)| e))?;
+            entry
+                .located
+                .clone()
+                .filter(|l| !l.pending && path.is_none_or(|p| p == l.path))?
+        };
+        self.reattach(pane, &located.path, sink).then_some(located)
     }
 
     /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are dropped.
@@ -581,6 +622,77 @@ mod tests {
         chats.close_machine("a");
         let (sink, _) = recorder();
         assert!(!chats.reattach(&pane("p1"), &f.to_string_lossy(), sink));
+    }
+
+    fn located(path: &std::path::Path, pending: bool) -> Located {
+        let path: String = path.to_string_lossy().into();
+        Located { agent: "claude".into(), candidates: vec![path.clone()], path, ambiguous: false, pending, cached: false }
+    }
+
+    #[tokio::test]
+    async fn a_located_parked_tail_reopens_without_locating() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\nb\n").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        chats.set_located(&pane("p1"), &located(&f, false));
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        chats.close(&pane("p1"));
+        let (sink, got) = recorder();
+        assert_eq!(chats.reattach_cached(&pane("p1"), None, sink), Some(located(&f, false)));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
+        assert!(chats.page(&pane("p1"), 2, 10).is_some(), "reopened, not parked");
+        let (sink, _) = recorder();
+        let same = f.to_string_lossy();
+        assert!(chats.reattach_cached(&pane("p1"), Some(&same), sink).is_some(), "the chosen path is the tailed one");
+    }
+
+    #[tokio::test]
+    async fn only_a_found_transcript_on_the_asked_path_is_reopened_from_cache() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        let chats = ChatManager::default();
+        let (sink, _) = recorder();
+        open(&chats, &pane("p1"), &f);
+        assert_eq!(chats.reattach_cached(&pane("p1"), None, sink.clone()), None, "never located");
+        chats.set_located(&pane("p1"), &located(&f, true));
+        assert_eq!(chats.reattach_cached(&pane("p1"), None, sink.clone()), None, "pending: Claude may write elsewhere");
+        chats.set_located(&pane("p1"), &located(&d.path().join("u.jsonl"), false));
+        assert_eq!(chats.reattach_cached(&pane("p1"), None, sink.clone()), None, "a location for another path is ignored");
+        chats.set_located(&pane("p1"), &located(&f, false));
+        assert_eq!(chats.reattach_cached(&pane("p1"), Some("/other.jsonl"), sink.clone()), None, "the user chose another file");
+        assert!(chats.page(&pane("p1"), 1, 10).is_some(), "a miss leaves the tail be");
+        assert!(chats.reattach_cached(&pane("p2"), None, sink).is_none(), "no tail for that pane");
+    }
+
+    #[tokio::test]
+    async fn a_dead_located_tail_is_located_again() {
+        struct Gone;
+        #[async_trait::async_trait]
+        impl crate::transport::Transport for Gone {
+            fn wrap(&self, _: &[String], _: bool) -> Vec<String> { vec!["true".into()] }
+            async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+            async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+        }
+        let chats = ChatManager::default();
+        let (sink, _) = recorder();
+        let f = std::path::Path::new("/x");
+        chats.insert(pane("p1"), "/x".into(), spawn_tail(Arc::new(Gone), "/x".into(), Box::new(Echo), sink.clone()));
+        chats.set_located(&pane("p1"), &located(f, false));
+        chats.close(&pane("p1"));
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(chats.reattach_cached(&pane("p1"), None, sink), None);
+    }
+
+    #[test]
+    fn serializes_cached_only_when_set() {
+        let f = std::path::Path::new("/x");
+        assert!(serde_json::to_value(located(f, false)).unwrap().get("cached").is_none());
+        let v = serde_json::to_value(Located { cached: true, ..located(f, false) }).unwrap();
+        assert_eq!(v["cached"], true);
     }
 
     #[test]
