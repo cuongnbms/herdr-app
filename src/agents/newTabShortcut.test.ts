@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn() }));
 import { herdrCall } from "../lib/ipc";
-import type { MachineView } from "../lib/types";
+import type { MachineView, PaneView } from "../lib/types";
 import { loadNewTabAgent, useNewTab } from "../settings/newTab";
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
@@ -17,6 +17,11 @@ const machine: MachineView = {
     ] },
   ] }],
 };
+const withPane = (pane: PaneView): MachineView => {
+  const ws = machine.sessions[0].workspaces[0];
+  return { ...machine, sessions: [{ ...machine.sessions[0], workspaces: [{ ...ws, tabs: [...ws.tabs,
+    { tab_id: "w1:t9", label: "claude", number: 9, status: "idle", panes: [pane] }] }] }] };
+};
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
 
 describe("openNewTabHere", () => {
@@ -26,8 +31,12 @@ describe("openNewTabHere", () => {
     useApp.setState({ machines: {}, order: [], selected: null, lensOverride: {} });
     useApp.getState().upsertMachine(machine);
     useNewTab.setState({ agent: "claude" });
-    vi.mocked(herdrCall).mockImplementation((_m, _s, method) =>
-      Promise.resolve(method === "tab.create" ? { root_pane: { pane_id: "w1:p9" } } : undefined));
+    vi.mocked(herdrCall).mockImplementation((_m, _s, method) => {
+      if (method === "tab.create") return Promise.resolve({ root_pane: { pane_id: "w1:p9" } });
+      // herdr reports the started agent in the next snapshot.
+      useApp.getState().upsertMachine(withPane({ pane_id: "w1:p9", terminal_id: "t9", title: "claude", cwd: "/srv/api", agent: "claude", status: "idle" }));
+      return Promise.resolve(undefined);
+    });
   });
 
   it("does nothing without a selected pane", async () => {

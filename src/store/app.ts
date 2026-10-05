@@ -40,6 +40,12 @@ function save(s: Persisted) {
   }
 }
 
+/** An agent being started in a new pane: first waiting for its shell, then for herdr to report the agent. */
+export interface AgentStart {
+  agent: string;
+  phase: "shell" | "agent";
+}
+
 export interface AppState {
   machines: Record<string, MachineView>;
   order: string[];
@@ -54,6 +60,9 @@ export interface AppState {
    *  over `lens` until the user picks a lens again. */
   lensOverride: Record<string, Lens>;
   setLensOverride: (key: string, lens: Lens | null) => void;
+  /** Panes (by paneKey) whose agent is still starting, shown under a loading overlay. Not persisted. */
+  starting: Record<string, AgentStart>;
+  setStarting: (key: string, start: AgentStart | null) => void;
   /** Whether the Agent Dashboard overlay is open. Not persisted. */
   dashboardOpen: boolean;
   setDashboardOpen: (open: boolean) => void;
@@ -75,6 +84,7 @@ export const useApp = create<AppState>((set, get) => ({
   viewed: null,
   lastPane: {},
   lensOverride: {},
+  starting: {},
   dashboardOpen: false,
   doneSeen: {},
   ...load(),
@@ -145,6 +155,11 @@ export const useApp = create<AppState>((set, get) => ({
       const { [key]: _old, ...rest } = s.lensOverride;
       return { lensOverride: lens ? { ...rest, [key]: lens } : rest };
     }),
+  setStarting: (key, start) =>
+    set((s) => {
+      const { [key]: _old, ...rest } = s.starting;
+      return { starting: start ? { ...rest, [key]: start } : rest };
+    }),
   // An explicit choice: persisted, and it ends any automatic override.
   setLens: (key, lens) => {
     set((s) => {
@@ -160,7 +175,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 }));
 
-function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView | undefined {
+export function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView | undefined {
   const session = machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session);
   for (const ws of session?.workspaces ?? []) {
     for (const tab of ws.tabs) {

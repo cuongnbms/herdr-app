@@ -5,7 +5,7 @@ import { useApp } from "../store/app";
 import { PathInput } from "../ui/PathInput";
 import { setFolder } from "../workspaces/folder";
 import { AgentChoice } from "../agents/AgentChoice";
-import { startAgent } from "../agents/startAgent";
+import { launchAgent } from "../agents/launchAgent";
 
 type Agent = "none" | "claude" | "pi";
 const AGENTS: readonly Agent[] = ["none", "claude", "pi"];
@@ -45,12 +45,9 @@ export function NewWorkspaceDialog({
       }
       if (agent !== "none") {
         // A new agent opens on the Terminal; useTranscriptProbe turns it to Chat once its transcript exists.
-        useApp.getState().setLensOverride(paneKey({ machine_id: machineId, session, pane_id: res.root_pane.pane_id }), "terminal");
-        await startAgent((m, p) => herdrCall(machineId, session, m, p), {
-          name: agent,
-          kind: agent,
-          pane_id: res.root_pane.pane_id,
-        });
+        const pane = { machine_id: machineId, session, pane_id: res.root_pane.pane_id };
+        useApp.getState().setLensOverride(paneKey(pane), "terminal");
+        await launchAgent((m, p) => herdrCall(machineId, session, m, p), pane, agent);
       }
     } catch (e) {
       onError((e as { message?: string }).message ?? String(e));

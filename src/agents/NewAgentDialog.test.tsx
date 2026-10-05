@@ -13,11 +13,25 @@ const ws: WorkspaceView = { workspace_id: "w1", label: "api", number: 1, status:
     { pane_id: "w1:p1", terminal_id: "t1", title: "sh", cwd: "/srv/api", agent: null, status: "unknown" } ] } ] };
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
 
-function respond(agentStart: () => Promise<unknown> = () => Promise.resolve(undefined)) {
-  vi.mocked(herdrCall).mockImplementation((_m, _s, method) =>
+// herdr reports a started agent in the pane in its next snapshot, which ends launchAgent's wait.
+const reportAgent = (paneId: string, kind: string) =>
+  useApp.getState().upsertMachine({
+    id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "idle",
+    sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
+      { workspace_id: "w0", label: "x", number: 1, status: "idle", tabs: [
+        { tab_id: "w0:t1", label: "1", number: 1, status: "idle", panes: [
+          { pane_id: paneId, terminal_id: "t0", title: kind, cwd: null, agent: kind, status: "idle" } ] } ] } ] }],
+  });
+const started = (params: unknown) => {
+  const { pane_id, kind } = params as { pane_id: string; kind: string };
+  reportAgent(pane_id, kind);
+  return Promise.resolve(undefined);
+};
+function respond(agentStart: (params: unknown) => Promise<unknown> = started) {
+  vi.mocked(herdrCall).mockImplementation((_m, _s, method, params) =>
     method === "tab.create"
       ? Promise.resolve({ type: "tab_created", tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p7" } })
-      : agentStart());
+      : agentStart(params));
 }
 const open = (onError = vi.fn()) => {
   const onClose = vi.fn();

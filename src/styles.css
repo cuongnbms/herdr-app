@@ -468,7 +468,16 @@ kbd {
 .seg-n .seg-thumb { width: calc((100% - 4px) / var(--n)); transform: translateX(calc(var(--i) * 100%)); }
 
 /* ---------- Terminal lens ---------- */
-.term-lens { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--surface-term); }
+.term-lens { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--surface-term); }
+/* Over the Terminal while a new pane's agent starts (launchAgent). */
+.term-starting {
+  position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 10px;
+  font-size: 13px; color: var(--fg-2); background: var(--surface-term); animation: fade-in var(--t-fast);
+}
+.term-starting-spinner {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fg-3); border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
 .term-host { flex: 1; min-height: 0; overflow: hidden; }
 /* Padding on .xterm (not the host) so FitAddon subtracts it when sizing rows. */
 .term-host .xterm { padding: 10px 0 0 14px; }

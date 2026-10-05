@@ -1,7 +1,7 @@
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import { useApp } from "../store/app";
-import { startAgent } from "./startAgent";
+import { launchAgent } from "./launchAgent";
 
 export type Agent = "claude" | "pi" | "shell";
 export const AGENTS: readonly Agent[] = ["claude", "pi", "shell"];
@@ -10,7 +10,7 @@ interface TabCreated {
   root_pane: { pane_id: string };
 }
 
-/** Opens a new Tab in `workspaceId` at `cwd` (herdr's default when empty), selects its pane and starts `agent` there (a shell starts nothing). */
+/** Opens a new Tab in `workspaceId` at `cwd` (herdr's default when empty), selects its pane and starts `agent` there (a shell starts nothing), resolving once it runs. */
 export async function openAgentTab(machineId: string, session: string, workspaceId: string, agent: Agent, cwd: string): Promise<void> {
   const res = await herdrCall<TabCreated>(machineId, session, "tab.create", {
     workspace_id: workspaceId,
@@ -23,5 +23,5 @@ export async function openAgentTab(machineId: string, session: string, workspace
   if (agent !== "shell") useApp.getState().setLensOverride(paneKey(pane), "terminal");
   useApp.getState().select(pane);
   if (agent === "shell") return;
-  await startAgent((m, p) => herdrCall(machineId, session, m, p), { name: agent, kind: agent, pane_id: pane.pane_id });
+  await launchAgent((m, p) => herdrCall(machineId, session, m, p), pane, agent);
 }

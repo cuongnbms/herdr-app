@@ -63,7 +63,7 @@ vi.mock("../settings/store", () => ({
 
 let machine: MachineState = "connected";
 vi.mock("../store/app", () => ({
-  useApp: (sel: (s: unknown) => unknown) => sel({ machines: { m1: { state: machine } } }),
+  useApp: (sel: (s: unknown) => unknown) => sel({ machines: { m1: { state: machine } }, starting: {} }),
 }));
 
 interface Opened {

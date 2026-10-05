@@ -10,6 +10,7 @@ import type { AttachEvent, PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { showToast } from "../ui/Toast";
 import { Banner } from "./Banner";
+import { StartingOverlay } from "./StartingOverlay";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { applyCopyOnSelect } from "./copyOnSelect";
@@ -229,6 +230,7 @@ export function TerminalLens({ pane, terminalId }: Props) {
         />
       )}
       <div className="term-host" ref={containerRef} />
+      <StartingOverlay pane={pane} />
     </div>
   );
 }
