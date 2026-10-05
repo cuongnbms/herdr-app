@@ -51,6 +51,13 @@ export function rankFiles(paths: string[], query: string, limit = 50): string[] 
     .map((item) => item.path);
 }
 
+/** Splits a `@../…` query into the folder to list and the name typed after it; null for other queries. */
+export function splitParentQuery(query: string): { dir: string; prefix: string } | null {
+  if (!query.startsWith("../")) return null;
+  const slash = query.lastIndexOf("/");
+  return { dir: query.slice(0, slash + 1), prefix: query.slice(slash + 1) };
+}
+
 const usageKey = (agent: string) => `herdr-app:slash-usage:${agent}`;
 
 export function readUsage(agent: string): Record<string, number> {

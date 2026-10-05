@@ -5,7 +5,8 @@ import { quickReplyButtons, useQuickReplies } from "../settings/quickReplies";
 import { CloseIcon, SendIcon, StopIcon } from "../ui/icons";
 import { CompletionMenu } from "./CompletionMenu";
 import { GitStatusLine } from "./GitStatus";
-import { rankCommands, rankFiles, readUsage, recordUse } from "./complete";
+import { rankCommands, rankFiles, readUsage, recordUse, splitParentQuery } from "./complete";
+import { dirSuggestions } from "../lib/pathInput";
 import { readDraft, useDraft } from "./drafts";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { modelLabel } from "./modelLabel";
@@ -121,9 +122,15 @@ export function Composer({
   const query = trigger?.query;
   const kind = trigger?.kind ?? null;
   const prefix = trigger?.prefix ?? "/";
-  const { commands, files, loading, error: listError } = useCompletions(pane, kind);
+  // `@../…` lists that one folder; other mentions rank the files under the Pane's folder.
+  const parent = kind === "file" ? splitParentQuery(query ?? "") : null;
+  const { commands, files, loading, error: listError } = useCompletions(pane, kind, parent?.dir);
   // Up to thousands of paths: rank them only when the list or the query changes.
-  const fileRows = useMemo(() => (kind === "file" ? rankFiles(files, query ?? "") : []), [kind, files, query]);
+  const fileRows = useMemo(() => {
+    if (kind !== "file") return [];
+    const split = splitParentQuery(query ?? "");
+    return split ? dirSuggestions(files, split.dir.slice(0, -1), split.prefix) : rankFiles(files, query ?? "");
+  }, [kind, files, query]);
   const rows: (SlashCommand | string)[] =
     kind === "slash"
       ? rankCommands(
@@ -141,7 +148,9 @@ export function Composer({
     const row = rows[i];
     if (!trigger || row === undefined) return;
     const insert = typeof row === "string" ? mention(row) : `${prefix}${row.name}`;
-    const next = applyCompletion(text, trigger, `${insert} `);
+    // A folder keeps the mention open, so its entries are listed next.
+    const folder = typeof row === "string" && row.endsWith("/");
+    const next = applyCompletion(text, trigger, folder ? insert : `${insert} `);
     setText(next.text);
     setCaret(next.caret);
     setDismissed(false);

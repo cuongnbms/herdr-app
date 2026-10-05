@@ -486,6 +486,28 @@ pub async fn complete_files(
     complete::list_files(&*transport, &info.home, &cwd).await
 }
 
+/// The entries of `dir` (relative to a Pane's working directory, e.g. `../`), read on the Pane's Machine.
+#[tauri::command]
+pub async fn complete_entries(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    session: String,
+    pane_id: String,
+    dir: String,
+) -> Result<Vec<String>, AppError> {
+    let pane_ref = PaneRef {
+        machine_id,
+        session,
+        pane_id,
+    };
+    let pane = find_pane(&mgr, &pane_ref)?;
+    let Some(cwd) = foreground_cwd(&mgr, &pane_ref).await.or(pane.cwd) else {
+        return Ok(Vec::new());
+    };
+    let transport = mgr.transport(&pane_ref.machine_id)?;
+    complete::list_entries(&*transport, &cwd, &dir).await
+}
+
 /// The folders inside `dir` (which may start with `~`) on a Machine, for folder fields.
 #[tauri::command]
 pub async fn complete_dirs(

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { completeCommands, completeFiles } from "../lib/ipc";
+import { completeCommands, completeEntries, completeFiles } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { PaneRef, SlashCommand } from "../lib/types";
 
@@ -20,12 +20,16 @@ const stale = (key: string, kind: Kind) => {
   return !hit || Date.now() - hit.at >= TTL_MS[kind];
 };
 
-/** Lists a Pane's slash commands or files on its Machine, only while `kind` is set. */
+/**
+ * Lists a Pane's slash commands or files on its Machine, only while `kind` is set. With `dir`
+ * (e.g. `../`), files are the entries of that one folder rather than the files under the Pane's.
+ */
 export function useCompletions(
   pane: PaneRef,
   kind: Kind | null,
+  dir?: string,
 ): { commands: SlashCommand[]; files: string[]; loading: boolean; error: boolean } {
-  const key = kind ? `${paneKey(pane)}|${kind}` : null;
+  const key = kind ? `${paneKey(pane)}|${kind}|${kind === "file" ? (dir ?? "") : ""}` : null;
   const [result, setResult] = useState<{ key: string; data: Listing | null } | null>(null);
 
   // Stale-while-revalidate: a cached listing shows whatever its age; an old one is refetched.
@@ -33,7 +37,8 @@ export function useCompletions(
   useEffect(() => {
     if (!key || !kind || !outdated) return;
     let live = true;
-    const request = kind === "slash" ? completeCommands(pane) : completeFiles(pane);
+    const request =
+      kind === "slash" ? completeCommands(pane) : dir !== undefined ? completeEntries(pane, dir) : completeFiles(pane);
     request.then(
       (data) => {
         cache.set(key, { at: Date.now(), data });
@@ -47,7 +52,7 @@ export function useCompletions(
     return () => {
       live = false;
     };
-    // `pane` is identified by `key`; a new object for the same Pane must not refetch.
+    // `pane` and `dir` are identified by `key`; a new object for the same Pane must not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, outdated]);
 

@@ -62,6 +62,7 @@ pub fn run() {
             commands::chat_close,
             commands::complete_commands,
             commands::complete_files,
+            commands::complete_entries,
             commands::complete_dirs,
             commands::chat_git_status,
             commands::system_fonts,

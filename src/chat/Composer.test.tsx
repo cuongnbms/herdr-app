@@ -5,13 +5,14 @@ vi.mock("../lib/ipc", () => ({
   imageSaveTemp: vi.fn(),
   completeCommands: vi.fn(),
   completeFiles: vi.fn(),
+  completeEntries: vi.fn(),
   chatGitStatus: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("./complete", async (orig) => {
   const m = await orig<typeof import("./complete")>();
   return { ...m, rankFiles: vi.fn(m.rankFiles) };
 });
-import { completeCommands, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
+import { completeCommands, completeEntries, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
 import { rankFiles } from "./complete";
 import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
@@ -33,6 +34,9 @@ beforeEach(() => {
     { name: "compact", description: "Compact conversation context", source: "builtin" },
   ]);
   vi.mocked(completeFiles).mockReset().mockResolvedValue(["README.md", "src/x.ts", "src/y.ts", "my docs/a.md"]);
+  vi.mocked(completeEntries)
+    .mockReset()
+    .mockImplementation(async (_p, dir) => (dir === "../" ? ["shared/", "Sibling/", ".hidden/", "notes.md"] : ["a.ts"]));
 });
 
 describe("Composer", () => {
@@ -310,6 +314,28 @@ describe("Composer completion", () => {
     expect(completeFiles).toHaveBeenCalledWith(pane);
     fireEvent.keyDown(box, { key: "Tab" });
     expect((box as HTMLTextAreaElement).value).toBe("look at @src/x.ts ");
+  });
+
+  it("lists the parent folder for @../ and drills into a chosen folder", async () => {
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole("textbox");
+    type(box, "@../");
+    await screen.findByRole("option", { name: /\.\.\/shared\// });
+    expect(completeEntries).toHaveBeenCalledWith(pane, "../");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      expect.stringContaining("../shared/"),
+      expect.stringContaining("../Sibling/"),
+      expect.stringContaining("../notes.md"),
+    ]);
+    type(box, "@../s");
+    await screen.findByRole("option", { name: /\.\.\/Sibling\// });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect((box as HTMLTextAreaElement).value).toBe("@../shared/");
+    await screen.findByRole("option", { name: /\.\.\/shared\/a\.ts/ });
+    expect(completeEntries).toHaveBeenCalledWith(pane, "../shared/");
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect((box as HTMLTextAreaElement).value).toBe("@../shared/a.ts ");
   });
 
   it("ranks files only when the list or the query changes", async () => {
