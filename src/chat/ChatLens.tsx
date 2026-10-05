@@ -21,6 +21,9 @@ import { usePendingTranscript } from "./pendingTranscript";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
+/** How long an open that has not answered yet may go without saying the transcript is loading. */
+const LOADING_DELAY = 150;
+
 type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[]; before: number };
 const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items, a.before) : reduce(s, a, a.atBottom));
 
@@ -47,6 +50,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const [opened, setOpened] = useState(0);
   // The first Reset waits for the whole backlog (seconds over a slow ssh): say so meanwhile.
   const [loaded, setLoaded] = useState(false);
+  // Held back while the open may be a reattach to the running tail, whose Reset comes at once:
+  // shown once the open turns out to have located, or after `LOADING_DELAY` without an answer.
+  const [loadingShown, setLoadingShown] = useState(false);
+  const loadingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Work blocks the user opened or closed, by block id: a virtualized row forgets its own state.
   const [chosenOpen, setChosenOpen] = useState<ReadonlyMap<string, boolean>>(new Map());
   // The turn picked in the rail stays lit until the user scrolls: near the end it may not reach
@@ -63,6 +70,11 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       const gen = ++generation.current;
       setOpenError(null);
       setLoaded(false);
+      setLoadingShown(false);
+      clearTimeout(loadingTimer.current);
+      loadingTimer.current = setTimeout(() => {
+        if (gen === generation.current) setLoadingShown(true);
+      }, LOADING_DELAY);
       const channel = new Channel<ChatEvent>();
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
@@ -80,6 +92,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         .then((l) => {
           if (gen !== generation.current || !l) return;
           setLocated(known ?? l);
+          clearTimeout(loadingTimer.current);
+          if (!l.cached) setLoadingShown(true);
           // Reopened on the running tail without locating: the agent may since have moved on to
           // another transcript, so locate it now, off the open's path.
           if (l.cached && path === null) {
@@ -131,6 +145,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       generation.current++;
       handle.current?.close();
       handle.current = null;
+      clearTimeout(loadingTimer.current);
       revokeChatImages(key);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -254,7 +269,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
-      {!loaded && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
+      {!loaded && loadingShown && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} onWheel={unpick} onPointerDown={unpick} onKeyDown={unpick}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {

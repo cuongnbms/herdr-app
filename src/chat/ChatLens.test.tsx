@@ -134,9 +134,25 @@ describe("ChatLens", () => {
     expect(openedPaths).toEqual([null, null]);
   });
 
-  it("says the transcript is loading until the first reset or error", () => {
+  it("says the transcript is loading once a located open waits for its reset", async () => {
+    opened = Promise.resolve({ agent: "claude", path: "/h/a.jsonl", ambiguous: false, candidates: ["/h/a.jsonl"], pending: false });
+    render(<ChatLens pane={pane} view={idlePi} />);
+    expect(screen.queryByText("Loading transcript…")).toBeNull();
+    expect(await screen.findByText("Loading transcript…", undefined, { timeout: 100 })).toBeTruthy();
+  });
+
+  it("does not say loading while reattaching to the running tail", async () => {
+    opened = Promise.resolve({ agent: "claude", path: "/h/a.jsonl", ambiguous: false, candidates: ["/h/a.jsonl"], pending: false, cached: true });
+    vi.mocked(chatLocate).mockReturnValueOnce(new Promise(() => {}));
+    render(<ChatLens pane={pane} view={idlePi} />);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByText("Loading transcript…")).toBeNull();
+  });
+
+  it("says the transcript is loading until the first reset or error", async () => {
     const { unmount } = render(<ChatLens pane={pane} view={idlePi} />);
-    expect(screen.getByText("Loading transcript…")).toBeTruthy();
+    expect(screen.queryByText("Loading transcript…")).toBeNull();
+    expect(await screen.findByText("Loading transcript…")).toBeTruthy();
     act(() => channels[channels.length - 1].onmessage({ type: "reset", items: [], total: 0 }));
     expect(screen.queryByText("Loading transcript…")).toBeNull();
     unmount();
