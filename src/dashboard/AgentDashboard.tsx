@@ -83,7 +83,7 @@ function FilterMenu({ cards, filters, onChange }: { cards: DashCard[]; filters: 
     const m = machines.get(c.machine.id) ?? { label: c.machine.label, n: 0 };
     machines.set(c.machine.id, { ...m, n: m.n + 1 });
     const id = c.pane.agent ?? "";
-    const a = agents.get(id) ?? { label: c.pane.agent ?? "shell", n: 0 };
+    const a = agents.get(id) ?? { label: id, n: 0 };
     agents.set(id, { ...a, n: a.n + 1 });
   }
   const section = (key: keyof Filters, title: string, opts: Map<string, { label: string; n: number }>) => (

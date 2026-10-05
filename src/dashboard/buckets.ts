@@ -29,7 +29,7 @@ export function bucketOf(status: AgentStatus, seen: boolean): Bucket {
   return "idle";
 }
 
-/** Every pane of a running session on a connected machine, in sidebar order, except Done and Idle:
+/** Every agent pane (shells are left out) of a running session on a connected machine, in sidebar order, except Done and Idle:
  *  newest status change first (`since`), then panes with no known time in sidebar order. */
 export function dashboardCards(
   machines: Record<string, MachineView>,
@@ -46,6 +46,7 @@ export function dashboardCards(
       for (const workspace of session.workspaces)
         for (const tab of workspace.tabs)
           for (const pane of tab.panes) {
+            if (!pane.agent) continue;
             const ref = { machine_id: machine.id, session: session.name, pane_id: pane.pane_id };
             const key = paneKey(ref);
             cards.push({ key, ref, machine, session, workspace, pane, bucket: bucketOf(pane.status, !!doneSeen[key]) });

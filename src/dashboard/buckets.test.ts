@@ -50,6 +50,10 @@ describe("dashboardCards", () => {
     expect(cards[0].workspace.label).toBe("herdr-app");
     expect(cards[0].machine.label).toBe("local-label");
   });
+  it("leaves out panes with no agent", () => {
+    const cards = dashboardCards({ local: machine("local", [pane("a", "idle", { agent: null }), pane("b", "idle")]) }, ["local"], {});
+    expect(cards.map((c) => c.key)).toEqual(["local/default/b"]);
+  });
   it("lists Done and Idle newest status change first, panes without a time last in sidebar order", () => {
     const machines = { local: machine("local", [
       pane("a", "idle"), pane("b", "idle"), pane("c", "done"), pane("d", "idle"), pane("e", "working"),
