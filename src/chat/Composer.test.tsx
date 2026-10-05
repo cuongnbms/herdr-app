@@ -17,6 +17,7 @@ import { rankFiles } from "./complete";
 import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
 import { clearCompletionCache } from "./useCompletions";
+import { useDraftImages } from "./draftImages";
 import { SUGGESTION_POLL_MS } from "./useClaudeSuggestion";
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
 const png = () => new File([new Uint8Array([137, 80, 78, 71])], "image.png", { type: "image/png" });
@@ -29,6 +30,7 @@ beforeEach(() => {
   vi.mocked(imageSaveTemp).mockReset().mockResolvedValue("/tmp/herdr-paste-1.png");
   clearCompletionCache();
   localStorage.clear();
+  useDraftImages.setState({ byPane: {} });
   vi.mocked(completeCommands).mockReset().mockResolvedValue([
     { name: "clear", description: "Clear the conversation", source: "builtin" },
     { name: "compact", description: "Compact conversation context", source: "builtin" },
@@ -186,6 +188,42 @@ describe("Composer", () => {
     paste(screen.getByRole("textbox"), [png()]);
     expect((await screen.findByRole("alert")).textContent).toContain("machine devtuf is not connected");
     expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("keeps a pasted image through a tab switch, for its own pane only", async () => {
+    const { unmount } = render(<Composer pane={pane} agent="claude" />);
+    paste(screen.getByRole("textbox"), [png()]);
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+    unmount();
+    const other = render(<Composer pane={{ ...pane, pane_id: "w1:p2" }} agent="claude" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    other.unmount();
+    render(<Composer pane={pane} agent="claude" />);
+    expect(screen.getByRole("img", { name: "Pasted image 1" })).toBeTruthy();
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it("finishes saving an image pasted just before a tab switch", async () => {
+    let finish: (path: string) => void = () => {};
+    vi.mocked(imageSaveTemp).mockReturnValue(new Promise((r) => (finish = r)));
+    const { unmount } = render(<Composer pane={pane} agent="claude" />);
+    paste(screen.getByRole("textbox"), [png()]);
+    await waitFor(() => expect(imageSaveTemp).toHaveBeenCalled());
+    unmount();
+    await act(async () => finish("/tmp/herdr-paste-1.png"));
+    render(<Composer pane={pane} agent="claude" />);
+    expect(screen.getByRole("img", { name: "Pasted image 1" })).toBeTruthy();
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it("shows each pane's own images when one Composer switches panes", async () => {
+    const { rerender } = render(<Composer pane={pane} agent="claude" />);
+    paste(screen.getByRole("textbox"), [png()]);
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+    rerender(<Composer pane={{ ...pane, pane_id: "w1:p2" }} agent="claude" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    rerender(<Composer pane={pane} agent="claude" />);
+    expect(screen.getByRole("img", { name: "Pasted image 1" })).toBeTruthy();
   });
 
   it("leaves text-only pastes to the textarea", () => {

@@ -8,6 +8,7 @@ import { GitStatusLine } from "./GitStatus";
 import { rankCommands, rankFiles, readUsage, recordUse, splitParentQuery } from "./complete";
 import { dirSuggestions } from "../lib/pathInput";
 import { readDraft, useDraft } from "./drafts";
+import { usePaneImages, type Attachment } from "./draftImages";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { modelLabel } from "./modelLabel";
 import { ModelMenu } from "./ModelMenu";
@@ -41,12 +42,8 @@ const PI_MODEL_RE = /^\/model(\s|$)/;
 const bracketedPaste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const mention = (path: string) => (/[\s"]/.test(path) ? `@"${path}"` : `@${path}`);
 
-interface Attachment {
-  id: number;
-  preview: string;
-  /** Path on the pane's Machine; null while the save is in flight. */
-  path: string | null;
-}
+// Unique across Composers: one pane's images outlive the Composer that pasted them.
+let nextId = 0;
 
 const revoke = (a: Attachment) => {
   if (a.preview) URL.revokeObjectURL(a.preview);
@@ -68,17 +65,15 @@ export function Composer({
 }) {
   const key = paneKey(pane);
   const [text, setText] = useState(() => readDraft(key));
-  const [images, setImages] = useState<Attachment[]>([]);
+  // Kept per pane outside the Composer, so a tab switch does not drop them; a paste or send
+  // in flight updates the pane it started on.
+  const [images, setImages] = usePaneImages(key);
   const [error, setError] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [active, setActive] = useState(0);
   const [usage, setUsage] = useState<Record<string, number>>(() => (agent ? readUsage(agent) : {}));
   const box = useRef<HTMLTextAreaElement>(null);
-  const nextId = useRef(0);
-  const live = useRef<Attachment[]>([]);
-  live.current = images;
-  useEffect(() => () => live.current.forEach(revoke), []);
 
   // The box grows with its text up to the CSS max-height, then scrolls; `rows` sets its floor.
   const fit = () => {
@@ -174,7 +169,7 @@ export function Composer({
       setError(`Image paste failed: ${file.type} is not supported`);
       return;
     }
-    const id = nextId.current++;
+    const id = nextId++;
     const preview = typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "";
     setImages((cur) => [...cur, { id, preview, path: null }]);
     try {
