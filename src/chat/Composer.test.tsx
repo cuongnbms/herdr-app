@@ -46,6 +46,33 @@ describe("Composer", () => {
     expect(herdrCall).toHaveBeenCalledWith("devtuf", "default", "agent.prompt", { target: "w1:p1", text: "fix the bug" });
     expect((box as HTMLTextAreaElement).value).toBe("");
   });
+  it("moves the caret to the line's start and end with Home and End", () => {
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "first line\nsecond line" } });
+    box.setSelectionRange(15, 15);
+    fireEvent.keyDown(box, { key: "Home" });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([11, 11]);
+    fireEvent.keyDown(box, { key: "End" });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([22, 22]);
+    box.setSelectionRange(4, 4);
+    fireEvent.keyDown(box, { key: "End" });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([10, 10]);
+  });
+  it("selects to the line's edge with Shift and to the text's edge with Cmd", () => {
+    render(<Composer pane={pane} agent="claude" />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "first line\nsecond line" } });
+    box.setSelectionRange(15, 15);
+    fireEvent.keyDown(box, { key: "Home", shiftKey: true });
+    expect([box.selectionStart, box.selectionEnd, box.selectionDirection]).toEqual([11, 15, "backward"]);
+    fireEvent.keyDown(box, { key: "End", shiftKey: true });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([15, 22]);
+    fireEvent.keyDown(box, { key: "Home", metaKey: true });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, 0]);
+    fireEvent.keyDown(box, { key: "End", ctrlKey: true, shiftKey: true });
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, 22]);
+  });
   it("sends Esc", () => {
     render(<Composer pane={pane} agent="claude" />);
     fireEvent.click(screen.getByRole("button", { name: "Esc" }));

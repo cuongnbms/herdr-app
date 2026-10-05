@@ -335,6 +335,10 @@ export function Composer({
               requestAnimationFrame(() => box.current?.setSelectionRange(offered.length, offered.length));
               return;
             }
+            if ((e.key === "Home" || e.key === "End") && !e.altKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              return setCaret(jumpToEdge(e.currentTarget, e.key === "Home", e.metaKey || e.ctrlKey, e.shiftKey));
+            }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               send();
@@ -386,4 +390,21 @@ export function Composer({
       {error && <div className="chat-error composer-error" role="alert">{error}</div>}
     </div>
   );
+}
+
+// macOS WebKit binds Home and End to scrolling, leaving the caret where it was. Move it to the
+// edge of its line instead (of the whole text with Cmd/Ctrl), extending the selection with Shift.
+function jumpToEdge(box: HTMLTextAreaElement, home: boolean, whole: boolean, extend: boolean): number {
+  const { value, selectionStart: start, selectionEnd: end } = box;
+  const backward = box.selectionDirection === "backward";
+  const head = backward ? start : end;
+  const anchor = backward ? end : start;
+  const lineEnd = value.indexOf("\n", head);
+  const to = whole
+    ? home ? 0 : value.length
+    : home ? value.lastIndexOf("\n", head - 1) + 1 : lineEnd === -1 ? value.length : lineEnd;
+  if (!extend) box.setSelectionRange(to, to);
+  else if (to < anchor) box.setSelectionRange(to, anchor, "backward");
+  else box.setSelectionRange(anchor, to, "forward");
+  return to;
 }
