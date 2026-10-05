@@ -1,0 +1,62 @@
+# Builds a universal (Apple Silicon + Intel) Herdr.dmg and attaches it to a
+# draft GitHub Release. Trigger by pushing a tag that matches the app version:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The app is ad-hoc signed, not notarized: see "Install" in README.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches app version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version ${version}"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Herdr ${{ github.ref_name }}
+          releaseBody: |
+            Download `Herdr_*_universal.dmg`, open it and drag Herdr into Applications.
+
+            This build is not notarized by Apple. Before the first launch, run:
+
+            ```sh
+            xattr -dr com.apple.quarantine /Applications/Herdr.app
+            ```
+          releaseDraft: true
+          args: --target universal-apple-darwin --bundles dmg
