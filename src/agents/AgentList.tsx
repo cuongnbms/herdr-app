@@ -150,6 +150,15 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   );
 }
 
+function NewWorkspaceButton({ machineId, session }: { machineId: string; session: string }) {
+  const a = useActions();
+  return (
+    <button className="ws-add" aria-label="New workspace" title="New workspace" onClick={() => a?.newWorkspace(machineId, session)}>
+      <PlusIcon />
+    </button>
+  );
+}
+
 // Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
 export const AgentList = memo(function AgentList() {
   const viewed = useApp((s) => s.viewed);
@@ -170,6 +179,7 @@ export const AgentList = memo(function AgentList() {
       <div className="agents-head" data-tauri-drag-region>
         <span className="agents-title">{session.name}</span>
         <span className="count">{total}</span>
+        {session.running && <NewWorkspaceButton machineId={viewed.machine_id} session={session.name} />}
       </div>
       {/* Only the list scrolls, so the head needs no background of its own: a second layer of the
           translucent chrome would darken it against the column. */}

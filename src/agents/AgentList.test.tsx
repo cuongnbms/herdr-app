@@ -101,6 +101,19 @@ describe("AgentList", () => {
     expect(screen.getByText("New agent in web", { selector: "h3" })).toBeTruthy();
   });
 
+  it("opens the new workspace dialog from the session header", () => {
+    render(<AgentList />);
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    expect(screen.getByRole("dialog", { name: "New workspace" })).toBeTruthy();
+    expect(screen.getByText("New workspace in default", { selector: "h3" })).toBeTruthy();
+  });
+
+  it("offers no new workspace button on a stopped session", () => {
+    useApp.setState({ machines: { local: { ...m, sessions: [{ ...m.sessions[0], running: false }] } } });
+    render(<AgentList />);
+    expect(screen.queryByRole("button", { name: "New workspace" })).toBeNull();
+  });
+
   it("changes the folder from the header menu", () => {
     render(<AgentList />);
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
