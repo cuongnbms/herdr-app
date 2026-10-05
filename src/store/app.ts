@@ -70,6 +70,9 @@ export interface AppState {
   /** Done panes the user has looked at (by paneKey); a seen Done pane counts as Idle on the
    *  dashboard. Cleared when the pane leaves done. Not persisted. */
   doneSeen: Record<string, true>;
+  /** When each pane's status last changed (by paneKey, ms since epoch), as seen by this app run:
+   *  panes in a machine's first snapshot have none. Orders the dashboard's Idle column. Not persisted. */
+  statusSince: Record<string, number>;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -88,6 +91,7 @@ export const useApp = create<AppState>((set, get) => ({
   starting: {},
   dashboardOpen: false,
   doneSeen: {},
+  statusSince: {},
   ...load(),
   // Closing returns to the selected pane, so a done one counts as seen then.
   setDashboardOpen: (open) =>
@@ -113,11 +117,13 @@ export const useApp = create<AppState>((set, get) => ({
       const shared = s.machines[v.id] ? shareEqual(s.machines[v.id], v) : v;
       // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
       const doneSeen = seenAfterSnapshot(s.doneSeen, shared, s.dashboardOpen ? null : s.selected);
+      const statusSince = sinceAfterSnapshot(s.statusSince, s.machines[v.id], shared, Date.now());
       return {
         machines: s.machines[v.id] === shared ? s.machines : { ...s.machines, [v.id]: shared },
         lensOverride: claudeStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
         order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
         doneSeen: sameKeys(doneSeen, s.doneSeen) ? s.doneSeen : doneSeen,
+        statusSince: sameTimes(statusSince, s.statusSince) ? s.statusSince : statusSince,
       };
     });
   },
@@ -223,6 +229,32 @@ function seenAfterSnapshot(prev: Record<string, true>, v: MachineView, selected:
           if (prev[k] || k === selKey) next[k] = true;
         }
   return next;
+}
+
+/** This machine's status-change times after a snapshot: a pane whose status changed, or that
+ *  appeared since the last snapshot, is stamped `now`; gone panes are dropped. A machine's first
+ *  snapshot stamps nothing, as when each status began is unknown. Other machines' times are untouched. */
+function sinceAfterSnapshot(prev: Record<string, number>, before: MachineView | undefined, v: MachineView, now: number): Record<string, number> {
+  const next: Record<string, number> = {};
+  const prefix = v.id + "/";
+  for (const k of Object.keys(prev)) if (!k.startsWith(prefix)) next[k] = prev[k];
+  for (const s of v.sessions)
+    for (const ws of s.workspaces)
+      for (const tab of ws.tabs)
+        for (const p of tab.panes) {
+          const ref = { machine_id: v.id, session: s.name, pane_id: p.pane_id };
+          const k = paneKey(ref);
+          if (!before) continue;
+          const old = findPane({ [v.id]: before }, ref);
+          if (!old || old.status !== p.status) next[k] = now;
+          else if (k in prev) next[k] = prev[k];
+        }
+  return next;
+}
+
+function sameTimes(a: Record<string, number>, b: Record<string, number>): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 }
 
 function sameKeys(a: Record<string, true>, b: Record<string, true>): boolean {

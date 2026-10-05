@@ -50,6 +50,19 @@ describe("dashboardCards", () => {
     expect(cards[0].workspace.label).toBe("herdr-app");
     expect(cards[0].machine.label).toBe("local-label");
   });
+  it("lists Done and Idle newest status change first, panes without a time last in sidebar order", () => {
+    const machines = { local: machine("local", [
+      pane("a", "idle"), pane("b", "idle"), pane("c", "done"), pane("d", "idle"), pane("e", "working"),
+      pane("f", "done"), pane("g", "done"),
+    ]) };
+    const since = { "local/default/b": 100, "local/default/c": 300, "local/default/e": 500, "local/default/g": 200 };
+    const cards = dashboardCards(machines, ["local"], { "local/default/c": true }, since);
+    const col = (b: string) => cards.filter((c) => c.bucket === b).map((c) => c.key);
+    expect(col("idle")).toEqual(["local/default/c", "local/default/b", "local/default/a", "local/default/d"]);
+    expect(col("done")).toEqual(["local/default/g", "local/default/f"]);
+    // Working keeps its place in sidebar order.
+    expect(cards[4].key).toBe("local/default/e");
+  });
   it("counts cards per bucket", () => {
     const cards = dashboardCards({ local: machine("local", [pane("a", "blocked"), pane("b", "working"), pane("c", "working")]) }, ["local"], {});
     expect(bucketCounts(cards)).toEqual({ attention: 1, working: 2, done: 0, idle: 0 });

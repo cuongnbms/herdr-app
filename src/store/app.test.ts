@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chosenLens, useApp, selectedPane } from "./app";
 import { paneKey } from "../lib/types";
 import type { MachineView } from "../lib/types";
@@ -154,6 +154,48 @@ describe("done-seen tracking", () => {
     expect(useApp.getState().dashboardOpen).toBe(true);
     useApp.getState().setDashboardOpen(false);
     expect(useApp.getState().dashboardOpen).toBe(false);
+  });
+});
+
+describe("status-change times", () => {
+  const withStatus = (p2: "idle" | "done" | "working"): MachineView => {
+    const s = machine.sessions[0];
+    const ws = s.workspaces[0];
+    const tab = ws.tabs[0];
+    return { ...machine, sessions: [{ ...s, workspaces: [{ ...ws, tabs: [{ ...tab, panes: [tab.panes[0], { ...tab.panes[1], status: p2 }] }] }] }] };
+  };
+  beforeEach(() => {
+    useApp.setState({ machines: {}, order: [], selected: null, statusSince: {} });
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("has no time for panes in a machine's first snapshot", () => {
+    useApp.getState().upsertMachine(withStatus("working"));
+    expect(useApp.getState().statusSince).toEqual({});
+  });
+  it("records when a pane's status changes, and keeps it while it stays", () => {
+    useApp.getState().upsertMachine(withStatus("working"));
+    vi.setSystemTime(1000);
+    useApp.getState().upsertMachine(withStatus("idle"));
+    expect(useApp.getState().statusSince).toEqual({ "local/default/w1:p2": 1000 });
+    vi.setSystemTime(2000);
+    useApp.getState().upsertMachine(withStatus("idle"));
+    expect(useApp.getState().statusSince).toEqual({ "local/default/w1:p2": 1000 });
+  });
+  it("records a pane that appears after the first snapshot", () => {
+    const one = withStatus("idle");
+    const tab = one.sessions[0].workspaces[0].tabs[0];
+    const first = { ...one, sessions: [{ ...one.sessions[0], workspaces: [{ ...one.sessions[0].workspaces[0], tabs: [{ ...tab, panes: [tab.panes[0]] }] }] }] };
+    useApp.getState().upsertMachine(first);
+    vi.setSystemTime(5000);
+    useApp.getState().upsertMachine(one);
+    expect(useApp.getState().statusSince).toEqual({ "local/default/w1:p2": 5000 });
+  });
+  it("forgets panes that are gone and keeps other machines' times", () => {
+    useApp.setState({ statusSince: { "devtuf/default/w1:p1": 7, "local/default/gone": 8 } });
+    useApp.getState().upsertMachine(withStatus("working"));
+    expect(useApp.getState().statusSince).toEqual({ "devtuf/default/w1:p1": 7 });
   });
 });
 

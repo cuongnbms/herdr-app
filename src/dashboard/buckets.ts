@@ -29,8 +29,14 @@ export function bucketOf(status: AgentStatus, seen: boolean): Bucket {
   return "idle";
 }
 
-/** Every pane of a running session on a connected machine, in sidebar order. */
-export function dashboardCards(machines: Record<string, MachineView>, order: string[], doneSeen: Record<string, true>): DashCard[] {
+/** Every pane of a running session on a connected machine, in sidebar order, except Done and Idle:
+ *  newest status change first (`since`), then panes with no known time in sidebar order. */
+export function dashboardCards(
+  machines: Record<string, MachineView>,
+  order: string[],
+  doneSeen: Record<string, true>,
+  since: Record<string, number> = {},
+): DashCard[] {
   const cards: DashCard[] = [];
   for (const id of order) {
     const machine = machines[id];
@@ -46,7 +52,10 @@ export function dashboardCards(machines: Record<string, MachineView>, order: str
           }
     }
   }
-  return cards;
+  const newest = (a: DashCard, b: DashCard) => (since[b.key] ?? 0) - (since[a.key] ?? 0);
+  const sorted = { done: cards.filter((c) => c.bucket === "done").sort(newest), idle: cards.filter((c) => c.bucket === "idle").sort(newest) };
+  const next = { done: 0, idle: 0 };
+  return cards.map((c) => (c.bucket === "done" || c.bucket === "idle" ? sorted[c.bucket][next[c.bucket]++] : c));
 }
 
 export function bucketCounts(cards: DashCard[]): Record<Bucket, number> {

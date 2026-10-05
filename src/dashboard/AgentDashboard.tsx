@@ -11,7 +11,8 @@ function useCards(): DashCard[] {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
   const doneSeen = useApp((s) => s.doneSeen);
-  return useMemo(() => dashboardCards(machines, order, doneSeen), [machines, order, doneSeen]);
+  const since = useApp((s) => s.statusSince);
+  return useMemo(() => dashboardCards(machines, order, doneSeen, since), [machines, order, doneSeen, since]);
 }
 
 const ENTRY_BADGES: { id: Exclude<Bucket, "idle">; label: string }[] = [
