@@ -5,7 +5,7 @@ import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from 
 import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { BotIcon, CloseIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon, TerminalIcon } from "../ui/icons";
+import { BotIcon, CloseIcon, FolderIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon, TerminalIcon } from "../ui/icons";
 import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
 import { AGENTS, openAgentTab } from "./openAgentTab";
@@ -102,6 +102,8 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   const a = useActions();
   const ref = { machine_id: machineId, session, workspace_id: ws.workspace_id };
   const folder = useFolder(ref);
+  // A folder named like the Workspace only repeats the label; its path stays in the tooltip.
+  const folderText = folder ? folderName(folder) : "no folder";
   const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
   const reorder = useTabReorder(
     ws.tabs.map((t) => t.tab_id),
@@ -122,9 +124,10 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
     : [];
   return (
     <section role="group" aria-label={ws.label} className="ws-group">
-      <div className="ws-head" onContextMenu={(e) => a?.menu(e, items)}>
+      <div className="ws-head" title={folder ?? "no folder"} onContextMenu={(e) => a?.menu(e, items)}>
+        <FolderIcon className="ws-icon" />
         <span className="ws-label">{ws.label}</span>
-        <span className="ws-folder" title={folder ?? "no folder"}>{folder ? folderName(folder) : "no folder"}</span>
+        {folderText !== ws.label && <span className="ws-folder">{folderText}</span>}
         <button className="ws-add" aria-label={`New agent in ${ws.label}`} onClick={() => a?.newAgent(machineId, session, ws)}>
           <PlusIcon />
         </button>

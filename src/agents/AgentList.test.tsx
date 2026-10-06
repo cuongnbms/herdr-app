@@ -75,7 +75,9 @@ describe("AgentList", () => {
     setFolder({ machine_id: "local", session: "default", workspace_id: "w1" }, "/Users/me/checkout-api/");
     render(<AgentList />);
     const w1 = screen.getByRole("group", { name: "checkout-api" });
-    expect(within(w1).getByText("checkout-api", { selector: ".ws-folder" })).toBeTruthy();
+    // The folder name repeats the label, so only the tooltip carries it.
+    expect(w1.querySelector(".ws-folder")).toBeNull();
+    expect(w1.querySelector(".ws-head")?.getAttribute("title")).toBe("/Users/me/checkout-api/");
     expect(within(w1).getByText("Idempotent payments")).toBeTruthy();
     expect(within(screen.getByRole("group", { name: "web" })).getAllByRole("listitem")).toHaveLength(3);
     expect(within(screen.getByRole("group", { name: "empty" })).getByText("no folder")).toBeTruthy();
@@ -119,9 +121,9 @@ describe("AgentList", () => {
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
     expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New claude", "New pi", "New shell", "Change folder…", "Rename workspace…", "Close workspace"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Change folder…" }));
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web-app" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(within(screen.getByRole("group", { name: "web" })).getByText("web", { selector: ".ws-folder" })).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "web" })).getByText("web-app", { selector: ".ws-folder" })).toBeTruthy();
   });
 
   it("starts an agent from the header menu in the workspace folder", () => {
