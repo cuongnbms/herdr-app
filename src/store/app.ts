@@ -120,7 +120,7 @@ export const useApp = create<AppState>((set, get) => ({
       const statusSince = sinceAfterSnapshot(s.statusSince, s.machines[v.id], shared, Date.now());
       return {
         machines: s.machines[v.id] === shared ? s.machines : { ...s.machines, [v.id]: shared },
-        lensOverride: claudeStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
+        lensOverride: agentStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
         order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
         doneSeen: sameKeys(doneSeen, s.doneSeen) ? s.doneSeen : doneSeen,
         statusSince: sameTimes(statusSince, s.statusSince) ? s.statusSince : statusSince,
@@ -195,13 +195,14 @@ export function findPane(machines: Record<string, MachineView>, ref: PaneRef): P
   return undefined;
 }
 
-/** Claude started in the selected pane, shown on the Terminal with no lens chosen, while new agents
- *  open on the Terminal: stay on the Terminal the user is typing in until they switch. */
-function claudeStarted(s: Pick<AppState, "machines" | "selected" | "lens" | "lensOverride">, v: MachineView): boolean {
+/** An agent (any kind) started in the selected pane, shown on the Terminal with no lens chosen, while
+ *  new agents open on the Terminal: stay on the Terminal the user is typing in until they switch. */
+function agentStarted(s: Pick<AppState, "machines" | "selected" | "lens" | "lensOverride">, v: MachineView): boolean {
   const sel = s.selected;
   if (!sel || sel.machine_id !== v.id || chosenLens(s, paneKey(sel)) || !newAgentOnTerminal()) return false;
   const before = findPane(s.machines, sel);
-  return !!before && before.agent !== "claude" && findPane({ [v.id]: v }, sel)?.agent === "claude";
+  const agent = findPane({ [v.id]: v }, sel)?.agent;
+  return !!before && !!agent && before.agent !== agent;
 }
 
 function firstPane(machines: Record<string, MachineView>, ref: SessionRef): PaneRef | null {

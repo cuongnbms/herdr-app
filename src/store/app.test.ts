@@ -314,6 +314,11 @@ describe("an agent showing up in the selected pane", () => {
     expect(chosenLens(useApp.getState(), key)).toBe("terminal");
   });
 
+  it.each(["pi", "codex"])("keeps it on the Terminal lens when %s starts in it", (agent) => {
+    useApp.getState().upsertMachine(withAgent(agent));
+    expect(chosenLens(useApp.getState(), key)).toBe("terminal");
+  });
+
   it("leaves it to open on Chat when new agents open on Chat", () => {
     useLensSettings.setState({ newAgentLens: "chat" });
     useApp.getState().upsertMachine(withAgent("claude"));
