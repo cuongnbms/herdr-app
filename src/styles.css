@@ -361,7 +361,7 @@ kbd {
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
 .tab-group > .agent-cards { padding: 2px; }
-.ws-group + .ws-group { margin-top: 6px; border-top: 1px solid var(--line); }
+.ws-group + .ws-group { margin-top: 8px; }
 .ws-head { display: flex; align-items: center; gap: 7px; padding: 12px 14px 4px; min-width: 0; }
 .ws-icon { flex: none; width: 14px; height: 14px; color: var(--fg-2); }
 .ws-label { flex: 0 1 auto; min-width: 0; max-width: 60%; color: var(--fg); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
