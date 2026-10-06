@@ -292,6 +292,34 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
     expect(parseInteractivePrompt("claude", colored)?.id).toBe(a?.id);
   });
 
+  test("reads the question under a numbered list Claude printed above it", () => {
+    const prompt = parseInteractivePrompt("claude", `
+⏺ The plan:
+  1. Route: app/api/geocode/route.ts.
+  2. Proxy: next.config.ts.
+  3. Logic: lib/geocode.ts.
+  The branch will be feat/location-search.
+
+────────────────────────────
+←  ☐ No key  ☐ Enter  ✔ Submit  →
+
+What should /api/geocode do without a key?
+
+❯ 1. Open-Meteo only (Recommended)
+     Still finds places.
+  2. 503 MISSING_API_KEY
+     Reports the missing config.
+  3. Type something.
+────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+`);
+    expect(prompt).toMatchObject({ kind: "question", question: "What should /api/geocode do without a key?", custom_option_index: 2 });
+    expect(prompt?.fallback).toBeUndefined();
+    expect(labels(prompt)).toEqual(["Open-Meteo only (Recommended)", "503 MISSING_API_KEY"]);
+  });
+
   test("ignores unknown agents and ordinary output", () => {
     expect(parseInteractivePrompt("other", "Enter to select · ↑/↓ to navigate · Esc to cancel")).toBeNull();
     expect(parseInteractivePrompt("claude", "No response requested. The task is complete.")).toBeNull();

@@ -200,7 +200,9 @@ function parseClaudeQuestion(screen: string): ParsedPrompt | null {
   const lines = screen.replace(ANSI_RE, "").split(/\r?\n/);
   const hintIndex = findLastIndex(lines, (_, index) => CLAUDE_ASK_HINT_RE.test(wrapped(lines, index)));
   if (hintIndex < 0) return null;
-  const rows = parseNumberedRows(lines, Math.max(0, hintIndex - 64), hintIndex);
+  const found = parseNumberedRows(lines, Math.max(0, hintIndex - 64), hintIndex);
+  // the menu is the last run from a `1.`: a numbered list Claude printed above it is not
+  const rows = found.slice(Math.max(0, found.map((row) => row.number).lastIndexOf(1)));
   if (!sequentialRows(rows) || rows.filter((row) => row.selected).length !== 1) return null;
   const chatIndex = rows.findIndex((row) => row.label === "Chat about this");
   const customIndex = rows.findIndex((row) => /^Type something\.?$/i.test(row.label));
