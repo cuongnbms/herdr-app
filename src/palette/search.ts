@@ -49,7 +49,8 @@ export function search(machines: MachineView[], query: string): PaneHit[] {
       }
     }
   }
-  const rank = (h: PaneHit) => (h.status === "blocked" ? 0 : h.status === "done" ? 1 : 2);
+  const RANK: Partial<Record<AgentStatus, number>> = { blocked: 0, done: 1, working: 2 };
+  const rank = (h: PaneHit) => RANK[h.status] ?? 3;
   return scored
     .map((x, i) => ({ ...x, i }))
     .sort((a, b) => rank(a.hit) - rank(b.hit) || a.pos - b.pos || a.i - b.i)
