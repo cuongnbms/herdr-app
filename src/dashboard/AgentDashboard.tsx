@@ -31,7 +31,7 @@ export function DashboardEntry() {
   return (
     <button
       className={"row dash-entry" + (open ? " active" : "") + alert}
-      aria-pressed={open} onClick={() => setOpen(!open)}>
+      aria-pressed={open} title="Agent Dashboard (⌘E)" onClick={() => setOpen(!open)}>
       <DashboardIcon className="icon machine-icon" />
       <span className="label">Agent Dashboard</span>
       <span className="dash-entry-counts">

@@ -145,6 +145,13 @@ export default function App() {
         e.preventDefault();
         setPaletteOpen((o) => !o);
       }
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        if (e.repeat) return;
+        const { dashboardOpen, setDashboardOpen } = useApp.getState();
+        setPaletteOpen(false);
+        setDashboardOpen(!dashboardOpen);
+      }
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         if (e.repeat) return;

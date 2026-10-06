@@ -12,6 +12,7 @@ vi.mock("./terminal/TerminalLens", async () => {
 import App from "./App";
 import { useApp } from "./store/app";
 import { useLensSettings } from "./settings/lens";
+import { initialSlots, useQuota } from "./quota/store";
 
 describe("App shell", () => {
   it("renders the sidebar and the empty main area", () => {
@@ -57,6 +58,17 @@ describe("App shell", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
+  });
+
+  it("toggles the Agent Dashboard with ⌘E", () => {
+    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false });
+    // The mocked invoke answers an earlier test's quota fetch with [], which is no outcome.
+    useQuota.setState({ slots: initialSlots() });
+    render(<App />);
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "Agent Dashboard" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
