@@ -16,6 +16,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags, so the notes can list commits since the last tag.
+          fetch-depth: 0
 
       - name: Check tag matches app version
         run: |
@@ -24,6 +27,15 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version ${version}"
             exit 1
           fi
+
+      - name: Write release notes
+        id: notes
+        run: |
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            .github/scripts/release-notes.sh "${GITHUB_REF_NAME}"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -50,13 +62,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Herdr ${{ github.ref_name }}
-          releaseBody: |
-            Download `Herdr_*_universal.dmg`, open it and drag Herdr into Applications.
-
-            This build is not notarized by Apple. Before the first launch, run:
-
-            ```sh
-            xattr -dr com.apple.quarantine /Applications/Herdr.app
-            ```
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           args: --target universal-apple-darwin --bundles dmg
