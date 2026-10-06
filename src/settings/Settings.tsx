@@ -1,6 +1,6 @@
 import { type CSSProperties, memo, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
-import { CloseIcon, GearIcon, SearchIcon } from "../ui/icons";
+import { CloseIcon, GearIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
 import { NEW_AGENT_LENSES, useLensSettings } from "./lens";
 import { useNewTab } from "./newTab";
@@ -268,9 +268,6 @@ export const Settings = memo(function Settings() {
       <button className="icon-btn" aria-label="Settings" aria-expanded={open} onClick={() => setOpen(true)}>
         <GearIcon />
       </button>
-      <span className="settings-hint">
-        <SearchIcon /> Jump <kbd>⌘K</kbd>
-      </span>
     </div>
   );
 });

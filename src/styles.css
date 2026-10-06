@@ -432,13 +432,12 @@ kbd {
 
 /* ---------- Header ---------- */
 .header {
-  flex: none; display: grid; grid-template-columns: 1fr minmax(0, 360px) 1fr; align-items: center; gap: 12px;
+  flex: none; display: flex; align-items: center; gap: 8px;
   height: var(--titlebar); padding: 0 12px; box-sizing: border-box;
   border-bottom: 1px solid var(--line); background: var(--surface-chrome);
 }
-.header > .seg { justify-self: start; }
 .header-search {
-  display: flex; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 6px 0 10px;
+  display: flex; align-items: center; gap: 8px; flex: 0 1 280px; min-width: 0; height: 30px; padding: 0 6px 0 10px; box-sizing: border-box;
   border-radius: var(--r-md); border: 1px solid var(--line); background: var(--seg-track);
   color: var(--fg-3); font-size: 12px; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast);
 }
@@ -504,8 +503,6 @@ kbd {
   position: relative; display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; border-top: 1px solid var(--line);
 }
-.settings-hint { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: 11.5px; }
-.settings-hint .icon { width: 13px; height: 13px; }
 .switch { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
 .switch input {
   appearance: none; -webkit-appearance: none; position: relative; flex: none; margin: 0;
