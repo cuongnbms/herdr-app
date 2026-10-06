@@ -7,7 +7,16 @@ import type { RGroup, RNode } from "./groups";
 import { Chevron, SessionRow } from "./Sidebar";
 import { useDragState } from "./dnd";
 import { indicatorClass, useTreeEndDnd, useTreeRowDnd } from "./useRowDnd";
-import { FolderIcon, FolderPlusIcon, PencilIcon, TrashIcon } from "../ui/icons";
+import { FolderIcon, FolderPlusIcon, PencilIcon, PlusIcon, TrashIcon } from "../ui/icons";
+import type { MenuItem } from "./ContextMenu";
+import type { Actions } from "./actions";
+
+/** "New session…" with a machine picker, offered only while some machine is connected. */
+function newSessionItem(a: Actions, groupId?: string): MenuItem[] {
+  const { machines } = useApp.getState();
+  if (!Object.values(machines).some((m) => m.state === "connected")) return [];
+  return [{ label: "New session…", icon: PlusIcon, onSelect: () => a.newSession(undefined, groupId) }];
+}
 
 function GroupRow({ group }: { group: RGroup }) {
   const key = `group:${group.id}`;
@@ -19,6 +28,7 @@ function GroupRow({ group }: { group: RGroup }) {
   const dnd = useTreeRowDnd({ kind: "group", id: group.id }, id, { open, hasChildren: group.children.length > 0 });
   const onMenu = (e: MouseEvent) =>
     a?.menu(e, [
+      ...newSessionItem(a, group.id),
       {
         label: "New subgroup",
         icon: FolderPlusIcon,
@@ -74,6 +84,7 @@ export function GroupTree() {
   const onMenu = (e: MouseEvent) => {
     if (e.defaultPrevented) return;
     a?.menu(e, [
+      ...newSessionItem(a),
       {
         label: "New group",
         icon: FolderPlusIcon,

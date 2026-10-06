@@ -18,7 +18,7 @@ const ConnectDialog = lazy(() => import("../machines/ConnectDialog").then((m) =>
 type Dialog =
   | { kind: "rename"; title: string; initial: string; submitLabel: string; run: (label: string) => Promise<unknown> }
   | { kind: "confirm"; title: string; message: string; confirmLabel: string; run: () => Promise<unknown> }
-  | { kind: "session"; machineId: string }
+  | { kind: "session"; machineId?: string; groupId?: string }
   | { kind: "workspace"; machineId: string; session: string; defaultCwd: string }
   | { kind: "agent"; machineId: string; session: string; workspace: WorkspaceView }
   | { kind: "folder"; ref: WorkspaceRef; initial: string }
@@ -30,7 +30,8 @@ export interface Actions {
   menu: (e: MouseEvent, items: MenuItem[]) => void;
   rename: (title: string, initial: string, run: (label: string) => Promise<unknown>, submitLabel?: string) => void;
   confirm: (title: string, message: string, confirmLabel: string, run: () => Promise<unknown>) => void;
-  newSession: (machineId: string) => void;
+  /** No `machineId`: the dialog offers a machine picker. `groupId`: place the new session there. */
+  newSession: (machineId?: string, groupId?: string) => void;
   newWorkspace: (machineId: string, session: string) => void;
   newAgent: (machineId: string, session: string, workspace: WorkspaceView) => void;
   changeFolder: (ref: WorkspaceRef, initial: string) => void;
@@ -94,7 +95,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
           else setError(errorMessage(e));
         });
       },
-      newSession: (machineId) => setDialog({ kind: "session", machineId }),
+      newSession: (machineId, groupId) => setDialog({ kind: "session", machineId, groupId }),
       newWorkspace: (machineId, session) =>
         setDialog({ kind: "workspace", machineId, session, defaultCwd: defaultCwdFor(machineId, session) }),
     }),
@@ -115,8 +116,7 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
         onClose={closeDialog} onConfirm={() => guard(dialog.run)} />
     );
   } else if (dialog?.kind === "session") {
-    const existing = useApp.getState().machines[dialog.machineId]?.sessions.map((s) => s.name) ?? [];
-    modal = <NewSessionDialog machineId={dialog.machineId} existing={existing} onClose={closeDialog} onError={setError} />;
+    modal = <NewSessionDialog machineId={dialog.machineId} groupId={dialog.groupId} onClose={closeDialog} onError={setError} />;
   } else if (dialog?.kind === "workspace") {
     modal = (
       <NewWorkspaceDialog machineId={dialog.machineId} session={dialog.session} defaultCwd={dialog.defaultCwd}

@@ -60,6 +60,31 @@ describe("Sidebar machine actions", () => {
     fireEvent.contextMenu(within(screen.getByRole("region", { name: "Machines" })).getByText("box"));
     expect(screen.queryByRole("menuitem", { name: "New session…" })).toBeNull();
   });
+  it("creates a new session on a chosen machine from the Groups menu", () => {
+    set([{ ...local, state: "disconnected" }, { ...local, id: "box", label: "box", kind: "ssh", sessions: [] }]);
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Groups" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session…" }));
+    expect((screen.getByLabelText("Machine") as HTMLSelectElement).value).toBe("box");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "api" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(sessionStart).toHaveBeenCalledWith("box", "api");
+  });
+  it("offers no New session in the Groups menu when no machine is connected", () => {
+    set([{ ...local, state: "disconnected" }]);
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Groups" }));
+    expect(screen.queryByRole("menuitem", { name: "New session…" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "New group" })).toBeTruthy();
+  });
+  it("offers New session with a machine picker on a group row", () => {
+    set([local]);
+    useLayout.setState({ layout: { tree: [{ kind: "group", id: "g", label: "Work", children: [] }], bookmarks: [] } });
+    render(<Sidebar />);
+    fireEvent.contextMenu(screen.getByText("Work"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New session…" }));
+    expect(screen.getByLabelText("Machine")).toBeTruthy();
+  });
   it("shows a failed inline Start", async () => {
     set([local]);
     render(<Sidebar />);
