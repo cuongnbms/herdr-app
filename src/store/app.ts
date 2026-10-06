@@ -151,7 +151,9 @@ export const useApp = create<AppState>((set, get) => ({
   view: (ref) => {
     const s = get();
     const sel = s.selected;
-    if (!ref || (sel && sel.machine_id === ref.machine_id && sel.session === ref.session)) return set({ viewed: ref });
+    if (!ref) return set({ viewed: ref });
+    // Reselecting the current pane still closes the dashboard.
+    if (sel && sel.machine_id === ref.machine_id && sel.session === ref.session) return s.select(sel);
     const last = s.lastPane[sessionKey(ref.machine_id, ref.session)];
     const pane = last && findPane(s.machines, last) ? last : firstPane(s.machines, ref);
     if (pane) s.select(pane);

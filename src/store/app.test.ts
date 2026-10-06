@@ -282,6 +282,14 @@ describe("switching session", () => {
     useApp.getState().view({ machine_id: "local", session: "default" });
     expect(useApp.getState().selected).toEqual(pane("default", "w1:p2"));
   });
+
+  it("closes the dashboard when viewing the selected pane's own session", () => {
+    useApp.getState().select(pane("default", "w1:p2"));
+    useApp.getState().setDashboardOpen(true);
+    useApp.getState().view({ machine_id: "local", session: "default" });
+    expect(useApp.getState().dashboardOpen).toBe(false);
+    expect(useApp.getState().selected).toEqual(pane("default", "w1:p2"));
+  });
 });
 
 describe("an agent showing up in the selected pane", () => {
