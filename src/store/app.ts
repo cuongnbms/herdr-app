@@ -67,6 +67,9 @@ export interface AppState {
   /** Whether the Agent Dashboard overlay is open. Not persisted. */
   dashboardOpen: boolean;
   setDashboardOpen: (open: boolean) => void;
+  /** Whether the Command Palette is open. Not persisted. */
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   /** Done panes the user has looked at (by paneKey); a seen Done pane counts as Idle on the
    *  dashboard. Cleared when the pane leaves done. Not persisted. */
   doneSeen: Record<string, true>;
@@ -90,9 +93,11 @@ export const useApp = create<AppState>((set, get) => ({
   lensOverride: {},
   starting: {},
   dashboardOpen: false,
+  paletteOpen: false,
   doneSeen: {},
   statusSince: {},
   ...load(),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
   // Closing returns to the selected pane, so a done one counts as seen then.
   setDashboardOpen: (open) =>
     set((s) => ({

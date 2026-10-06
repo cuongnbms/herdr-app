@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import "./fonts/fonts.css";
 import "./styles.css";
 import { machinesList, onMachine, onNotifyActivate, onPaneStatus, sessionStart } from "./lib/ipc";
@@ -91,7 +91,8 @@ export default function App() {
   const pane = useApp((s) => selectedPane(s)?.pane ?? null);
   const remembered = useApp((s) => (s.selected ? chosenLens(s, paneKey(s.selected)) : undefined));
   const starting = useApp((s) => (s.selected ? !!s.starting[paneKey(s.selected)] : false));
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteOpen = useApp((s) => s.paletteOpen);
+  const setPaletteOpen = useApp((s) => s.setPaletteOpen);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
   const chatFontSize = useSettings((s) => s.chatFontSize);
 
@@ -143,12 +144,13 @@ export default function App() {
       // While the dashboard is open, ⌘K focuses its search instead.
       if (e.metaKey && e.key.toLowerCase() === "k" && !useApp.getState().dashboardOpen) {
         e.preventDefault();
-        setPaletteOpen((o) => !o);
+        const { paletteOpen, setPaletteOpen } = useApp.getState();
+        setPaletteOpen(!paletteOpen);
       }
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "e") {
         e.preventDefault();
         if (e.repeat) return;
-        const { dashboardOpen, setDashboardOpen } = useApp.getState();
+        const { dashboardOpen, setDashboardOpen, setPaletteOpen } = useApp.getState();
         setPaletteOpen(false);
         setDashboardOpen(!dashboardOpen);
       }

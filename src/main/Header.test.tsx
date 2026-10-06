@@ -15,15 +15,19 @@ const m: MachineView = {
 describe("Header", () => {
   beforeEach(() => useApp.setState({
     machines: { local: m }, order: ["local"], lens: {},
-    selected: { machine_id: "local", session: "default", pane_id: "w1:p1" },
+    selected: { machine_id: "local", session: "default", pane_id: "w1:p1" }, paletteOpen: false,
   }));
-  it("shows breadcrumb and agent status, and switches lens", () => {
+  it("has no breadcrumb or agent status, and switches lens", () => {
     render(<Header />);
-    expect(screen.getByLabelText("Breadcrumb").textContent).toBe("local › default › herdr-app › Rewrite");
-    expect(screen.getByLabelText("status blocked")).toBeTruthy();
-    expect(screen.getByText("claude · blocked")).toBeTruthy();
+    expect(screen.queryByLabelText("Breadcrumb")).toBeNull();
+    expect(screen.queryByText("claude · blocked")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Chat" }));
     expect(useApp.getState().lens["local/default/w1:p1"]).toBe("chat");
+  });
+  it("opens the palette from the search bar", () => {
+    render(<Header />);
+    fireEvent.click(screen.getByRole("button", { name: /Search panes/ }));
+    expect(useApp.getState().paletteOpen).toBe(true);
   });
   it("disables Chat when the pane has no agent", () => {
     const pane = m.sessions[0].workspaces[0].tabs[0].panes[0];

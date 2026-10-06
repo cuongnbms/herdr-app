@@ -49,7 +49,7 @@ export function search(machines: MachineView[], query: string): PaneHit[] {
       }
     }
   }
-  const rank = (h: PaneHit) => (h.status === "blocked" ? 0 : 1);
+  const rank = (h: PaneHit) => (h.status === "blocked" ? 0 : h.status === "done" ? 1 : 2);
   return scored
     .map((x, i) => ({ ...x, i }))
     .sort((a, b) => rank(a.hit) - rank(b.hit) || a.pos - b.pos || a.i - b.i)
