@@ -117,11 +117,19 @@ describe("AgentList", () => {
   it("changes the folder from the header menu", () => {
     render(<AgentList />);
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
-    expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New agent…", "Change folder…", "Rename workspace…", "Close workspace"]);
+    expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New claude", "New pi", "New shell", "Change folder…", "Rename workspace…", "Close workspace"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Change folder…" }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(within(screen.getByRole("group", { name: "web" })).getByText("web", { selector: ".ws-folder" })).toBeTruthy();
+  });
+
+  it("starts an agent from the header menu in the workspace folder", () => {
+    setFolder({ machine_id: "local", session: "default", workspace_id: "w2" }, "/srv/web");
+    render(<AgentList />);
+    fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New pi" }));
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", { workspace_id: "w2", cwd: "/srv/web", label: "pi", focus: false });
   });
 
   it("offers pane and tab actions in the card menu", () => {

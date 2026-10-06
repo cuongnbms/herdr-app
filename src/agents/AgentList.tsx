@@ -5,9 +5,10 @@ import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from 
 import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { BotIcon, CloseIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon } from "../ui/icons";
+import { BotIcon, CloseIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon, TerminalIcon } from "../ui/icons";
 import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
+import { AGENTS, openAgentTab } from "./openAgentTab";
 import { useTabReorder } from "./tabDnd";
 
 export interface PaneEntry {
@@ -108,7 +109,12 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   );
   const items: MenuItem[] = a
     ? [
-        { label: "New agent…", icon: BotIcon, onSelect: () => a.newAgent(machineId, session, ws) },
+        // Starts straight away in the workspace folder (else a pane's cwd, else herdr's default).
+        ...AGENTS.map((agent) => ({
+          label: `New ${agent}`,
+          icon: agent === "shell" ? TerminalIcon : BotIcon,
+          onSelect: () => a.guard(() => openAgentTab(machineId, session, ws.workspace_id, agent, folder ?? suggestFolder(ws))),
+        })),
         { label: "Change folder…", icon: FolderOpenIcon, onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
         { label: "Rename workspace…", icon: PencilIcon, onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
         { label: "Close workspace", icon: CloseIcon, onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
