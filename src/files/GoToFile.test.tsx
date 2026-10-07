@@ -35,4 +35,17 @@ describe("GoToFile", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect((input as HTMLInputElement).value).toBe("");
   });
+  it("focusing an empty input shows recent files first; Enter does nothing while hidden", () => {
+    const onOpen = vi.fn();
+    render(<GoToFile list={{ paths: ["a.ts", "b.ts"], capped: false, refused: false }} recent={["b.ts"]} onOpen={onOpen} inputRef={createRef()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.focus(input);
+    expect(screen.getAllByRole("option")[0].textContent).toContain("b.ts");
+    fireEvent.blur(input);
+    expect(screen.queryAllByRole("option").length).toBe(0);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+  });
 });
