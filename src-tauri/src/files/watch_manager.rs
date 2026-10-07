@@ -27,6 +27,41 @@ const INOTIFY_FAILURES: usize = 3;
 
 pub type WatchSink = Arc<dyn Fn(WatchEvent) + Send + Sync>;
 
+/// The one live Files watch: starting a watch replaces the running one.
+#[derive(Default)]
+pub struct FilesWatch {
+    current: std::sync::Mutex<Option<(u64, tokio::task::JoinHandle<()>)>>,
+    last_id: std::sync::atomic::AtomicU64,
+}
+
+impl FilesWatch {
+    /// Abort the running watch and start one on `root`; the returned id is for `stop`.
+    pub fn start(&self, t: Arc<dyn Transport>, local: bool, root: String, sink: WatchSink) -> u64 {
+        let id = self.last_id.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut current = self.current.lock().unwrap();
+        if let Some((_, old)) = current.take() {
+            old.abort();
+        }
+        *current = Some((id, tokio::spawn(run_watch(t, local, root, sink))));
+        id
+    }
+
+    /// Abort the watch, unless a newer one has replaced the one `id` names.
+    pub fn stop(&self, id: u64) {
+        let mut current = self.current.lock().unwrap();
+        if current.as_ref().is_some_and(|(cur, _)| *cur == id) {
+            if let Some((_, task)) = current.take() {
+                task.abort();
+            }
+        }
+    }
+
+    /// Whether a current watch is held (set by `start`, cleared by `stop` of its id).
+    pub fn is_running(&self) -> bool {
+        self.current.lock().unwrap().is_some()
+    }
+}
+
 /// Watch `root` until the task is aborted, restarting after errors with a backoff.
 pub async fn run_watch(t: Arc<dyn Transport>, local: bool, root: String, sink: WatchSink) {
     // Whether the current attempt delivered any change: an attempt that did not is a failure
@@ -550,5 +585,20 @@ mod tests {
             "{seen:?}"
         );
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_stale_stop_leaves_the_newer_watch_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().into_owned();
+        let w = FilesWatch::default();
+        let (sink, _rx) = collect();
+        let first = w.start(Arc::new(LocalTransport), true, root.clone(), sink.clone());
+        let second = w.start(Arc::new(LocalTransport), true, root, sink);
+        assert!(second > first);
+        w.stop(first);
+        assert!(w.is_running());
+        w.stop(second);
+        assert!(!w.is_running());
     }
 }

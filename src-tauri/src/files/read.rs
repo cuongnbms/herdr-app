@@ -3,7 +3,7 @@ use serde::Serialize;
 use super::paths::{check_rel, io_error, is_image, script_argv};
 use super::{BINARY_SNIFF_BYTES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
 use crate::error::{AppError, AppResult};
-use crate::transport::{exec, exec_bytes, Transport};
+use crate::transport::{exec_bytes, Transport};
 
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -52,15 +52,6 @@ echo "$s"
 case "${s%% *}" in ''|*[!0-9]*) exit 5;; esac
 [ "${s%% *}" -le "$3" ] || exit 4
 cat -- "$f""#;
-
-/// `$1` root, then one relative path each. A line `-` stands for a path that cannot be stat'ed.
-const STAT_SCRIPT: &str = r#"cd "$1" || exit 3
-shift
-for r; do
-  f="./$r"
-  s=$(stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f" 2>/dev/null) || s=-
-  printf '%s\n' "$s"
-done"#;
 
 fn parse_stat(line: &str) -> Option<FileStat> {
     let (size, mtime) = line.trim().split_once(' ')?;
@@ -169,30 +160,6 @@ pub async fn read_image(t: &dyn Transport, root: &str, rel: &str) -> AppResult<V
     Ok(split_line(&out.stdout).1.to_vec())
 }
 
-pub async fn stat_files(
-    t: &dyn Transport,
-    root: &str,
-    rels: &[String],
-) -> AppResult<Vec<Option<FileStat>>> {
-    for r in rels {
-        check_rel(r)?;
-    }
-    if rels.is_empty() {
-        return Ok(vec![]);
-    }
-    let mut args: Vec<&str> = vec![root];
-    args.extend(rels.iter().map(String::as_str));
-    let out = exec(t, &script_argv(STAT_SCRIPT, &args)).await?;
-    if out.status != 0 {
-        return Err(script_error(out.status, &out.stderr, root));
-    }
-    let stats: Vec<Option<FileStat>> = out.stdout.lines().map(parse_stat).collect();
-    if stats.len() != rels.len() {
-        return Err(bad_output());
-    }
-    Ok(stats)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,7 +223,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_is_not_found_and_stat_maps_missing_to_none() {
+    async fn missing_is_not_found() {
         let (_t, r) = root();
         std::fs::write(format!("{r}/a"), "abc").unwrap();
         assert_eq!(
@@ -265,22 +232,6 @@ mod tests {
                 .unwrap_err()
                 .code,
             "not_found"
-        );
-        let s = stat_files(&LocalTransport, &r, &["a".into(), "nope".into()])
-            .await
-            .unwrap();
-        assert_eq!(s[0].unwrap().size, 3);
-        assert_eq!(s[1], None);
-        assert!(stat_files(&LocalTransport, &r, &[])
-            .await
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            stat_files(&LocalTransport, &r, &["../x".into()])
-                .await
-                .unwrap_err()
-                .code,
-            "invalid"
         );
     }
 
@@ -299,10 +250,6 @@ mod tests {
         let c = read_file(&LocalTransport, &r, "link.txt").await.unwrap();
         assert!(c.truncated);
         assert_eq!(c.size, (MAX_TEXT_BYTES + 10) as u64);
-        let s = stat_files(&LocalTransport, &r, &["link.txt".into()])
-            .await
-            .unwrap();
-        assert_eq!(s[0].unwrap().size, (MAX_TEXT_BYTES + 10) as u64);
     }
 
     #[test]

@@ -5,15 +5,16 @@ use crate::{
     error::AppError,
     files::{
         all::{self, FileList},
-        changed::{self, Changed},
         list::{self, Entry},
         paths::resolve_root,
-        read::{self, FileContent, FileStat},
+        read::{self, FileContent},
+        watch::WatchEvent,
+        watch_manager::{FilesWatch, WatchSink},
     },
     git::{self, GitStatus},
     herdr::rpc,
     layout::LayoutStore,
-    machines::MachineManager,
+    machines::{self, MachineManager},
     sshconfig,
     transcript::{self, ChatEvent, ChatItem, ChatManager, Located},
     transport::{self, ssh::master_argv},
@@ -756,24 +757,31 @@ pub async fn files_image(
 }
 
 #[tauri::command]
-pub async fn files_stat(
+pub async fn files_watch(
     mgr: Mgr<'_>,
+    watch: State<'_, Arc<FilesWatch>>,
     machine_id: String,
     root: String,
-    rels: Vec<String>,
-) -> Result<Vec<Option<FileStat>>, AppError> {
-    let root = files_root(&mgr, &machine_id, &root)?;
-    let t = mgr.transport(&machine_id)?;
-    read::stat_files(&*t, &root, &rels).await
+    events: Channel<WatchEvent>,
+) -> Result<u64, AppError> {
+    let info = mgr.info(&machine_id)?;
+    let root = resolve_root(&info.home, &root)?;
+    if complete::files::is_home(&info.home, &root) {
+        return Err(AppError::new(
+            "invalid",
+            "auto-refresh is off for the home folder",
+        ));
+    }
+    let transport = mgr.transport(&machine_id)?;
+    let sink: WatchSink = Arc::new(move |e: WatchEvent| {
+        if let Err(err) = events.send(e) {
+            tracing::warn!("files watch event send failed: {err}");
+        }
+    });
+    Ok(watch.start(transport, machine_id == machines::LOCAL, root, sink))
 }
 
 #[tauri::command]
-pub async fn files_changed(
-    mgr: Mgr<'_>,
-    machine_id: String,
-    root: String,
-) -> Result<Changed, AppError> {
-    let root = files_root(&mgr, &machine_id, &root)?;
-    let t = mgr.transport(&machine_id)?;
-    changed::changed(&*t, &root).await
+pub fn files_unwatch(watch: State<'_, Arc<FilesWatch>>, id: u64) {
+    watch.stop(id);
 }

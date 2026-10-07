@@ -72,8 +72,8 @@ pub fn run() {
             commands::files_list_all,
             commands::files_read,
             commands::files_image,
-            commands::files_stat,
-            commands::files_changed,
+            commands::files_watch,
+            commands::files_unwatch,
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,
@@ -109,6 +109,7 @@ pub fn run() {
             app.manage(mgr.clone());
             app.manage(attach);
             app.manage(chats);
+            app.manage(Arc::new(files::watch_manager::FilesWatch::default()));
             tauri::async_runtime::spawn(async move { mgr.connect_at_startup().await });
             Ok(())
         })
