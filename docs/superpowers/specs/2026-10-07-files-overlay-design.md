@@ -158,12 +158,12 @@ script as quoted positional parameters, never spliced into the script text.
 
 | Command | Returns |
 |---|---|
-| `files_list_dir(machine_id, root, rel)` | `Vec<Entry { name, kind: file \| dir \| symlink, size }>` for one folder, exclude list applied. |
-| `files_list_all(machine_id, root)` | `{ paths: Vec<String>, capped: bool }`. `git ls-files -z -co --exclude-standard` inside a git repo, else `find` skipping the exclude list. Capped at 50,000. Shares the exclude list and the home/`/` refusal with `complete/files.rs` (extracted, not copied). |
+| `files_list_dir(machine_id, root, rel)` | `Vec<Entry { name, kind: file \| dir \| symlink }>` for one folder, exclude list applied (no size: portable `stat` per entry costs a fork each). |
+| `files_list_all(machine_id, root)` | `{ paths: Vec<String>, capped: bool, refused: bool }`. `git ls-files -z -co --exclude-standard` inside a git repo, else `find` skipping the exclude list. Capped at 50,000. Shares the exclude list and the home/`/` refusal with `complete/files.rs` (extracted, not copied). |
 | `files_read(machine_id, root, rel)` | `FileContent { kind: text \| binary \| image, text?, truncated, size, mtime }`. One script: stat, NUL check over the first 8 KB, `head -c` 2 MB. Images are read by `files_image`. |
 | `files_image(machine_id, root, rel)` | Raw bytes as `tauri::ipc::Response`; refused above 5 MB. |
 | `files_stat(machine_id, root, rels)` | `Vec<Option<{ size, mtime }>>`, `None` for a missing file. |
-| `files_changed(machine_id, root)` | `GitStatus` from `git.rs` with a limit of 200 entries. `git_status` takes the limit as a parameter; the Chat lens keeps 15. |
+| `files_changed(machine_id, root)` | `Changed { repo, total, changes: Vec<GitChange> }`, at most 200 changes. Uses `git.rs`'s parser with a limit parameter (the Chat lens keeps 15); paths are rewritten relative to the root (git reports them relative to the repository) and changes outside the root are dropped. |
 
 ## Frontend
 
