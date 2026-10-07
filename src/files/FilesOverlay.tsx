@@ -4,7 +4,7 @@ import { filesChanged, filesListAll, filesRead } from "../lib/ipc";
 import type { Changed, FileContent, FileList } from "../lib/types";
 import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { CloseIcon, CopyIcon, FileCopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
+import { CloseIcon, CopyIcon, EyeIcon, EyeOffIcon, FileCopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -141,6 +141,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const { open, pin, close, closeTabs, cycle, setScroll } = useFiles.getState();
 
   const [side, setSide] = useState(SIDE_DEFAULT);
+  const [showHeavy, setShowHeavy] = useState(false);
   const [list, setList] = useState<FileList | null>(null);
   const [changed, setChanged] = useState<Changed | null>(null);
   const [doc, setDoc] = useState<{ rel: string; content: FileContent } | null>(null);
@@ -315,7 +316,20 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
         <GoToFile list={list} recent={recent} onOpen={onOpen} inputRef={goto} />
         <div className="files-side-scroll">
           <ChangedList changed={changed} onOpen={onOpen} />
-          <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} />
+          <div className="files-tree-head">
+            <span>FILES</span>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Show heavy folders"
+              aria-pressed={showHeavy}
+              title={showHeavy ? "Hide .git, node_modules and other heavy folders" : "Show .git, node_modules and other heavy folders"}
+              onClick={() => setShowHeavy((on) => !on)}
+            >
+              {showHeavy ? <EyeIcon /> : <EyeOffIcon />}
+            </button>
+          </div>
+          <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} showHeavy={showHeavy} />
         </div>
       </aside>
       <div className="files-resize" role="separator" aria-orientation="vertical" onMouseDown={startDrag} />

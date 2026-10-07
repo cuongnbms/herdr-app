@@ -14,6 +14,8 @@ interface Props {
   onOpen: (rel: string, pin: boolean) => void;
   /** Changing it refetches the root and every expanded folder. */
   reloadKey: number;
+  /** Lists heavy folders (`.git`, `node_modules`…) too; changing it refetches like `reloadKey`. */
+  showHeavy?: boolean;
 }
 
 const NO_DIRS: string[] = [];
@@ -28,7 +30,7 @@ const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirli
 /** A linked folder looks like a folder, named like a symlink. */
 const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
-export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props) {
+export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHeavy = false }: Props) {
   const expanded = useFiles((s) => s.byWs[filesKey]?.expanded ?? NO_DIRS);
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -58,7 +60,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     (rel: string) => {
       const g = gen.current;
       inflight.current.add(rel);
-      filesListDir(machineId, root, rel).then(
+      filesListDir(machineId, root, rel, showHeavy).then(
         (list) => {
           if (g !== gen.current) return;
           inflight.current.delete(rel);
@@ -72,7 +74,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
         },
       );
     },
-    [machineId, root],
+    [machineId, root, showHeavy],
   );
 
   // Initial mount, a new root, or a reload: refetch the root and open folders. Children of

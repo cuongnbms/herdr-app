@@ -55,6 +55,17 @@ describe("FilesOverlay", () => {
     expect(screen.getByText("Open a file from the tree, or press ⌘P")).toBeTruthy();
   });
 
+  it("toggles heavy folders in the tree, hidden by default", async () => {
+    render(<FilesOverlay />);
+    const btn = screen.getByRole("button", { name: "Show heavy folders" });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() =>
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("files_list_dir", { machineId: "local", root: "/r", rel: "", showHeavy: true }),
+    );
+  });
+
   it("Esc closes the overlay, but not while an input has focus", () => {
     render(<FilesOverlay />);
     screen.getByRole("combobox").focus();

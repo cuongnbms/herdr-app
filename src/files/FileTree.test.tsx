@@ -181,4 +181,15 @@ describe("FileTree", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("/etc"));
   });
+  it("asks for heavy folders only when showHeavy is on, and relists when it changes", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.showHeavy ? [{ name: "node_modules", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "a.md", kind: "file" }],
+    );
+    const { rerender } = render(<FileTree machineId="local" root="/r" filesKey="local/default/w13" onOpen={() => {}} reloadKey={0} />);
+    await screen.findByText("a.md");
+    expect(vi.mocked(invoke)).toHaveBeenLastCalledWith("files_list_dir", { machineId: "local", root: "/r", rel: "", showHeavy: false });
+    rerender(<FileTree machineId="local" root="/r" filesKey="local/default/w13" onOpen={() => {}} reloadKey={0} showHeavy />);
+    expect(await screen.findByText("node_modules")).toBeTruthy();
+  });
 });
