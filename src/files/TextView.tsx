@@ -75,7 +75,7 @@ interface Props {
   /** Called once with the path and its last scroll position when the file is left. */
   saveScroll(path: string, top: number): void;
   /** `index` is the number of steps taken; it wraps around the matches here. */
-  find: { query: string; index: number } | null;
+  find: { query: string; index: number; matchCase: boolean } | null;
 }
 
 /** One mount per file, so the virtualizer starts at the file's own offset. */
@@ -88,7 +88,8 @@ function FileText({ text, path, initialScroll, initialLine, saveScroll, find }: 
   const lines = useMemo(() => highlightLines(text, path), [text, path]);
   const plain = useMemo(() => splitLines(text), [text]);
   const query = find?.query ?? null;
-  const matches = useMemo(() => (query ? findMatches(plain, query) : []), [plain, query]);
+  const matchCase = find?.matchCase ?? false;
+  const matches = useMemo(() => (query ? findMatches(plain, query, matchCase) : []), [plain, query, matchCase]);
   const byLine = useMemo(() => {
     const map = new Map<number, Match[]>();
     for (const m of matches) {

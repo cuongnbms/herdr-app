@@ -208,6 +208,24 @@ describe("FilesOverlay", () => {
       expect(document.activeElement).toBe(input);
     });
 
+    it("Match case narrows the matches; ⌘G and ⇧⌘G step through them", async () => {
+      texts["a.ts"] = "Foo foo\nfoo";
+      await openTabs("a.ts");
+      await waitFor(() => expect(document.querySelector(".files-text")).not.toBeNull());
+      press("f");
+      fireEvent.change(screen.getByPlaceholderText("Find in file"), { target: { value: "foo" } });
+      const count = () => document.querySelector(".files-find-count")!.textContent;
+      expect(count()).toBe("1 / 3");
+      press("g");
+      expect(count()).toBe("2 / 3");
+      press("g");
+      expect(count()).toBe("3 / 3");
+      press("g", { shiftKey: true });
+      expect(count()).toBe("2 / 3");
+      fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+      expect(count()).toBe("1 / 2");
+    });
+
     it("⌘R reloads the lists and the open file", async () => {
       await openTabs("a.ts");
       await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([c]) => c === "files_list_all")).toBe(true));

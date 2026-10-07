@@ -153,6 +153,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   /** The `#fragment` of the link that opened `rel`, used once when it is shown. */
   const [jump, setJump] = useState<{ rel: string; hash: string } | null>(null);
   const [query, setQuery] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
   const outline = useOutline((s) => s.shown);
   const toggleOutline = useOutline((s) => s.toggle);
   const [hasOutline, setHasOutline] = useState(false);
@@ -236,8 +237,8 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const searchable =
     shown !== null && shown.kind === "text" && shown.text !== null && !(md && mode === "render");
   const count = useMemo(
-    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query).length : 0),
-    [searchable, shown, query],
+    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query, matchCase).length : 0),
+    [searchable, shown, query, matchCase],
   );
 
   const keys = (e: KeyboardEvent) => {
@@ -261,6 +262,10 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       if (md && mode === "render") setMode(active, "source");
       setFindOpen(true);
       setFindFocus((n) => n + 1);
+    } else if (k === "g") {
+      e.preventDefault();
+      // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
+      if (findOpen && searchable && count > 0) setIndex((i) => i + (e.shiftKey ? -1 : 1));
     } else if (!e.shiftKey && k === "r") {
       e.preventDefault();
       reload();
@@ -358,8 +363,13 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                 index={count > 0 ? ((index % count) + count) % count : 0}
                 focusKey={findFocus}
                 query={query}
+                matchCase={matchCase}
                 onQuery={(q) => {
                   setQuery(q);
+                  setIndex(0);
+                }}
+                onMatchCase={(on) => {
+                  setMatchCase(on);
                   setIndex(0);
                 }}
                 // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
@@ -377,7 +387,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   mode={mode}
                   onMode={(m) => setMode(active, m)}
                   onOpen={onLink}
-                  find={findOpen && searchable && query ? { query, index } : null}
+                  find={findOpen && searchable && query ? { query, index, matchCase } : null}
                   initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
                   hash={jump && jump.rel === active ? jump.hash : null}
                   saveScroll={(rel, top) => setScroll(key, rel, top)}

@@ -24,4 +24,9 @@ describe("findMatches", () => {
     expect(findMatches(["a𐐨b"], "𐐀")).toEqual([{ line: 0, start: 1, end: 3 }]);
     expect(findMatches(["İ𐐀x"], "𐐨X")).toEqual([{ line: 0, start: 1, end: 4 }]);
   });
+  it("with matchCase, matches the exact case only", () => {
+    expect(findMatches(["Foo foo FOO"], "foo", true)).toEqual([{ line: 0, start: 4, end: 7 }]);
+    expect(findMatches(["İx foo"], "İx", true)).toEqual([{ line: 0, start: 0, end: 2 }]);
+    expect(findMatches(["aaa"], "aa", true)).toEqual([{ line: 0, start: 0, end: 2 }]);
+  });
 });

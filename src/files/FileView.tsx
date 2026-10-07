@@ -35,7 +35,7 @@ export function FileView({
   mode: FileMode;
   onMode(mode: FileMode): void;
   onOpen(rel: string, hash: string | null): void;
-  find: { query: string; index: number } | null;
+  find: { query: string; index: number; matchCase: boolean } | null;
   initialScroll: number;
   /** The `#fragment` this file was opened with by a link: `L12` shows line 12, else a heading. */
   hash?: string | null;

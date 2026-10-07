@@ -42,9 +42,19 @@ function matchRanges(text: string, qLower: string, qPoints: string[]): [number, 
   return out;
 }
 
-/** Case-insensitive, non-overlapping matches of `query` in each line; offsets index the line. */
-export function findMatches(lines: string[], query: string): Match[] {
+/** Non-overlapping matches of `query` in each line, case-insensitive unless `matchCase`;
+ * offsets index the line. */
+export function findMatches(lines: string[], query: string, matchCase = false): Match[] {
   if (!query) return [];
+  if (matchCase) {
+    const out: Match[] = [];
+    lines.forEach((text, line) => {
+      for (let at = text.indexOf(query); at >= 0; at = text.indexOf(query, at + query.length)) {
+        out.push({ line, start: at, end: at + query.length });
+      }
+    });
+    return out;
+  }
   const qPoints = Array.from(query, lowerPoint);
   const qLower = query.toLowerCase();
   const out: Match[] = [];

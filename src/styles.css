@@ -1333,6 +1333,11 @@ button.composer-model:disabled { cursor: default; }
   background: var(--surface-0); color: var(--fg); font-size: 12.5px;
 }
 .files-find-input:focus { border-color: var(--accent); box-shadow: var(--ring); outline: none; }
+.files-find-case {
+  height: 26px; padding: 0 7px; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  background: var(--surface-0); color: var(--fg-3); font-size: 12px; cursor: pointer;
+}
+.files-find-case[aria-pressed="true"] { border-color: var(--accent); color: var(--fg); }
 .files-find-count { color: var(--fg-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .files-text { flex: 1; min-height: 0; overflow: auto; background: var(--surface-code); color: var(--hl-fg); font: 12.5px/var(--files-line-h) var(--mono); }
