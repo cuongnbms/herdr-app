@@ -55,6 +55,17 @@ describe("FilesOverlay", () => {
     expect(screen.getByText("Open a file from the tree, or press ⌘P")).toBeTruthy();
   });
 
+  it("toggles heavy folders in the tree, hidden by default", async () => {
+    render(<FilesOverlay />);
+    const btn = screen.getByRole("button", { name: "Show heavy folders" });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() =>
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith("files_list_dir", { machineId: "local", root: "/r", rel: "", showHeavy: true }),
+    );
+  });
+
   it("Esc closes the overlay, but not while an input has focus", () => {
     render(<FilesOverlay />);
     screen.getByRole("combobox").focus();
@@ -208,13 +219,17 @@ describe("FilesOverlay", () => {
       expect(useFiles.getState().ws(key).active).toBe("c.ts");
     });
 
-    it("⌘F switches rendered markdown to Source and opens find; again refocuses it", async () => {
-      texts["doc.md"] = "# Doc\n\nfoo";
+    it("⌘F finds in rendered markdown without leaving Render; again refocuses it", async () => {
+      texts["doc.md"] = "# Doc\n\nfoo and Foo";
       await openTabs("doc.md");
       await screen.findByRole("heading", { name: "Doc" });
       press("f");
-      expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByRole("button", { name: "Render" }).getAttribute("aria-pressed")).toBe("true");
       const input = screen.getByPlaceholderText("Find in file");
+      fireEvent.change(input, { target: { value: "foo" } });
+      expect(document.querySelector(".files-find-count")!.textContent).toBe("1 / 2");
+      press("g");
+      expect(document.querySelector(".files-find-count")!.textContent).toBe("2 / 2");
       expect(document.activeElement).toBe(input);
       input.blur();
       press("f");

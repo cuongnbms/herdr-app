@@ -15,7 +15,7 @@ describe("FilesEntry", () => {
 
   it("toasts with no selection", () => {
     render(<><FilesEntry /><Toasts /></>);
-    fireEvent.click(screen.getByRole("button", { name: /browse files/i }));
+    fireEvent.click(screen.getByRole("button", { name: /workspace files/i }));
     expect(screen.getByText("Select a workspace first")).toBeTruthy();
     expect(useApp.getState().filesOverlay).toBeNull();
   });
@@ -23,7 +23,7 @@ describe("FilesEntry", () => {
   it("toggles the Files overlay for the selected pane's Workspace, closing the dashboard", () => {
     useApp.setState({ selected: { machine_id: "local", session: "default", pane_id: "p1" }, dashboardOpen: true });
     render(<FilesEntry />);
-    const btn = screen.getByRole("button", { name: /browse files/i });
+    const btn = screen.getByRole("button", { name: /workspace files/i });
     fireEvent.click(btn);
     expect(useApp.getState().filesOverlay).toMatchObject({ workspace_id: "w1" });
     expect(useApp.getState().dashboardOpen).toBe(false);

@@ -6,6 +6,9 @@ import type { WorkspaceRef } from "../workspaces/folder";
 
 export type Root = { path: string; source: "folder" | "pane" };
 
+/** The absolute path of `rel` below `root`, without doubling the slash of `/`. */
+export const absPath = (root: string, rel: string) => `${root === "/" ? "" : root}/${rel}`;
+
 /**
  * The folder the Files overlay browses: the Workspace's folder, else a pane's cwd.
  * `selectedCwd` must be `null` unless the selected pane belongs to `ref`'s Workspace;

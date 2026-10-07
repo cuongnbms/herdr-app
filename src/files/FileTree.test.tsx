@@ -9,7 +9,11 @@ vi.mock("./transfer", () => ({
   startUpload: (...a: unknown[]) => startUpload(...a),
   startDownload: (...a: unknown[]) => startDownload(...a),
 }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { showToast } from "../ui/Toast";
 import { FileTree } from "./FileTree";
 
 describe("FileTree", () => {
@@ -144,6 +148,58 @@ describe("FileTree", () => {
     rerender(<FileTree machineId="local" root="/s" filesKey="local/default/w9" onOpen={() => {}} reloadKey={0} />);
     expect(screen.queryByText("old.md")).toBeNull();
   });
+  it("shows a chevron and folder icon on folders, a file icon on files", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [],
+    );
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w10" onOpen={() => {}} reloadKey={0} />);
+    const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
+    const a = screen.getByText("a.md").closest("[role=treeitem]") as HTMLElement;
+    const icons = (el: HTMLElement) => [...el.querySelectorAll("svg")].map((s) => s.dataset.icon);
+    expect(icons(src)).toEqual(["chevron", "folder"]);
+    expect(icons(a)).toEqual(["file"]);
+    fireEvent.click(src);
+    await waitFor(() => expect(icons(src)).toEqual(["chevron", "folder-open"]));
+    expect(src.classList.contains("open")).toBe(true);
+  });
+  it("copies a row's path or relative path from its context menu", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
+    );
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w11" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.click(await screen.findByText("src"));
+    fireEvent.contextMenu(await screen.findByText("x.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("/r/src/x.ts"));
+    expect(showToast).toHaveBeenLastCalledWith("Path copied");
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Relative Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("src"));
+    expect(showToast).toHaveBeenLastCalledWith("Relative path copied");
+  });
+
+  it("joins the path onto a filesystem root without doubling the slash", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => [{ name: "etc", kind: "dir" }]);
+    render(<FileTree machineId="local" root="/" filesKey="local/default/w12" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("etc"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("/etc"));
+  });
+  it("asks for heavy folders only when showHeavy is on, and relists when it changes", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.showHeavy ? [{ name: "node_modules", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "a.md", kind: "file" }],
+    );
+    const { rerender } = render(<FileTree machineId="local" root="/r" filesKey="local/default/w13" onOpen={() => {}} reloadKey={0} />);
+    await screen.findByText("a.md");
+    expect(vi.mocked(invoke)).toHaveBeenLastCalledWith("files_list_dir", { machineId: "local", root: "/r", rel: "", showHeavy: false });
+    rerender(<FileTree machineId="local" root="/r" filesKey="local/default/w13" onOpen={() => {}} reloadKey={0} showHeavy />);
+    expect(await screen.findByText("node_modules")).toBeTruthy();
+  });
 });
 
 describe("FileTree context menu", () => {
@@ -156,7 +212,7 @@ describe("FileTree context menu", () => {
     vi.mocked(invoke).mockImplementation(listing as any);
     render(<FileTree machineId="m" root="/r" filesKey="m/default/c1" onOpen={() => {}} reloadKey={0} />);
     fireEvent.contextMenu(await screen.findByText("src"));
-    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…", "Download"]);
+    expect(menuLabels()).toEqual(["Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download"]);
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.contextMenu(screen.getByRole("tree"));
     expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…"]);
@@ -167,7 +223,7 @@ describe("FileTree context menu", () => {
     vi.mocked(invoke).mockImplementation(listing as any);
     render(<FileTree machineId="m" root="/r" filesKey="m/default/c6" onOpen={() => {}} reloadKey={0} />);
     fireEvent.contextMenu(await screen.findByText("a.md"));
-    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…", "Download"]);
+    expect(menuLabels()).toEqual(["Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download"]);
     fireEvent.contextMenu(screen.getByRole("menuitem", { name: "Download" }));
     // The menu's own overlay closes it; the tree must not open its root menu in its place.
     expect(screen.queryAllByRole("menuitem").map((b) => b.textContent)).not.toEqual(["Upload Files…", "Upload Folder…"]);

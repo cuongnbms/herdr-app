@@ -751,6 +751,10 @@ kbd {
 .chat-user-line .chat-copy { order: -1; }
 .chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-user .chat-images { justify-content: flex-end; }
+/* A sent message the transcript has not echoed yet: dimmed while the send is on its way. */
+.chat-outgoing { transition: opacity 0.15s ease; }
+.chat-outgoing.sending { opacity: 0.5; }
+.chat-outgoing .chat-image { cursor: default; }
 .skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .skill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; color: var(--fg-2); }
 .skill-chip svg { width: 12px; height: 12px; }
@@ -1307,13 +1311,20 @@ button.composer-model:disabled { cursor: default; }
 .files-changed-code { flex: none; width: 12px; color: var(--amber); font-weight: 600; text-align: center; }
 .files-changed-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
+.files-tree-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 0 12px; color: var(--fg-3); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; }
+.files-tree-head .icon-btn { width: 22px; height: 22px; }
+.files-tree-head .icon-btn .icon { width: 14px; height: 14px; }
+.files-tree-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
 .files-tree { flex: 1 0 auto; box-sizing: border-box; padding: 4px 0; font-size: 12.5px; outline: none; }
 .files-tree-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 8px; color: var(--fg-2); cursor: pointer; white-space: nowrap; user-select: none; }
 .files-tree-row:hover { background: var(--hover); color: var(--fg); }
 .files-tree-row:focus-visible { background: var(--active); color: var(--fg); outline: none; box-shadow: inset 2px 0 0 var(--accent); }
 .files-tree-dir { color: var(--fg); }
 .files-tree-symlink .files-tree-name { font-style: italic; }
-.files-tree-caret { flex: none; width: 12px; color: var(--fg-3); font-size: 10px; text-align: center; }
+.files-tree-caret { flex: none; display: flex; width: 12px; color: var(--fg-3); }
+.files-tree-caret .icon { width: 12px; height: 12px; transition: transform 0.1s; }
+.files-tree-row.open .files-tree-caret .icon { transform: rotate(90deg); }
+.files-tree-row .files-tree-icon { width: 14px; height: 14px; color: var(--fg-3); }
 .files-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .files-tree-error { display: flex; align-items: center; gap: 8px; padding-top: 3px; padding-bottom: 3px; color: var(--err); font-size: 12px; }
 .files-tree-error button { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
@@ -1358,10 +1369,16 @@ button.composer-model:disabled { cursor: default; }
 .files-text { flex: 1; min-height: 0; overflow: auto; background: var(--surface-code); color: var(--hl-fg); font: 12.5px/var(--files-line-h) var(--mono); }
 .files-text-body { min-width: max-content; }
 .files-line { display: flex; width: 100%; height: var(--files-line-h); line-height: var(--files-line-h); white-space: pre; }
-.files-gutter { flex: none; padding: 0 12px 0 14px; box-sizing: content-box; color: var(--fg-3); text-align: right; user-select: none; }
+.files-gutter { flex: none; padding: 0 12px 0 14px; box-sizing: content-box; color: var(--fg-3); text-align: right; user-select: none; -webkit-user-select: none; }
+/* Drawn as generated content: WebKit still paints the selection over user-select:none text. */
+.files-gutter::before { content: attr(data-line); }
 .files-code { padding-right: 24px; }
-.files-match { border-radius: 2px; background: var(--accent-soft); color: inherit; }
-.files-match.current { outline: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* Find paints amber, not accent: an accent tint reads as the text selection. */
+.files-match { border-radius: 2px; background: color-mix(in srgb, var(--amber) 32%, transparent); color: inherit; }
+.files-match.current, .files-match.current * { background: var(--amber); color: #1a1206; }
+/* Find in rendered markdown paints with the CSS Custom Highlight API: only colours apply. */
+::highlight(files-find) { background-color: color-mix(in srgb, var(--amber) 32%, transparent); }
+::highlight(files-find-current) { background-color: var(--amber); color: #1a1206; }
 .files-text .hljs-comment, .files-text .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .files-text .hljs-keyword, .files-text .hljs-selector-tag, .files-text .hljs-literal, .files-text .hljs-doctag { color: var(--hl-keyword); }
 .files-text .hljs-string, .files-text .hljs-regexp, .files-text .hljs-addition { color: var(--hl-string); }

@@ -1,5 +1,14 @@
 export type Match = { line: number; start: number; end: number };
 
+/** What a view reports to the find bar: how many matches, and which one is current. */
+export type FindStatus = { count: number; index: number };
+
+/** What the overlay asks a view to find; `index` counts steps taken from the starting match. */
+export type FindQuery = { query: string; index: number; matchCase: boolean };
+
+/** `steps` past `base`, wrapped around `count` matches. */
+export const wrapIndex = (base: number, steps: number, count: number) => (((base + steps) % count) + count) % count;
+
 /** One code point lowercased, kept as is when lowercasing would change its length (`İ`). */
 function lowerPoint(ch: string): string {
   const l = ch.toLowerCase();

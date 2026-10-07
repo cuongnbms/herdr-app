@@ -55,6 +55,7 @@ export function Composer({
   status,
   onPiModel,
   meta,
+  onSend,
 }: {
   pane: PaneRef;
   agent: string | null;
@@ -62,6 +63,12 @@ export function Composer({
   /** Called once `/model` has gone to pi, whose picker the Chat lens then shows as a card. */
   onPiModel?: () => void;
   meta?: ChatMeta;
+  /**
+   * Called as a message goes out, with its text and image previews; the returned function is
+   * told whether it went through. The previews of a send that went through are the caller's to
+   * revoke; a failed send's go back into the box.
+   */
+  onSend?: (text: string, previews: string[]) => (ok: boolean) => void;
 }) {
   const key = paneKey(pane);
   const [text, setText] = useState(() => readDraft(key));
@@ -217,14 +224,17 @@ export function Composer({
     // The suggestion was for the turn this send answers.
     clearSuggestion();
     setSending(true);
+    const settle = onSend?.(sent, sentImages.map((a) => a.preview));
     // Optimistic clear; restore the draft if the prompt did not go through (unless the user typed meanwhile).
     submit(sent, sentImages.map((a) => a.path as string))
       .then(
         () => {
-          sentImages.forEach(revoke);
+          if (settle) settle(true);
+          else sentImages.forEach(revoke);
           if (agent === "pi" && PI_MODEL_RE.test(sent.trim())) onPiModel?.();
         },
         () => {
+          settle?.(false);
           setText((cur) => (cur === "" ? sent : cur));
           setImages((cur) => (cur.length === 0 ? sentImages : (sentImages.forEach(revoke), cur)));
         },
@@ -237,8 +247,12 @@ export function Composer({
     if (sending) return;
     clearSuggestion();
     setSending(true);
+    const settle = onSend?.(reply, []);
     call("agent.prompt", { target: pane.pane_id, text: reply })
-      .catch(() => {})
+      .then(
+        () => settle?.(true),
+        () => settle?.(false),
+      )
       .finally(() => setSending(false));
   };
 

@@ -1,4 +1,5 @@
 import type { FileContent } from "../lib/types";
+import type { FindQuery, FindStatus } from "./find";
 import { ImageView } from "./ImageView";
 import { lineOfHash } from "./links";
 import { MarkdownView } from "./MarkdownView";
@@ -22,6 +23,7 @@ export function FileView({
   mode,
   onOpen,
   find,
+  onFindStatus,
   initialScroll,
   hash = null,
   saveScroll,
@@ -35,7 +37,9 @@ export function FileView({
   mode: FileMode;
   onMode(mode: FileMode): void;
   onOpen(rel: string, hash: string | null): void;
-  find: { query: string; index: number; matchCase: boolean } | null;
+  find: FindQuery | null;
+  /** Told the match count and the current match by the view that searches. */
+  onFindStatus?(status: FindStatus): void;
   initialScroll: number;
   /** The `#fragment` this file was opened with by a link: `L12` shows line 12, else a heading. */
   hash?: string | null;
@@ -72,6 +76,8 @@ export function FileView({
           saveScroll={saveScroll}
           outline={outline}
           onOutline={onOutline}
+          find={find}
+          onFindStatus={onFindStatus}
         />
       ) : (
         <TextView
@@ -81,6 +87,7 @@ export function FileView({
           initialLine={lineOfHash(hash)}
           saveScroll={saveScroll}
           find={find}
+          onFindStatus={onFindStatus}
         />
       )}
     </>

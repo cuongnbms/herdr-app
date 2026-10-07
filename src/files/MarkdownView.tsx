@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
+import { clearHighlights, findRanges, firstVisible, repaint, reveal, setHighlight } from "./domFind";
+import { wrapIndex, type FindQuery, type FindStatus } from "./find";
 import { resolveLink } from "./links";
 import { MarkdownImage } from "./MarkdownImage";
 import { Outline, type Heading } from "./Outline";
@@ -27,9 +31,30 @@ function rehypeHeadingIds() {
   };
 }
 
-const viewRehypePlugins = [...(rehypePlugins as unknown as unknown[]), rehypeHeadingIds] as never;
+/**
+ * Raw HTML in a file is kept to GitHub's safe set (`<details>`, `<kbd>`, `<sub>`, `<br>`…):
+ * no scripts, frames, styles or event handlers. `<picture>`/`<source>` go too, as their
+ * `srcset` would load remote images; `<img>` goes through the `img` component, which loads
+ * only images inside the root. Raw `id`s and `name`s get a `user-content-` prefix so they
+ * cannot clobber the app's own; anchor lookups below try the prefixed id as well.
+ */
+const sanitizeSchema: SanitizeSchema = {
+  ...defaultSchema,
+  tagNames: defaultSchema.tagNames?.filter((t) => t !== "picture" && t !== "source"),
+  // A dropped tag keeps its children; these hold raw text (CSS, fallback markup) that must go too.
+  strip: [...(defaultSchema.strip ?? []), "style", "noscript", "textarea", "title", "template"],
+};
 
-const byId = (root: HTMLElement | null, id: string) => root?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
+// Sanitizing runs before anything that adds classes (highlighting) and before heading ids.
+const viewRehypePlugins = [
+  rehypeRaw,
+  [rehypeSanitize, sanitizeSchema],
+  ...(rehypePlugins as unknown as unknown[]),
+  rehypeHeadingIds,
+] as never;
+
+const byId = (root: HTMLElement | null, id: string) =>
+  root?.querySelector(`[id="${CSS.escape(id)}"]`) ?? root?.querySelector(`[id="${CSS.escape(`user-content-${id}`)}"]`) ?? null;
 
 interface Props {
   /** Machine and root that relative images are read from. */
@@ -47,6 +72,91 @@ interface Props {
   outline?: boolean;
   /** Told whether the document has headings to outline; `false` again on unmount. */
   onOutline?(has: boolean): void;
+  /** `index` is the number of steps taken from the first match on screen; it wraps here. */
+  find?: FindQuery | null;
+  /** Told the match count and the current match whenever either changes. */
+  onFindStatus?(status: FindStatus): void;
+}
+
+const MATCH = "files-find";
+const CURRENT = "files-find-current";
+
+/**
+ * Find in the rendered text under `root`. Matches are painted with the CSS Custom Highlight
+ * API: the DOM belongs to React and mermaid, so marking matches must not add elements to it.
+ */
+function useDomFind(root: React.RefObject<HTMLDivElement | null>, find: FindQuery | null | undefined, onFindStatus?: (s: FindStatus) => void) {
+  const query = find?.query ?? "";
+  const matchCase = find?.matchCase ?? false;
+  const steps = find?.index ?? 0;
+  /** `fresh` marks a new search (it scrolls to its match); a content change keeps the view. */
+  const [found, setFound] = useState<{ ranges: Range[]; base: number; fresh: boolean }>({ ranges: [], base: 0, fresh: false });
+  // Bumped when the rendered DOM changes after the first paint (reload, mermaid, images).
+  const [contentSeq, setContentSeq] = useState(0);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setContentSeq((n) => n + 1), 50);
+    });
+    // `open` too: a <details> toggled open shows text to find. (Not `style`: repaint() writes it.)
+    observer.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["open"] });
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [root]);
+
+  // A new search starts at the first match on screen, so it begins where you are reading.
+  useLayoutEffect(() => {
+    const el = root.current;
+    const ranges = el && query ? findRanges(el, query, matchCase) : [];
+    setFound({ ranges, base: el ? firstVisible(ranges, el) : 0, fresh: true });
+  }, [root, query, matchCase]);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!contentSeq || !el || !query) return;
+    const ranges = findRanges(el, query, matchCase);
+    setFound((f) => ({ ranges, base: Math.min(f.base, Math.max(0, ranges.length - 1)), fresh: false }));
+  }, [contentSeq]);
+
+  const count = found.ranges.length;
+  const index = count ? wrapIndex(found.base, steps, count) : 0;
+  const report = useRef(onFindStatus);
+  report.current = onFindStatus;
+  useEffect(() => report.current?.({ count, index }), [count, index]);
+
+  // Whether highlights are painted now: with none before or after, there is nothing to repaint.
+  const painted = useRef(false);
+  useEffect(() => {
+    if (count) {
+      setHighlight(MATCH, found.ranges);
+      setHighlight(CURRENT, [found.ranges[index]]);
+    } else if (painted.current) clearHighlights(MATCH, CURRENT);
+    else return;
+    painted.current = count > 0;
+    repaint(root.current);
+  }, [found, index]);
+
+  // `steps` is not wrapped, so stepping onto the same match, as with a single match, reveals it again.
+  const revealed = useRef<{ found: unknown; steps: number }>({ found: null, steps: 0 });
+  useEffect(() => {
+    const last = revealed.current;
+    const moved = (found !== last.found && found.fresh) || steps !== last.steps;
+    revealed.current = { found, steps };
+    if (moved && count && root.current) reveal(found.ranges[index], root.current);
+  }, [found, steps]);
+
+  useEffect(
+    () => () => {
+      if (painted.current) clearHighlights(MATCH, CURRENT);
+    },
+    [root],
+  );
 }
 
 const readHeadings = (root: HTMLElement): Heading[] =>
@@ -73,8 +183,9 @@ export function MarkdownView(props: Props) {
   return <RenderedMarkdown key={props.rel} {...props} />;
 }
 
-function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline }: Props) {
+function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline, find, onFindStatus }: Props) {
   const root = useRef<HTMLDivElement>(null);
+  useDomFind(root, find, onFindStatus);
   const saveOnScroll = useScrollMemory(rel, initialScroll, saveScroll);
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -147,10 +258,16 @@ function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initia
     }),
     [rel, onOpen, machineId, fileRoot],
   );
+  // Parsing and highlighting the document is the slow part; find re-renders this view on every
+  // keystroke, so the same element lets React skip the document.
+  const doc = useMemo(
+    () => <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>,
+    [text, components],
+  );
   return (
     <div className="files-markdown-wrap">
       <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
-        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        {doc}
       </div>
       {outline && has && (
         <Outline

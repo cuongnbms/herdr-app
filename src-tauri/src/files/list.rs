@@ -62,11 +62,16 @@ done"#
 );
 
 /// One level of `rel` below `root`: folders (linked ones too) first, then files and symlinks,
-/// each sorted case-insensitively. Heavy folders (`SKIP_DIRS`) are left out; a linked folder
-/// is kept whatever its name, as `complete/files.rs` (`find -type d`) keeps it too.
-pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec<Entry>> {
+/// each sorted case-insensitively. Heavy folders (`SKIP_DIRS`) are left out unless `show_heavy`;
+/// a linked folder is kept whatever its name, as `complete/files.rs` (`find -type d`) keeps it too.
+pub async fn list_dir(
+    t: &dyn Transport,
+    root: &str,
+    rel: &str,
+    show_heavy: bool,
+) -> AppResult<Vec<Entry>> {
     let out = run_in_folder(t, LIST_SCRIPT, root, rel).await?;
-    Ok(parse_entries(&out))
+    Ok(parse_entries(&out, show_heavy))
 }
 
 /// Every name in `rel` below `root`, hidden and heavy ones included and uncapped: the names an
@@ -111,8 +116,8 @@ fn not_found(msg: String) -> AppError {
     AppError::new("not_found", msg)
 }
 
-/// The script's `kind<TAB>name` lines, heavy folders dropped, sorted and capped.
-fn parse_entries(stdout: &[u8]) -> Vec<Entry> {
+/// The script's `kind<TAB>name` lines, heavy folders dropped unless `show_heavy`, sorted and capped.
+fn parse_entries(stdout: &[u8], show_heavy: bool) -> Vec<Entry> {
     let mut entries: Vec<Entry> = stdout
         .split(|b| *b == b'\n')
         .filter_map(|line| {
@@ -125,7 +130,7 @@ fn parse_entries(stdout: &[u8]) -> Vec<Entry> {
                 "f" => EntryKind::File,
                 _ => return None,
             };
-            if kind == EntryKind::Dir && SKIP_DIRS.contains(&name) {
+            if !show_heavy && kind == EntryKind::Dir && SKIP_DIRS.contains(&name) {
                 return None;
             }
             Some(Entry {
@@ -179,7 +184,7 @@ mod tests {
         std::os::unix::fs::symlink("b.md", root.join("link")).unwrap();
         std::os::unix::fs::symlink("src", root.join("srclink")).unwrap();
         std::os::unix::fs::symlink("gone", root.join("dangling")).unwrap();
-        let got = list_dir(&LocalTransport, &root.to_string_lossy(), "")
+        let got = list_dir(&LocalTransport, &root.to_string_lossy(), "", false)
             .await
             .unwrap();
         let names: Vec<(&str, &EntryKind)> =
@@ -198,7 +203,7 @@ mod tests {
                 ("link", &EntryKind::Symlink),
             ]
         );
-        let sub = list_dir(&LocalTransport, &root.to_string_lossy(), "src")
+        let sub = list_dir(&LocalTransport, &root.to_string_lossy(), "src", false)
             .await
             .unwrap();
         assert_eq!(
@@ -208,10 +213,24 @@ mod tests {
                 kind: EntryKind::File
             }]
         );
-        let linked = list_dir(&LocalTransport, &root.to_string_lossy(), "srclink")
+        let linked = list_dir(&LocalTransport, &root.to_string_lossy(), "srclink", false)
             .await
             .unwrap();
         assert_eq!(linked, sub);
+    }
+
+    #[tokio::test]
+    async fn lists_heavy_dirs_when_asked() {
+        let tmp = tempfile::tempdir().unwrap();
+        mk(tmp.path(), &["node_modules/y.js", ".git/HEAD", "src/x.ts"]);
+        let r = tmp.path().to_string_lossy().into_owned();
+        let got = list_dir(&LocalTransport, &r, "", true).await.unwrap();
+        let names: Vec<&str> = got.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec![".git", "node_modules", "src"]);
+        let inside = list_dir(&LocalTransport, &r, "node_modules", true)
+            .await
+            .unwrap();
+        assert_eq!(inside[0].name, "y.js");
     }
 
     #[tokio::test]
@@ -219,22 +238,29 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let r = tmp.path().to_string_lossy().into_owned();
         std::fs::write(tmp.path().join("f"), "x").unwrap();
-        let e = list_dir(&LocalTransport, &r, "nope").await.unwrap_err();
+        let e = list_dir(&LocalTransport, &r, "nope", false)
+            .await
+            .unwrap_err();
         assert_eq!(
             (e.code.as_str(), e.message.as_str()),
             ("not_found", "no such folder: \"nope\"")
         );
-        let e = list_dir(&LocalTransport, &r, "f").await.unwrap_err();
+        let e = list_dir(&LocalTransport, &r, "f", false).await.unwrap_err();
         assert_eq!(
             (e.code.as_str(), e.message.as_str()),
             ("not_found", "not a folder: \"f\"")
         );
         let gone = format!("{r}/gone");
-        let e = list_dir(&LocalTransport, &gone, "").await.unwrap_err();
+        let e = list_dir(&LocalTransport, &gone, "", false)
+            .await
+            .unwrap_err();
         assert_eq!(e.code, "not_found");
         assert!(e.message.contains("gone"), "{}", e.message);
         assert_eq!(
-            list_dir(&LocalTransport, &r, "../").await.unwrap_err().code,
+            list_dir(&LocalTransport, &r, "../", false)
+                .await
+                .unwrap_err()
+                .code,
             "invalid"
         );
     }
@@ -244,7 +270,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         mk(root, &[".env", "a\nb", "ok", ".config/x"]);
-        let got = list_dir(&LocalTransport, &root.to_string_lossy(), "")
+        let got = list_dir(&LocalTransport, &root.to_string_lossy(), "", false)
             .await
             .unwrap();
         let names: Vec<&str> = got.iter().map(|e| e.name.as_str()).collect();
@@ -258,7 +284,13 @@ mod tests {
         std::fs::create_dir(&locked).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let res = list_dir(&LocalTransport, &tmp.path().to_string_lossy(), "locked").await;
+        let res = list_dir(
+            &LocalTransport,
+            &tmp.path().to_string_lossy(),
+            "locked",
+            false,
+        )
+        .await;
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         // root can enter any folder; there is nothing to check then.
         if let Err(e) = res {
@@ -347,7 +379,7 @@ mod tests {
 
     #[test]
     fn names_equal_ignoring_case_sort_by_exact_name() {
-        let got = parse_entries(b"f\tb\nf\tB\nf\ta\nd\tZ\nd\tbuild\nf\tA\n");
+        let got = parse_entries(b"f\tb\nf\tB\nf\ta\nd\tZ\nd\tbuild\nf\tA\n", false);
         let names: Vec<&str> = got.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["Z", "A", "a", "B", "b"]);
     }

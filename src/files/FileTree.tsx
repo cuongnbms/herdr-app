@@ -4,9 +4,10 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { filesListDir } from "../lib/ipc";
 import type { FileEntry } from "../lib/types";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
-import { ArrowDownIcon, ArrowUpIcon, FolderInputIcon } from "../ui/icons";
+import { ArrowDownIcon, ArrowUpIcon, ChevronIcon, FileIcon, FolderIcon, FolderInputIcon, FolderOpenIcon } from "../ui/icons";
 import { startDownload, startUpload } from "./transfer";
 import { useFiles } from "./store";
+import { copyItems } from "./treeMenu";
 
 interface Props {
   machineId: string;
@@ -15,6 +16,8 @@ interface Props {
   onOpen: (rel: string, pin: boolean) => void;
   /** Changing it refetches the root and every expanded folder. */
   reloadKey: number;
+  /** Lists heavy folders (`.git`, `node_modules`…) too; changing it refetches like `reloadKey`. */
+  showHeavy?: boolean;
 }
 
 const NO_DIRS: string[] = [];
@@ -29,7 +32,7 @@ const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirli
 /** A linked folder looks like a folder, named like a symlink. */
 const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
-export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props) {
+export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHeavy = false }: Props) {
   const expanded = useFiles((s) => s.byWs[filesKey]?.expanded ?? NO_DIRS);
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -46,6 +49,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     setErrors({});
     setFocusRel(null);
   }
+  /** The open context menu: the row it belongs to (null for the tree's empty space) and the folder an Upload goes into. */
   const [menu, setMenu] = useState<{ x: number; y: number; rel: string | null; dir: string } | null>(null);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -59,7 +63,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     (rel: string) => {
       const g = gen.current;
       inflight.current.add(rel);
-      filesListDir(machineId, root, rel).then(
+      filesListDir(machineId, root, rel, showHeavy).then(
         (list) => {
           if (g !== gen.current) return;
           inflight.current.delete(rel);
@@ -73,7 +77,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
         },
       );
     },
-    [machineId, root],
+    [machineId, root, showHeavy],
   );
 
   // Initial mount, a new root, or a reload: refetch the root and open folders. Children of
@@ -111,6 +115,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
 
   const menuItems = (m: { rel: string | null; dir: string }): MenuItem[] => {
     const list: MenuItem[] = [
+      ...(m.rel !== null ? copyItems(root, m.rel) : []),
       { label: "Upload Files…", icon: ArrowUpIcon, onSelect: () => void upload(m.dir, false) },
       { label: "Upload Folder…", icon: FolderInputIcon, onSelect: () => void upload(m.dir, true) },
     ];
@@ -205,7 +210,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
             aria-expanded={isDir ? open : undefined}
             data-rel={rel}
             data-kind={ent.kind}
-            className={`files-tree-row ${kindClass(ent.kind)}`}
+            className={`files-tree-row ${kindClass(ent.kind)}${open ? " open" : ""}`}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={(e) => {
               // The second click of a double click would collapse what the first expanded.
@@ -222,7 +227,17 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
               setMenu({ x: e.clientX, y: e.clientY, rel, dir: isDir ? rel : dir });
             }}
           >
-            <span className="files-tree-caret">{isDir ? (open ? "▾" : "▸") : ""}</span>
+            {/* Files keep the chevron's width, so names line up across a level. */}
+            <span className="files-tree-caret">{isDir && <ChevronIcon data-icon="chevron" />}</span>
+            {isDir ? (
+              open ? (
+                <FolderOpenIcon className="icon files-tree-icon" data-icon="folder-open" />
+              ) : (
+                <FolderIcon className="icon files-tree-icon" data-icon="folder" />
+              )
+            ) : (
+              <FileIcon className="icon files-tree-icon" data-icon="file" />
+            )}
             <span className="files-tree-name">{ent.name}</span>
           </div>
           {open && renderDir(rel, depth + 1)}
@@ -245,6 +260,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
       }}
     >
       {renderDir("", 0)}
+      {/* Fixed to the window rather than to an animating ancestor. */}
       {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />, document.body)}
     </div>
   );

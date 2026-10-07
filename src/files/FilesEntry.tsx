@@ -19,9 +19,9 @@ export function toggleFilesOverlay() {
 export function FilesEntry() {
   const open = useApp((s) => !!s.filesOverlay);
   return (
-    <button className={"row files-entry" + (open ? " active" : "")} aria-pressed={open} title="Browse Files (⌘E)" onClick={toggleFilesOverlay}>
+    <button className={"row files-entry" + (open ? " active" : "")} aria-pressed={open} title="Workspace Files (⌘E)" onClick={toggleFilesOverlay}>
       <FolderOpenIcon className="icon machine-icon" />
-      <span className="label">Browse Files</span>
+      <span className="label">Workspace Files</span>
     </button>
   );
 }
