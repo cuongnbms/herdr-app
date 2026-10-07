@@ -1380,6 +1380,7 @@ button.composer-model:disabled { cursor: default; }
 .files-outline-toggle[role="button"]:hover { background: var(--active); color: var(--fg); }
 .files-notice { flex: 1; display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--fg-3); font-size: 13px; }
 .files-notice-size { font-size: 12px; font-variant-numeric: tabular-nums; }
+.files-markdown-image { max-width: 100%; }
 .files-image-wrap { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 16px; background: var(--surface-code); }
 .files-image { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .files-image.actual { max-width: none; max-height: none; object-fit: none; cursor: zoom-out; }

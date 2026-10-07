@@ -62,6 +62,8 @@ export function FileView({
       {content.truncated && <div className="files-banner">Showing the first 2 MB</div>}
       {isMarkdown(rel) && mode === "render" ? (
         <MarkdownView
+          machineId={machineId}
+          root={root}
           text={content.text}
           rel={rel}
           onOpen={onOpen}
