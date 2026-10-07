@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { filesListDir } from "../lib/ipc";
 import type { FileEntry } from "../lib/types";
+import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { ChevronIcon, FileIcon, FolderIcon, FolderOpenIcon } from "../ui/icons";
 import { useFiles } from "./store";
+import { copyItems } from "./treeMenu";
 
 interface Props {
   machineId: string;
@@ -47,6 +50,9 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const treeRef = useRef<HTMLDivElement>(null);
+  /** The open context menu and the row it belongs to. */
+  const [menu, setMenu] = useState<{ x: number; y: number; rel: string } | null>(null);
+  const menuItems = (rel: string): MenuItem[] => [...copyItems(root, rel)];
 
   const load = useCallback(
     (rel: string) => {
@@ -190,6 +196,10 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
             onDoubleClick={() => {
               if (!isDir) onOpen(rel, true);
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, rel });
+            }}
           >
             {/* Files keep the chevron's width, so names line up across a level. */}
             <span className="files-tree-caret">{isDir && <ChevronIcon data-icon="chevron" />}</span>
@@ -213,6 +223,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   return (
     <div className="files-tree" role="tree" ref={treeRef} onKeyDown={onKeyDown}>
       {renderDir("", 0)}
+      {/* Fixed to the window rather than to an animating ancestor. */}
+      {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.rel)} onClose={() => setMenu(null)} />, document.body)}
     </div>
   );
 }

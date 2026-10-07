@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { showToast } from "../ui/Toast";
 import { FileTree } from "./FileTree";
 
 describe("FileTree", () => {
@@ -150,5 +154,31 @@ describe("FileTree", () => {
     fireEvent.click(src);
     await waitFor(() => expect(icons(src)).toEqual(["chevron", "folder-open"]));
     expect(src.classList.contains("open")).toBe(true);
+  });
+  it("copies a row's path or relative path from its context menu", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
+    );
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w11" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.click(await screen.findByText("src"));
+    fireEvent.contextMenu(await screen.findByText("x.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("/r/src/x.ts"));
+    expect(showToast).toHaveBeenLastCalledWith("Path copied");
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Relative Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("src"));
+    expect(showToast).toHaveBeenLastCalledWith("Relative path copied");
+  });
+
+  it("joins the path onto a filesystem root without doubling the slash", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => [{ name: "etc", kind: "dir" }]);
+    render(<FileTree machineId="local" root="/" filesKey="local/default/w12" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("etc"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Path" }));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith("/etc"));
   });
 });

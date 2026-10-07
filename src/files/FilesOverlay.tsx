@@ -20,7 +20,7 @@ import { splitLines } from "./highlightLines";
 import { HIGHLIGHT_LIMIT } from "./limits";
 import { lineOfHash } from "./links";
 import { useOutline } from "./outlineStore";
-import { resolveRoot, type Root } from "./root";
+import { absPath, resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { usePolling } from "./usePolling";
 
@@ -292,7 +292,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
     window.addEventListener("mouseup", up);
   };
 
-  const fullPath = active ? `${root === "/" ? "" : root}/${active}` : "";
+  const fullPath = active ? absPath(root, active) : "";
   const copyPath = () => {
     if (!active) return;
     writeText(fullPath).then(
