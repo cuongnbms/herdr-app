@@ -206,4 +206,23 @@ describe("FileTree context menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Download" }));
     expect(startDownload).toHaveBeenCalledWith("m", "/r", "a.md");
   });
+
+  it("does not reload the old root after the root changed mid-upload", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    dialogOpen.mockResolvedValue(["/Users/u/n.md"]);
+    let finish!: (ok: boolean) => void;
+    startUpload.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = r)));
+    const { rerender } = render(<FileTree machineId="m" root="/r" filesKey="m/default/c5" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload Files…" }));
+    await waitFor(() => expect(startUpload).toHaveBeenCalled());
+    rerender(<FileTree machineId="m" root="/s" filesKey="m/default/c5" onOpen={() => {}} reloadKey={0} />);
+    await screen.findByText("a.md");
+    const before = vi.mocked(invoke).mock.calls.length;
+    finish(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(vi.mocked(invoke).mock.calls.slice(before).filter(([, a]: any) => a.root === "/r")).toEqual([]);
+    expect(vi.mocked(invoke).mock.calls.length).toBe(before);
+  });
 });

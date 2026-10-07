@@ -47,6 +47,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     setFocusRel(null);
   }
   const [menu, setMenu] = useState<{ x: number; y: number; rel: string | null; dir: string } | null>(null);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const gen = useRef(0);
   const inflight = useRef(new Set<string>());
   const expandedRef = useRef(expanded);
@@ -99,10 +101,12 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   };
 
   const upload = async (dir: string, directory: boolean) => {
+    const startedIn = scopeRef.current;
     const picked = await openDialog({ multiple: true, directory });
     if (picked === null) return;
     const paths = typeof picked === "string" ? [picked] : picked;
-    if (await startUpload(machineId, root, dir, paths)) load(dir);
+    // The root may have changed during the dialog or the transfer; its listing is not ours to refresh.
+    if ((await startUpload(machineId, root, dir, paths)) && scopeRef.current === startedIn) load(dir);
   };
 
   const menuItems = (m: { rel: string | null; dir: string }): MenuItem[] => {
