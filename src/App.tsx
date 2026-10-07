@@ -12,7 +12,7 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
-import { workspaceOfSelection } from "./files/root";
+import { toggleFilesOverlay } from "./files/FilesEntry";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
@@ -150,25 +150,17 @@ export default function App() {
         const { paletteOpen, setPaletteOpen } = useApp.getState();
         setPaletteOpen(!paletteOpen);
       }
-      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "e") {
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         if (e.repeat) return;
         const { dashboardOpen, setDashboardOpen, setPaletteOpen } = useApp.getState();
         setPaletteOpen(false);
         setDashboardOpen(!dashboardOpen);
       }
-      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "o") {
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "e") {
         e.preventDefault();
         if (e.repeat) return;
-        const state = useApp.getState();
-        if (state.dashboardOpen) return;
-        if (state.filesOverlay) {
-          state.setFilesOverlay(null);
-          return;
-        }
-        const ws = workspaceOfSelection(state);
-        if (ws) state.setFilesOverlay(ws);
-        else showToast("Select a workspace first");
+        toggleFilesOverlay();
       }
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
         e.preventDefault();

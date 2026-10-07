@@ -61,21 +61,21 @@ describe("App shell", () => {
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
-  it("toggles the Agent Dashboard with ⌘E", () => {
+  it("toggles the Agent Dashboard with ⌘D", () => {
     useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false });
     // The mocked invoke answers an earlier test's quota fetch with [], which is no outcome.
     useQuota.setState({ slots: initialSlots() });
     render(<App />);
-    fireEvent.keyDown(window, { key: "e", metaKey: true });
+    fireEvent.keyDown(window, { key: "d", metaKey: true });
     expect(screen.getByRole("dialog", { name: "Agent Dashboard" })).toBeTruthy();
-    fireEvent.keyDown(window, { key: "e", metaKey: true });
+    fireEvent.keyDown(window, { key: "d", metaKey: true });
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
-  it("⌘O with no selection toasts, with a selection opens the Files overlay", () => {
+  it("⌘E with no selection toasts, with a selection toggles the Files overlay", () => {
     useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: null });
     render(<App />);
-    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
     expect(screen.getByText("Select a workspace first")).toBeTruthy();
     useApp.setState({
       machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
@@ -83,9 +83,9 @@ describe("App shell", () => {
       ] }] } } as never,
       selected: { machine_id: "local", session: "default", pane_id: "p1" },
     });
-    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
     expect(useApp.getState().filesOverlay).toMatchObject({ workspace_id: "w1" });
-    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
     expect(useApp.getState().filesOverlay).toBeNull();
   });
 

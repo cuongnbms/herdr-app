@@ -19,6 +19,7 @@ import type { MenuItem } from "./ContextMenu";
 import { ActionsProvider, useActions } from "./actions";
 import { forgetSessionFolders } from "../workspaces/folder";
 import { DashboardEntry } from "../dashboard/AgentDashboard";
+import { FilesEntry } from "../files/FilesEntry";
 import {
   ChevronIcon,
   FolderInputIcon,
@@ -276,6 +277,7 @@ export const Sidebar = memo(function Sidebar() {
     <ActionsProvider>
       <DragContext.Provider value={dragState}>
         <DashboardEntry />
+        <FilesEntry />
         {(bookmarks.length > 0 || (draggingSession && emptyBookmarksShown)) && <BookmarksSection bookmarks={bookmarks} />}
         <GroupTree />
         <section aria-label="Machines" className="machines-section">
