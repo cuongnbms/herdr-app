@@ -13,6 +13,9 @@ export interface FilesWs {
 }
 
 const RECENT_MAX = 20;
+
+/** Which tabs a "Close …" command closes, relative to the tab it was invoked on. */
+export type CloseScope = "others" | "right" | "all";
 const EMPTY: FilesWs = { tabs: [], preview: null, active: null, expanded: [], scroll: {}, recent: [] };
 
 export function wsKey(ref: WorkspaceRef): string {
@@ -30,6 +33,7 @@ interface FilesState {
   open: (key: string, rel: string, opts: { pin: boolean }) => void;
   pin: (key: string, rel: string) => void;
   close: (key: string, rel: string) => void;
+  closeTabs: (key: string, scope: CloseScope, rel: string) => void;
   cycle: (key: string, delta: 1 | -1) => void;
   toggleDir: (key: string, rel: string) => void;
   setScroll: (key: string, rel: string, top: number) => void;
@@ -64,6 +68,16 @@ export const useFiles = create<FilesState>((set, get) => {
         const tabs = w.tabs.filter((t) => t !== rel);
         const active = w.active === rel ? (tabs[at] ?? tabs[at - 1] ?? null) : w.active;
         return { ...w, tabs, active, preview: w.preview === rel ? null : w.preview };
+      }),
+    closeTabs: (key, scope, rel) =>
+      update(key, (w) => {
+        const at = w.tabs.indexOf(rel);
+        if (at < 0) return w;
+        const tabs = scope === "all" ? [] : scope === "others" ? [rel] : w.tabs.slice(0, at + 1);
+        // A closed active tab hands over to the tab the command was invoked on.
+        const active = w.active && tabs.includes(w.active) ? w.active : tabs.length ? rel : null;
+        const preview = w.preview && tabs.includes(w.preview) ? w.preview : null;
+        return { ...w, tabs, active, preview };
       }),
     cycle: (key, delta) =>
       update(key, (w) => {

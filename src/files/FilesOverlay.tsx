@@ -138,7 +138,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const preview = useFiles((s) => s.ws(key).preview);
   const active = useFiles((s) => s.ws(key).active);
   const recent = useFiles((s) => s.ws(key).recent);
-  const { open, pin, close, cycle, setScroll } = useFiles.getState();
+  const { open, pin, close, closeTabs, cycle, setScroll } = useFiles.getState();
 
   const [side, setSide] = useState(SIDE_DEFAULT);
   const [list, setList] = useState<FileList | null>(null);
@@ -327,6 +327,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
           onSelect={(rel) => open(key, rel, { pin: false })}
           onPin={(rel) => pin(key, rel)}
           onClose={(rel) => close(key, rel)}
+          onCloseTabs={(scope, rel) => closeTabs(key, scope, rel)}
         />
         {active ? (
           <>
