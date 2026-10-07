@@ -29,6 +29,18 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The item Tab lands on: the last focused one, else the first. */
+  const [focusRel, setFocusRel] = useState<string | null>(null);
+  // A different root starts from nothing, reset while rendering so the old root's entries
+  // are never committed under the new one.
+  const scope = `${machineId}\0${root}`;
+  const [shownScope, setShownScope] = useState(scope);
+  if (shownScope !== scope) {
+    setShownScope(scope);
+    setEntries({});
+    setErrors({});
+    setFocusRel(null);
+  }
   const gen = useRef(0);
   const inflight = useRef(new Set<string>());
   const expandedRef = useRef(expanded);
@@ -56,17 +68,16 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     [machineId, root],
   );
 
-  // A different root starts from nothing.
-  useEffect(() => {
-    setEntries({});
-    setErrors({});
-  }, [machineId, root]);
-
-  // Initial mount, a new root, or a reload: refetch the root and open folders.
+  // Initial mount, a new root, or a reload: refetch the root and open folders. Children of
+  // collapsed folders are dropped, so expanding one later lists it afresh.
   useEffect(() => {
     gen.current++;
     inflight.current.clear();
-    for (const rel of ["", ...expandedRef.current]) load(rel);
+    const keep = new Set(["", ...expandedRef.current]);
+    const open = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => keep.has(k)));
+    setEntries(open);
+    setErrors(open);
+    for (const rel of keep) load(rel);
   }, [load, reloadKey]);
 
   // First expand of a folder loads it.
@@ -129,6 +140,19 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     }
   };
 
+  // Visible items in order, for the roving tab stop.
+  const visible: string[] = [];
+  const walkVisible = (dir: string) => {
+    if (errors[dir] !== undefined) return;
+    for (const ent of entries[dir] ?? []) {
+      const rel = join(dir, ent.name);
+      visible.push(rel);
+      if (isFolder(ent.kind) && expanded.includes(rel)) walkVisible(rel);
+    }
+  };
+  walkVisible("");
+  const tabStop = focusRel !== null && visible.includes(focusRel) ? focusRel : (visible[0] ?? null);
+
   const renderDir = (dir: string, depth: number): React.ReactNode => {
     if (errors[dir] !== undefined) {
       return (
@@ -148,7 +172,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
         <div key={rel} role="none">
           <div
             role="treeitem"
-            tabIndex={-1}
+            tabIndex={rel === tabStop ? 0 : -1}
+            onFocus={() => setFocusRel(rel)}
             aria-level={depth + 1}
             aria-expanded={isDir ? open : undefined}
             data-rel={rel}
