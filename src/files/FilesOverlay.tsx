@@ -9,14 +9,13 @@ import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
 import { ChangedList } from "./ChangedList";
-import { findMatches } from "./find";
+import type { FindStatus } from "./find";
 import { FindBar } from "./FindBar";
 import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { FileView, type FileMode } from "./FileView";
 import { GoToFile } from "./GoToFile";
 import { latestOnly, STALE } from "./latest";
-import { splitLines } from "./highlightLines";
 import { HIGHLIGHT_LIMIT } from "./limits";
 import { lineOfHash } from "./links";
 import { useOutline } from "./outlineStore";
@@ -237,10 +236,9 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const md = active !== null && isMarkdown(active);
   const searchable =
     shown !== null && shown.kind === "text" && shown.text !== null && !(md && mode === "render");
-  const count = useMemo(
-    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query, matchCase).length : 0),
-    [searchable, shown, query, matchCase],
-  );
+  /** Reported by the view, which owns the matches and where the search starts. */
+  const [status, setStatus] = useState<FindStatus>({ count: 0, index: 0 });
+  const count = findOpen && searchable && query ? status.count : 0;
 
   const keys = (e: KeyboardEvent) => {
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
@@ -265,7 +263,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       setFindFocus((n) => n + 1);
     } else if (k === "g") {
       e.preventDefault();
-      // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
+      // Not wrapped here: the view wraps it, and each step re-scrolls even onto the same match.
       if (findOpen && searchable && count > 0) setIndex((i) => i + (e.shiftKey ? -1 : 1));
     } else if (!e.shiftKey && k === "r") {
       e.preventDefault();
@@ -388,7 +386,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
             {findOpen && searchable && (
               <FindBar
                 count={count}
-                index={count > 0 ? ((index % count) + count) % count : 0}
+                index={status.index}
                 focusKey={findFocus}
                 query={query}
                 matchCase={matchCase}
@@ -400,7 +398,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   setMatchCase(on);
                   setIndex(0);
                 }}
-                // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
+                // Not wrapped here: the view wraps it, and each step re-scrolls even onto the same match.
                 onStep={(d) => count > 0 && setIndex((i) => i + d)}
                 onClose={() => setFindOpen(false)}
               />
@@ -416,6 +414,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   onMode={(m) => setMode(active, m)}
                   onOpen={onLink}
                   find={findOpen && searchable && query ? { query, index, matchCase } : null}
+                  onFindStatus={setStatus}
                   initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
                   hash={jump && jump.rel === active ? jump.hash : null}
                   saveScroll={(rel, top) => setScroll(key, rel, top)}
