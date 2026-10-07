@@ -12,6 +12,7 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
+import { workspaceOfSelection } from "./files/root";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
@@ -84,6 +85,7 @@ function EmptyMain() {
 const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
 const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
 
+const FilesOverlay = lazy(() => import("./files/FilesOverlay").then((m) => ({ default: m.FilesOverlay })));
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   // Only the selected Pane and its ids: a change elsewhere on its Machine does not re-render App.
@@ -94,6 +96,7 @@ export default function App() {
   const paletteOpen = useApp((s) => s.paletteOpen);
   const setPaletteOpen = useApp((s) => s.setPaletteOpen);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
+  const filesOverlay = useApp((s) => s.filesOverlay);
   const chatFontSize = useSettings((s) => s.chatFontSize);
 
   const theme = useTheme((s) => s.theme);
@@ -153,6 +156,19 @@ export default function App() {
         const { dashboardOpen, setDashboardOpen, setPaletteOpen } = useApp.getState();
         setPaletteOpen(false);
         setDashboardOpen(!dashboardOpen);
+      }
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        if (e.repeat) return;
+        const state = useApp.getState();
+        if (state.dashboardOpen) return;
+        if (state.filesOverlay) {
+          state.setFilesOverlay(null);
+          return;
+        }
+        const ws = workspaceOfSelection(state);
+        if (ws) state.setFilesOverlay(ws);
+        else showToast("Select a workspace first");
       }
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
@@ -218,6 +234,11 @@ export default function App() {
         )}
       </main>
       {dashboardOpen && <AgentDashboard />}
+      {filesOverlay && (
+        <Suspense fallback={null}>
+          <FilesOverlay />
+        </Suspense>
+      )}
       <Toasts />
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>

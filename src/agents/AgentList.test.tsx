@@ -119,7 +119,7 @@ describe("AgentList", () => {
   it("changes the folder from the header menu", () => {
     render(<AgentList />);
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
-    expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New claude", "New pi", "New shell", "Change folder…", "Rename workspace…", "Close workspace"]);
+    expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["New claude", "New pi", "New shell", "Browse files", "Change folder…", "Rename workspace…", "Close workspace"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Change folder…" }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web-app" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

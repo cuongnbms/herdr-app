@@ -72,6 +72,23 @@ describe("App shell", () => {
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
+  it("⌘O with no selection toasts, with a selection opens the Files overlay", () => {
+    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: null });
+    render(<App />);
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    expect(screen.getByText("Select a workspace first")).toBeTruthy();
+    useApp.setState({
+      machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
+        { workspace_id: "w1", label: "app", number: 1, status: "idle", tabs: [{ tab_id: "t1", label: "t", panes: [{ pane_id: "p1", cwd: "/r" }] }] },
+      ] }] } } as never,
+      selected: { machine_id: "local", session: "default", pane_id: "p1" },
+    });
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    expect(useApp.getState().filesOverlay).toMatchObject({ workspace_id: "w1" });
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
+    expect(useApp.getState().filesOverlay).toBeNull();
+  });
+
   it("shows the loading overlay, not the empty state, while a new pane's agent starts before herdr reports the pane", () => {
     const pane = { machine_id: "local", session: "default", pane_id: "w1:p7" };
     useApp.setState({ machines: {}, order: [], selected: pane, dashboardOpen: false, starting: { "local/default/w1:p7": { agent: "claude", phase: "shell" } } });

@@ -117,6 +117,7 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
           icon: agent === "shell" ? TerminalIcon : BotIcon,
           onSelect: () => a.guard(() => openAgentTab(machineId, session, ws.workspace_id, agent, folder ?? suggestFolder(ws))),
         })),
+        { label: "Browse files", icon: FolderOpenIcon, onSelect: () => useApp.getState().setFilesOverlay(ref) },
         { label: "Change folder…", icon: FolderOpenIcon, onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
         { label: "Rename workspace…", icon: PencilIcon, onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
         { label: "Close workspace", icon: CloseIcon, onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },
