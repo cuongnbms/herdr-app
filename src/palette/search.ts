@@ -1,4 +1,4 @@
-import type { AgentStatus, MachineView, PaneRef } from "../lib/types";
+import { paneKey, type AgentStatus, type MachineView, type PaneRef } from "../lib/types";
 
 export interface PaneHit {
   ref: PaneRef;
@@ -23,7 +23,9 @@ function subsequence(text: string, q: string): number {
   return first;
 }
 
-export function search(machines: MachineView[], query: string): PaneHit[] {
+/** Panes matching `query`, by status (blocked, done, working, idle, the rest), then newest status
+ *  change first (`since`, by paneKey), then panes with no known time; ties by match position, then sidebar order. */
+export function search(machines: MachineView[], query: string, since: Record<string, number> = {}): PaneHit[] {
   const q = query.trim().toLowerCase();
   const scored: { hit: PaneHit; pos: number }[] = [];
   for (const m of machines) {
@@ -49,10 +51,11 @@ export function search(machines: MachineView[], query: string): PaneHit[] {
       }
     }
   }
-  const RANK: Partial<Record<AgentStatus, number>> = { blocked: 0, done: 1, working: 2 };
-  const rank = (h: PaneHit) => RANK[h.status] ?? 3;
+  const RANK: Partial<Record<AgentStatus, number>> = { blocked: 0, done: 1, working: 2, idle: 3 };
+  const rank = (h: PaneHit) => RANK[h.status] ?? 4;
+  const time = (h: PaneHit) => since[paneKey(h.ref)] ?? 0;
   return scored
     .map((x, i) => ({ ...x, i }))
-    .sort((a, b) => rank(a.hit) - rank(b.hit) || a.pos - b.pos || a.i - b.i)
+    .sort((a, b) => rank(a.hit) - rank(b.hit) || time(b.hit) - time(a.hit) || a.pos - b.pos || a.i - b.i)
     .map((x) => x.hit);
 }

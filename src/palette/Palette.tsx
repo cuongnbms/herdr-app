@@ -7,13 +7,14 @@ import { SearchIcon } from "../ui/icons";
 export function Palette({ onClose }: { onClose: () => void }) {
   const machines = useApp((s) => s.machines);
   const order = useApp((s) => s.order);
+  const since = useApp((s) => s.statusSince);
   const select = useApp((s) => s.select);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const hits = useMemo(
-    () => search(order.flatMap((id) => (machines[id] ? [machines[id]] : [])), query),
-    [machines, order, query],
+    () => search(order.flatMap((id) => (machines[id] ? [machines[id]] : [])), query, since),
+    [machines, order, query, since],
   );
   useEffect(() => input.current?.focus(), []);
   const choose = (i: number) => {
