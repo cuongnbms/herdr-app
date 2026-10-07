@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { paneKey } from "../lib/types";
 import type { MachineView, PaneRef, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
-import { pruneFolders } from "../workspaces/folder";
+import { pruneFolders, type WorkspaceRef } from "../workspaces/folder";
 import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 import { newAgentOnTerminal } from "../settings/lens";
@@ -67,6 +67,9 @@ export interface AppState {
   /** Whether the Agent Dashboard overlay is open. Not persisted. */
   dashboardOpen: boolean;
   setDashboardOpen: (open: boolean) => void;
+  /** The Workspace whose Files overlay is open, if any. Not persisted. */
+  filesOverlay: WorkspaceRef | null;
+  setFilesOverlay: (ref: WorkspaceRef | null) => void;
   /** Whether the Command Palette is open. Not persisted. */
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
@@ -94,10 +97,13 @@ export const useApp = create<AppState>((set, get) => ({
   starting: {},
   dashboardOpen: false,
   paletteOpen: false,
+  filesOverlay: null,
   doneSeen: {},
   statusSince: {},
   ...load(),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setFilesOverlay: (ref) =>
+    set(ref ? { filesOverlay: ref, dashboardOpen: false, paletteOpen: false } : { filesOverlay: null }),
   // Closing returns to the selected pane, so a done one counts as seen then.
   setDashboardOpen: (open) =>
     set((s) => ({
