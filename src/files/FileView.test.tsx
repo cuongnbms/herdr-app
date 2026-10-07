@@ -22,3 +22,13 @@ describe("FileView", () => {
     expect(screen.queryByRole("heading")).toBeNull();
   });
 });
+
+describe("FileView markdown anchors", () => {
+  it("gives headings slug ids that #links target", () => {
+    const text = "[x](#my-title)\n\n# My Title\n\n# My Title";
+    const { container } = render(<FileView {...base} rel="a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />);
+    expect(container.querySelector("h1#my-title")).toBeTruthy();
+    expect(container.querySelector("h1#my-title-1")).toBeTruthy();
+    expect(container.querySelector('a[href="#my-title"]')).toBeTruthy();
+  });
+});
