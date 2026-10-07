@@ -60,6 +60,10 @@ _Avoid_: mode, view
 A full-screen view over the app for reading the files of one Workspace, rooted at its Workspace folder (else the selected Pane's cwd). Read-only.
 _Avoid_: file lens, file browser
 
+**Files watch**:
+The live feed of changes under the Files overlay's root (`inotifywait`, a `find` poll loop, or FSEvents) that reloads the open file and the loaded folders of the tree. One at a time, owned by the open Files overlay.
+_Avoid_: watcher (herdr's session watcher), polling
+
 **Transcript**:
 The Agent's own conversation file (`.jsonl`) that the Chat lens reads.
 _Avoid_: history, log
