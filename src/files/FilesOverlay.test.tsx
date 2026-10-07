@@ -157,6 +157,17 @@ describe("FilesOverlay", () => {
     expect(screen.getByRole("heading", { name: "Big" })).toBeTruthy();
   });
 
+  it("a #L link to a markdown file opens it as source", async () => {
+    texts["from.md"] = "[notes](notes.md#L2)";
+    texts["notes.md"] = "# Notes\n\nsecond";
+    useFiles.getState().open(filesKey(ref, "/r"), "from.md", { pin: true });
+    render(<FilesOverlay />);
+    fireEvent.click(await screen.findByText("notes"));
+    await waitFor(() => expect(screen.getByRole("tab", { selected: true }).textContent).toContain("notes.md"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.queryByRole("heading", { name: "Notes" })).toBeNull();
+  });
+
   describe("keys", () => {
     const key = filesKey(ref, "/r");
     const press = (k: string, extra: Partial<KeyboardEventInit> = {}) =>

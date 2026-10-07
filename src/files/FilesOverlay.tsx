@@ -18,6 +18,7 @@ import { GoToFile } from "./GoToFile";
 import { latestOnly, STALE } from "./latest";
 import { splitLines } from "./highlightLines";
 import { HIGHLIGHT_LIMIT } from "./limits";
+import { lineOfHash } from "./links";
 import { resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { usePolling } from "./usePolling";
@@ -223,7 +224,9 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
 
   // Rendering parses on the main thread, so text past the highlight limit opens as source.
   const large = shown?.text != null && shown.text.length > HIGHLIGHT_LIMIT;
-  const mode: FileMode = active ? (modes[active] ?? (large ? "source" : "render")) : "render";
+  // A `#L12` link has a line to show, which only the source view has.
+  const toLine = jump !== null && jump.rel === active && lineOfHash(jump.hash) !== null;
+  const mode: FileMode = active ? (modes[active] ?? (large || toLine ? "source" : "render")) : "render";
   const setMode = (rel: string, m: FileMode) => setModes((s) => ({ ...s, [rel]: m }));
   const md = active !== null && isMarkdown(active);
   const searchable =
