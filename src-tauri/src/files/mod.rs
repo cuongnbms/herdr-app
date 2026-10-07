@@ -1,10 +1,12 @@
-//! Read-only file browsing on a Machine: scripts run over the transport, never writing.
+//! File browsing on a Machine: scripts run over the transport. The only write is Upload
+//! (`transfer`), which never overwrites (ADR-0005).
 
 pub mod all;
 pub mod changed;
 pub mod list;
 pub mod paths;
 pub mod read;
+pub mod transfer;
 
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
