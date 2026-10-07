@@ -187,3 +187,11 @@ export interface Changed {
   total: number;
   changes: GitChange[];
 }
+
+export interface FileChange {
+  path: string;
+  isDir: boolean;
+  removed: boolean;
+}
+
+export type WatchEvent = { type: "resync" } | { type: "changes"; changes: FileChange[] } | { type: "error"; message: string };
