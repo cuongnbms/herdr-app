@@ -1,5 +1,6 @@
 //! Read-only file browsing on a Machine: scripts run over the transport, never writing.
 
+pub mod list;
 pub mod paths;
 
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
