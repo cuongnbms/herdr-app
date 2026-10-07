@@ -22,15 +22,24 @@ pub struct Entry {
     pub kind: EntryKind,
 }
 
-/// `$1` is the root, `$2` the folder below it. Exit 3 when the root is not a folder, 4 when
-/// `$2` does not exist, 5 when it is not a folder, 6 when a folder cannot be entered.
-/// An unmatched glob yields its own pattern, so entries that do not exist are skipped.
-const LIST_SCRIPT: &str = r#"[ -d "$1" ] || exit 3
+/// Script prologue: `$1` is the root, `$2` the folder below it; ends inside `$2`. Exit 3 when
+/// the root is not a folder, 4 when `$2` does not exist, 5 when it is not a folder, 6 when a
+/// folder cannot be entered.
+macro_rules! enter_folder {
+    () => {
+        r#"[ -d "$1" ] || exit 3
 cd "$1" || exit 6
 [ -e "./$2" ] || [ -L "./$2" ] || exit 4
 [ -d "./$2" ] || exit 5
 cd "./$2" || exit 6
-for e in * .*; do
+"#
+    };
+}
+
+/// An unmatched glob yields its own pattern, so entries that do not exist are skipped.
+const LIST_SCRIPT: &str = concat!(
+    enter_folder!(),
+    r#"for e in * .*; do
   case "$e" in .|..) continue;; esac
   case "$e" in *"
 "*) continue;; esac
@@ -39,7 +48,18 @@ for e in * .*; do
     if [ -d "./$e" ]; then k=L; else k=l; fi
   elif [ -d "./$e" ]; then k=d; else k=f; fi
   printf '%s\t%s\n' "$k" "$e"
-done"#;
+done"#
+);
+
+/// Every name in the folder, each followed by a NUL (names can hold newlines).
+const NAMES_SCRIPT: &str = concat!(
+    enter_folder!(),
+    r#"for e in * .*; do
+  case "$e" in .|..) continue;; esac
+  [ -e "./$e" ] || [ -L "./$e" ] || continue
+  printf '%s\0' "$e"
+done"#
+);
 
 /// One level of `rel` below `root`: folders (linked ones too) first, then files and symlinks,
 /// each sorted case-insensitively. Heavy folders (`SKIP_DIRS`) are left out unless `show_heavy`;
@@ -50,13 +70,35 @@ pub async fn list_dir(
     rel: &str,
     show_heavy: bool,
 ) -> AppResult<Vec<Entry>> {
+    let out = run_in_folder(t, LIST_SCRIPT, root, rel).await?;
+    Ok(parse_entries(&out, show_heavy))
+}
+
+/// Every name in `rel` below `root`, hidden and heavy ones included and uncapped: the names an
+/// Upload must not reuse. Fails like `list_dir` when `rel` is missing or not a folder.
+pub async fn list_names(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec<String>> {
+    let out = run_in_folder(t, NAMES_SCRIPT, root, rel).await?;
+    Ok(out
+        .split(|b| *b == 0)
+        .filter(|n| !n.is_empty())
+        .map(|n| String::from_utf8_lossy(n).into_owned())
+        .collect())
+}
+
+/// Run a script starting with `enter_folder!` on `root` and `rel`; its stdout on success.
+async fn run_in_folder(
+    t: &dyn Transport,
+    script: &str,
+    root: &str,
+    rel: &str,
+) -> AppResult<Vec<u8>> {
     check_rel(rel)?;
-    let out = exec_bytes(t, &script_argv(LIST_SCRIPT, &[root, rel])).await?;
+    let out = exec_bytes(t, &script_argv(script, &[root, rel])).await?;
     match out.status {
-        0 => {}
-        3 => return Err(not_found(format!("no such folder: {root:?}"))),
-        4 => return Err(not_found(format!("no such folder: {rel:?}"))),
-        5 => return Err(not_found(format!("not a folder: {rel:?}"))),
+        0 => Ok(out.stdout),
+        3 => Err(not_found(format!("no such folder: {root:?}"))),
+        4 => Err(not_found(format!("no such folder: {rel:?}"))),
+        5 => Err(not_found(format!("not a folder: {rel:?}"))),
         6 => {
             let msg = out.stderr.trim();
             let msg = if msg.is_empty() {
@@ -64,11 +106,10 @@ pub async fn list_dir(
             } else {
                 msg.to_string()
             };
-            return Err(AppError::new("io", msg));
+            Err(AppError::new("io", msg))
         }
-        s => return Err(io_error(s, &out.stderr)),
+        s => Err(io_error(s, &out.stderr)),
     }
-    Ok(parse_entries(&out.stdout, show_heavy))
 }
 
 fn not_found(msg: String) -> AppError {
@@ -256,6 +297,84 @@ mod tests {
             assert_eq!(e.code, "io");
             assert!(!e.message.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn list_names_reports_every_name_unfiltered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("my root");
+        mk(
+            &root,
+            &[
+                "dest/dist/x.js",
+                "dest/node_modules/y.js",
+                "dest/.git/HEAD",
+                "dest/.env",
+                "dest/a b",
+                "dest/it's \"q\".md",
+                "dest/new\nline",
+                "dest/-dash",
+            ],
+        );
+        std::os::unix::fs::symlink("gone", root.join("dest/dangling")).unwrap();
+        let mut got = list_names(&LocalTransport, &root.to_string_lossy(), "dest")
+            .await
+            .unwrap();
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "-dash",
+                ".env",
+                ".git",
+                "a b",
+                "dangling",
+                "dist",
+                "it's \"q\".md",
+                "new\nline",
+                "node_modules",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_names_is_not_capped() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..MAX_DIR_ENTRIES + 3 {
+            std::fs::write(tmp.path().join(format!("f{i}")), "").unwrap();
+        }
+        let got = list_names(&LocalTransport, &tmp.path().to_string_lossy(), "")
+            .await
+            .unwrap();
+        assert_eq!(got.len(), MAX_DIR_ENTRIES + 3);
+    }
+
+    #[tokio::test]
+    async fn list_names_fails_like_list_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path().to_string_lossy().into_owned();
+        std::fs::write(tmp.path().join("f"), "x").unwrap();
+        let e = list_names(&LocalTransport, &r, "nope").await.unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("not_found", "no such folder: \"nope\"")
+        );
+        let e = list_names(&LocalTransport, &r, "f").await.unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("not_found", "not a folder: \"f\"")
+        );
+        let e = list_names(&LocalTransport, &format!("{r}/gone"), "")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, "not_found");
+        assert_eq!(
+            list_names(&LocalTransport, &r, "../")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
     }
 
     #[test]

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { filesListDir } from "../lib/ipc";
 import type { FileChange, FileEntry } from "../lib/types";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
-import { ChevronIcon, FileIcon, FolderIcon, FolderOpenIcon } from "../ui/icons";
+import { ArrowDownIcon, ArrowUpIcon, ChevronIcon, FileIcon, FolderIcon, FolderInputIcon, FolderOpenIcon } from "../ui/icons";
+import { startDownload, startUpload } from "./transfer";
 import { useFiles } from "./store";
 import { copyItems } from "./treeMenu";
 import { dirsToRelist } from "./watchDirs";
@@ -50,6 +52,10 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
     setErrors({});
     setFocusRel(null);
   }
+  /** The open context menu: the row it belongs to (null for the tree's empty space) and the folder an Upload goes into. */
+  const [menu, setMenu] = useState<{ x: number; y: number; rel: string | null; dir: string } | null>(null);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const gen = useRef(0);
   const inflight = useRef(new Set<string>());
   /** The latest load started per folder; a load that is no longer it never writes back. */
@@ -58,9 +64,6 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const treeRef = useRef<HTMLDivElement>(null);
-  /** The open context menu and the row it belongs to. */
-  const [menu, setMenu] = useState<{ x: number; y: number; rel: string } | null>(null);
-  const menuItems = (rel: string): MenuItem[] => [...copyItems(root, rel)];
 
   const load = useCallback(
     (rel: string) => {
@@ -133,6 +136,26 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   const retry = (rel: string) => {
     setErrors(({ [rel]: _drop, ...rest }) => rest);
     load(rel);
+  };
+
+  const upload = async (dir: string, directory: boolean) => {
+    const startedIn = scopeRef.current;
+    const picked = await openDialog({ multiple: true, directory });
+    if (picked === null) return;
+    const paths = typeof picked === "string" ? [picked] : picked;
+    // The root may have changed during the dialog or the transfer; its listing is not ours to refresh.
+    if ((await startUpload(machineId, root, dir, paths)) && scopeRef.current === startedIn) load(dir);
+  };
+
+  const menuItems = (m: { rel: string | null; dir: string }): MenuItem[] => {
+    const list: MenuItem[] = [
+      ...(m.rel !== null ? copyItems(root, m.rel) : []),
+      { label: "Upload Files…", icon: ArrowUpIcon, onSelect: () => void upload(m.dir, false) },
+      { label: "Upload Folder…", icon: FolderInputIcon, onSelect: () => void upload(m.dir, true) },
+    ];
+    const rel = m.rel;
+    if (rel !== null) list.push({ label: "Download", icon: ArrowDownIcon, onSelect: () => void startDownload(machineId, root, rel) });
+    return list;
   };
 
   const items = () => Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);
@@ -234,7 +257,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
             }}
             onContextMenu={(e) => {
               e.preventDefault();
-              setMenu({ x: e.clientX, y: e.clientY, rel });
+              e.stopPropagation();
+              setMenu({ x: e.clientX, y: e.clientY, rel, dir: isDir ? rel : dir });
             }}
           >
             {/* Files keep the chevron's width, so names line up across a level. */}
@@ -257,10 +281,21 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   };
 
   return (
-    <div className="files-tree" role="tree" ref={treeRef} onKeyDown={onKeyDown}>
+    <div
+      className="files-tree"
+      role="tree"
+      ref={treeRef}
+      onKeyDown={onKeyDown}
+      onContextMenu={(e) => {
+        // React bubbles events from the portalled menu here too; only the tree's own space counts.
+        if (!treeRef.current?.contains(e.target as Node)) return;
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, rel: null, dir: "" });
+      }}
+    >
       {renderDir("", 0)}
       {/* Fixed to the window rather than to an animating ancestor. */}
-      {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.rel)} onClose={() => setMenu(null)} />, document.body)}
+      {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />, document.body)}
     </div>
   );
 }

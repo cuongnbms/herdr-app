@@ -57,7 +57,7 @@ A way of viewing a Pane: the **Terminal lens** (the raw attached terminal) or th
 _Avoid_: mode, view
 
 **Files overlay**:
-A full-screen view over the app for reading the files of one Workspace, rooted at its Workspace folder (else the selected Pane's cwd). Read-only.
+A full-screen view over the app for reading the files of one Workspace, rooted at its Workspace folder (else the selected Pane's cwd). It reads files, and moves files in by Upload and out by Download; it never overwrites, edits or deletes.
 _Avoid_: file lens, file browser
 
 **Files watch**:

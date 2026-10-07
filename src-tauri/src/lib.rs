@@ -30,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .menu(app_menu)
         .invoke_handler(tauri::generate_handler![
             commands::machines_list,
@@ -74,6 +75,8 @@ pub fn run() {
             commands::files_image,
             commands::files_watch,
             commands::files_unwatch,
+            commands::files_upload,
+            commands::files_download,
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,

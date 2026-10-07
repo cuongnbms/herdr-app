@@ -18,6 +18,7 @@ tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -32,8 +33,7 @@ tracing-appender = "0.2"
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-
-[dev-dependencies]
+tar = "0.4"
 tempfile = "3"
 
 [profile.release]

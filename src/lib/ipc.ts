@@ -126,3 +126,7 @@ export const filesImage = (machineId: string, root: string, rel: string) =>
   invoke<ArrayBuffer>("files_image", { machineId, root, rel });
 export const filesWatch = (machineId: string, root: string, events: Channel<WatchEvent>) => invoke<number>("files_watch", { machineId, root, events });
 export const filesUnwatch = (id: number) => invoke<void>("files_unwatch", { id });
+export const filesUpload = (machineId: string, root: string, destRel: string, sources: string[]) =>
+  invoke<string[]>("files_upload", { machineId, root, destRel, sources });
+export const filesDownload = (machineId: string, root: string, rel: string) =>
+  invoke<string>("files_download", { machineId, root, rel });

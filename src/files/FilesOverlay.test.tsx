@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
-vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn(), showProgressToast: vi.fn(() => 1), updateToast: vi.fn() }));
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
