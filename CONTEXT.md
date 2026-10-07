@@ -56,6 +56,10 @@ _Avoid_: plugin, extension
 A way of viewing a Pane: the **Terminal lens** (the raw attached terminal) or the **Chat lens** (the Agent's Transcript as a conversation).
 _Avoid_: mode, view
 
+**Files overlay**:
+A full-screen view over the app for reading the files of one Workspace, rooted at its Workspace folder (else the selected Pane's cwd). Read-only.
+_Avoid_: file lens, file browser
+
 **Transcript**:
 The Agent's own conversation file (`.jsonl`) that the Chat lens reads.
 _Avoid_: history, log
