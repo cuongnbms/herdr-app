@@ -5,6 +5,7 @@ pub mod changed;
 pub mod list;
 pub mod paths;
 pub mod read;
+pub mod watch;
 
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
