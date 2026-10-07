@@ -3,15 +3,15 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::error::{AppError, AppResult};
-use crate::files::paths::{io_error, script_argv};
+use crate::files::paths::{check_rel, io_error, script_argv};
 use crate::transport::{sh_quote, Transport};
 
 /// Hard limit for one transfer.
@@ -286,6 +286,109 @@ pub fn upload(
     }
 }
 
+/// `(parent_abs, name)` of the item `rel` under the absolute `root`. The root itself is refused.
+pub fn download_target(root: &str, rel: &str) -> AppResult<(String, String)> {
+    check_rel(rel)?;
+    let rel = rel.trim_end_matches('/');
+    if rel.is_empty() {
+        return Err(AppError::new(
+            "invalid",
+            "cannot download the whole Workspace folder",
+        ));
+    }
+    let (dir, name) = rel.rsplit_once('/').unwrap_or(("", rel));
+    Ok((join_abs(root, dir), name.to_string()))
+}
+
+/// `$HOME/Downloads`, created if missing.
+pub fn downloads_dir() -> AppResult<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .ok_or_else(|| AppError::new("io", "HOME is not set"))?;
+    let dir = PathBuf::from(home).join("Downloads");
+    fs::create_dir_all(&dir).map_err(|e| AppError::new("io", format!("{}: {e}", dir.display())))?;
+    Ok(dir)
+}
+
+/// Rename that fails with `AlreadyExists` instead of replacing `to`. On macOS this is atomic and also
+/// catches names that differ only by case on case-insensitive volumes.
+#[cfg(target_os = "macos")]
+fn rename_excl(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let from = CString::new(from.as_os_str().as_bytes())?;
+    let to = CString::new(to.as_os_str().as_bytes())?;
+    // SAFETY: both pointers are valid NUL-terminated strings for the duration of the call.
+    if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn rename_excl(from: &Path, to: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(to).is_ok() {
+        return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+    }
+    fs::rename(from, to)
+}
+
+/// Move `staged` into `dir` as `name`, or as its first free Finder-style variant. Never replaces anything.
+fn place(staged: &Path, dir: &Path, name: &str, is_dir: bool) -> AppResult<String> {
+    for n in 0..10_000 {
+        let c = candidate(name, is_dir, n);
+        let to = dir.join(&c);
+        match rename_excl(staged, &to) {
+            Ok(()) => return Ok(c),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(AppError::new("io", format!("{}: {e}", to.display()))),
+        }
+    }
+    Err(AppError::new(
+        "io",
+        format!("no free name for {name} in {}", dir.display()),
+    ))
+}
+
+/// Move the downloaded `staging/name` into `downloads` under a free name; returns the saved path.
+pub fn finish_download(staging: &Path, name: &str, downloads: &Path) -> AppResult<PathBuf> {
+    let staged = staging.join(name);
+    let meta = fs::symlink_metadata(&staged)
+        .map_err(|_| AppError::new("io", format!("{name}: nothing was downloaded")))?;
+    Ok(downloads.join(place(&staged, downloads, name, meta.is_dir())?))
+}
+
+/// Copy `name` from the folder `parent_abs` on the Machine into `downloads` under a free name.
+/// Blocking; returns the saved path. The staging dir is removed on every exit path.
+pub fn download(
+    t: &dyn Transport,
+    parent_abs: &str,
+    name: &str,
+    downloads: &Path,
+) -> AppResult<PathBuf> {
+    let staging = tempfile::Builder::new()
+        .prefix(".herdr-download.")
+        .tempdir_in(downloads)
+        .map_err(|e| AppError::new("io", format!("{}: {e}", downloads.display())))?;
+    let argv = script_argv(
+        "COPYFILE_DISABLE=1 tar -cf - -C \"$1\" -- \"$2\"",
+        &[parent_abs, name],
+    );
+    let dest = staging.path().to_path_buf();
+    let (exit, io) = run_piped(t, &argv, TRANSFER_TIMEOUT, move |stdin, stdout| {
+        drop(stdin);
+        tar::Archive::new(stdout)
+            .unpack(&dest)
+            .map_err(|e| AppError::new("io", format!("download stream: {e}")))
+    })?;
+    if exit.code != 0 {
+        return Err(io_error(exit.code, &exit.stderr));
+    }
+    io?;
+    finish_download(staging.path(), name, downloads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +656,67 @@ mod tests {
         assert_eq!(err.code, "timeout");
         assert!(started.elapsed() < Duration::from_secs(3));
         assert!(ls(to.path()).is_empty(), "{:?}", ls(to.path()));
+    }
+
+    #[test]
+    fn download_target_splits_and_refuses_the_root() {
+        assert_eq!(
+            download_target("/r", "a/b.md").unwrap(),
+            ("/r/a".to_string(), "b.md".to_string())
+        );
+        assert_eq!(
+            download_target("/r", "b.md").unwrap(),
+            ("/r".to_string(), "b.md".to_string())
+        );
+        assert_eq!(
+            download_target("/", "b").unwrap(),
+            ("/".to_string(), "b".to_string())
+        );
+        assert_eq!(download_target("/r", "").unwrap_err().code, "invalid");
+        assert_eq!(download_target("/r", "../x").unwrap_err().code, "invalid");
+    }
+
+    #[test]
+    fn download_saves_files_and_folders_under_free_names() {
+        let ws = tempfile::tempdir().unwrap();
+        fs::create_dir_all(ws.path().join("dir/sub")).unwrap();
+        fs::write(ws.path().join("dir/sub/x.md"), "x").unwrap();
+        fs::write(ws.path().join("a.md"), "new").unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        fs::write(dl.path().join("A.md"), "old").unwrap();
+        let parent = ws.path().to_str().unwrap();
+        // On a case-sensitive volume `a.md` is free, so the clash cannot be exercised there.
+        if dl.path().join("a.md").exists() {
+            let saved = download(&LocalTransport, parent, "a.md", dl.path()).unwrap();
+            assert_eq!(saved, dl.path().join("a (1).md"));
+            assert_eq!(fs::read_to_string(&saved).unwrap(), "new");
+            assert_eq!(fs::read_to_string(dl.path().join("A.md")).unwrap(), "old");
+        } else {
+            fs::remove_file(dl.path().join("A.md")).unwrap();
+            fs::write(dl.path().join("A.md"), "old").unwrap();
+            fs::write(dl.path().join("a (1).md"), "placeholder").unwrap();
+        }
+
+        let saved = download(&LocalTransport, parent, "dir", dl.path()).unwrap();
+        assert_eq!(saved, dl.path().join("dir"));
+        assert_eq!(fs::read_to_string(saved.join("sub/x.md")).unwrap(), "x");
+        // No staging dir and no AppleDouble files are left behind.
+        assert_eq!(ls(dl.path()), ["A.md", "a (1).md", "dir"]);
+        assert_eq!(ls(&saved), ["sub"]);
+    }
+
+    #[test]
+    fn download_of_a_missing_item_fails_and_leaves_nothing() {
+        let ws = tempfile::tempdir().unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let err = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "nope.md",
+            dl.path(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "io");
+        assert!(ls(dl.path()).is_empty());
     }
 }
