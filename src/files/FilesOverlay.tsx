@@ -6,7 +6,7 @@ import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
 import { CloseIcon, CopyIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
-import { setFolder, useFolder } from "../workspaces/folder";
+import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
 import { ChangedList } from "./ChangedList";
 import { findMatches } from "./find";
@@ -16,6 +16,7 @@ import { FileTree } from "./FileTree";
 import { FileView, type FileMode } from "./FileView";
 import { GoToFile } from "./GoToFile";
 import { latestOnly, STALE } from "./latest";
+import { splitLines } from "./highlightLines";
 import { HIGHLIGHT_LIMIT } from "./limits";
 import { resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
@@ -27,13 +28,6 @@ const SIDE_DEFAULT = 280;
 
 const isMarkdown = (rel: string) => /\.(md|markdown)$/i.test(rel);
 const errMessage = (e: unknown) => String((e as { message?: string } | null)?.message ?? e);
-
-/** The lines TextView searches: same split as its highlighter. */
-function plainLines(text: string): string[] {
-  const lines = text.split("\n");
-  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-  return lines;
-}
 
 export function FilesOverlay() {
   const ref = useApp((s) => s.filesOverlay);
@@ -125,7 +119,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
       ) : (
         <div className="files-empty">
           <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
-          <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, root?.path ?? "")}>
+          <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, folder ?? (ws ? suggestFolder(ws) : ""))}>
             Change folder…
           </button>
         </div>
@@ -152,6 +146,10 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const [removed, setRemoved] = useState<string | null>(null);
   const [modes, setModes] = useState<Record<string, FileMode>>({});
   const [findOpen, setFindOpen] = useState(false);
+  /** Bumped by ⌘F, so an open find bar takes the focus again. */
+  const [findFocus, setFindFocus] = useState(0);
+  /** The `#fragment` of the link that opened `rel`, used once when it is shown. */
+  const [jump, setJump] = useState<{ rel: string; hash: string } | null>(null);
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const goto = useRef<HTMLInputElement>(null);
@@ -207,14 +205,21 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
     onChanges: setChanged,
   });
 
-  // A different file starts with a fresh find.
+  // A different file starts with a fresh find, and a link's fragment applies to its own file only.
   useEffect(() => {
     setFindOpen(false);
     setIndex(0);
+    setJump((j) => (j && j.rel === active ? j : null));
   }, [active]);
 
   const onOpen = useCallback((rel: string, pinned: boolean) => open(key, rel, { pin: pinned }), [key, open]);
-  const onLink = useCallback((rel: string) => open(key, rel, { pin: false }), [key, open]);
+  const onLink = useCallback(
+    (rel: string, hash: string | null) => {
+      setJump(hash ? { rel, hash } : null);
+      open(key, rel, { pin: false });
+    },
+    [key, open],
+  );
 
   // Rendering parses on the main thread, so text past the highlight limit opens as source.
   const large = shown?.text != null && shown.text.length > HIGHLIGHT_LIMIT;
@@ -224,12 +229,14 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const searchable =
     shown !== null && shown.kind === "text" && shown.text !== null && !(md && mode === "render");
   const count = useMemo(
-    () => (searchable && shown?.text != null && query ? findMatches(plainLines(shown.text), query).length : 0),
+    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query).length : 0),
     [searchable, shown, query],
   );
 
   const keys = (e: KeyboardEvent) => {
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
+    // A dialog over the overlay (Change folder…) keeps its keys.
+    if (document.querySelector(".overlay")) return;
     const k = e.key.toLowerCase();
     if (!e.shiftKey && k === "p") {
       e.preventDefault();
@@ -246,6 +253,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       if (!active || !shown || shown.kind !== "text" || shown.text === null) return;
       if (md && mode === "render") setMode(active, "source");
       setFindOpen(true);
+      setFindFocus((n) => n + 1);
     } else if (!e.shiftKey && k === "r") {
       e.preventDefault();
       reload();
@@ -272,9 +280,10 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
     window.addEventListener("mouseup", up);
   };
 
+  const fullPath = active ? `${root === "/" ? "" : root}/${active}` : "";
   const copyPath = () => {
     if (!active) return;
-    writeText(`${root}/${active}`).then(
+    writeText(fullPath).then(
       () => showToast("Path copied"),
       (e) => console.error("copy failed", e),
     );
@@ -302,7 +311,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
         {active ? (
           <>
             <div className="files-crumbs">
-              <span className="files-crumb-path" title={`${root}/${active}`}>
+              <span className="files-crumb-path" title={fullPath}>
                 {active.split("/").join(" / ")}
               </span>
               <button type="button" className="icon-btn" aria-label="Copy path" title="Copy path" onClick={copyPath}>
@@ -319,16 +328,23 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
               )}
             </div>
             {removed === active && <div className="files-banner files-banner-removed">File removed</div>}
+            {shown && error && error.rel === active && (
+              <div className="files-banner files-banner-error" role="alert">
+                Could not reload: {error.message}
+              </div>
+            )}
             {findOpen && searchable && (
               <FindBar
                 count={count}
-                index={index}
+                index={count > 0 ? ((index % count) + count) % count : 0}
+                focusKey={findFocus}
                 query={query}
                 onQuery={(q) => {
                   setQuery(q);
                   setIndex(0);
                 }}
-                onStep={(d) => count > 0 && setIndex((i) => (i + d + count) % count)}
+                // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
+                onStep={(d) => count > 0 && setIndex((i) => i + d)}
                 onClose={() => setFindOpen(false)}
               />
             )}
@@ -344,10 +360,11 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   onOpen={onLink}
                   find={findOpen && searchable && query ? { query, index } : null}
                   initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
-                  saveScroll={(top) => setScroll(key, active, top)}
+                  hash={jump && jump.rel === active ? jump.hash : null}
+                  saveScroll={(rel, top) => setScroll(key, rel, top)}
                 />
               ) : error && error.rel === active ? (
-                <div className="files-notice">{error.message}</div>
+                <div className="files-notice" role="alert">{error.message}</div>
               ) : null}
             </div>
           </>

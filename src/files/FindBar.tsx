@@ -3,6 +3,7 @@ import { useEffect, useRef, type KeyboardEvent } from "react";
 export function FindBar({
   count,
   index,
+  focusKey = 0,
   query,
   onQuery,
   onStep,
@@ -10,6 +11,8 @@ export function FindBar({
 }: {
   count: number;
   index: number;
+  /** Changing it focuses the input again (⌘F while the bar is open). */
+  focusKey?: number;
   query: string;
   onQuery(q: string): void;
   onStep(delta: 1 | -1): void;
@@ -19,7 +22,7 @@ export function FindBar({
   useEffect(() => {
     input.current?.focus();
     input.current?.select();
-  }, []);
+  }, [focusKey]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
