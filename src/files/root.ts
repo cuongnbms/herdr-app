@@ -6,7 +6,11 @@ import type { WorkspaceRef } from "../workspaces/folder";
 
 export type Root = { path: string; source: "folder" | "pane" };
 
-/** The folder the Files overlay browses: the Workspace's folder, else a pane's cwd. */
+/**
+ * The folder the Files overlay browses: the Workspace's folder, else a pane's cwd.
+ * `selectedCwd` must be `null` unless the selected pane belongs to `ref`'s Workspace;
+ * another Workspace's cwd would become this one's root.
+ */
 export function resolveRoot(ref: WorkspaceRef, ws: WorkspaceView | undefined, selectedCwd: string | null): Root | null {
   const folder = getFolder(ref);
   if (folder) return { path: folder, source: "folder" };

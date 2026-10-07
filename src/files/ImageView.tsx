@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { filesImage } from "../lib/ipc";
-import { latestOnly, STALE } from "./latest";
 
 /** `mtime` changing (a poll found the image changed) fetches it again. */
 export function ImageView({ machineId, root, rel, mtime }: { machineId: string; root: string; rel: string; mtime: number }) {
@@ -11,13 +10,13 @@ export function ImageView({ machineId, root, rel, mtime }: { machineId: string; 
   useEffect(() => {
     let made: string | null = null;
     let gone = false;
-    const fetchImage = latestOnly(() => filesImage(machineId, root, rel));
     setUrl(null);
     setError(null);
     setActual(false);
-    fetchImage().then(
+    // `gone` drops the answer of a fetch this effect no longer wants.
+    filesImage(machineId, root, rel).then(
       (buf) => {
-        if (gone || buf === STALE) return;
+        if (gone) return;
         const type = rel.toLowerCase().endsWith(".svg") ? "image/svg+xml" : undefined;
         made = URL.createObjectURL(new Blob([buf], type ? { type } : undefined));
         setUrl(made);
