@@ -173,6 +173,7 @@ export default function App() {
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         if (e.repeat) return;
+        useApp.getState().setFilesOverlay(null);
         openNewTabHere().catch((err: unknown) =>
           showToast(`Could not open a new tab: ${(err as { message?: string } | null)?.message ?? String(err)}`),
         );

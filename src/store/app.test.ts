@@ -337,3 +337,21 @@ describe("an agent showing up in the selected pane", () => {
     expect(chosenLens(useApp.getState(), key)).toBeUndefined();
   });
 });
+
+describe("the Files overlay and the main area", () => {
+  const ws = { machine_id: "local", session: "default", workspace_id: "w1" };
+  beforeEach(() => useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: ws }));
+  it("selecting a pane closes Files; clearing the selection does not", () => {
+    useApp.getState().select(null);
+    expect(useApp.getState().filesOverlay).toEqual(ws);
+    useApp.getState().select({ machine_id: "local", session: "default", pane_id: "w1:p1" });
+    expect(useApp.getState().filesOverlay).toBeNull();
+  });
+  it("opening the dashboard closes Files; closing it does not", () => {
+    useApp.getState().setDashboardOpen(false);
+    expect(useApp.getState().filesOverlay).toEqual(ws);
+    useApp.getState().setDashboardOpen(true);
+    expect(useApp.getState().filesOverlay).toBeNull();
+    expect(useApp.getState().dashboardOpen).toBe(true);
+  });
+});

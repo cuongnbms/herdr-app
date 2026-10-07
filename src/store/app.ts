@@ -108,6 +108,8 @@ export const useApp = create<AppState>((set, get) => ({
   setDashboardOpen: (open) =>
     set((s) => ({
       dashboardOpen: open,
+      // The dashboard and Files share the main area: opening one closes the other.
+      filesOverlay: open ? null : s.filesOverlay,
       doneSeen:
         !open && s.selected && findPane(s.machines, s.selected)?.status === "done"
           ? { ...s.doneSeen, [paneKey(s.selected)]: true }
@@ -154,6 +156,7 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       selected: ref,
       dashboardOpen: ref ? false : s.dashboardOpen,
+      filesOverlay: ref ? null : s.filesOverlay,
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
       lastPane: ref ? { ...s.lastPane, [sessionKey(ref.machine_id, ref.session)]: ref } : s.lastPane,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,

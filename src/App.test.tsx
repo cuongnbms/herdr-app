@@ -89,6 +89,13 @@ describe("App shell", () => {
     expect(useApp.getState().filesOverlay).toBeNull();
   });
 
+  it("⌘T closes the Files overlay", () => {
+    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: { machine_id: "local", session: "default", workspace_id: "w1" } });
+    render(<App />);
+    fireEvent.keyDown(window, { key: "t", metaKey: true });
+    expect(useApp.getState().filesOverlay).toBeNull();
+  });
+
   it("shows the loading overlay, not the empty state, while a new pane's agent starts before herdr reports the pane", () => {
     const pane = { machine_id: "local", session: "default", pane_id: "w1:p7" };
     useApp.setState({ machines: {}, order: [], selected: pane, dashboardOpen: false, starting: { "local/default/w1:p7": { agent: "claude", phase: "shell" } } });
