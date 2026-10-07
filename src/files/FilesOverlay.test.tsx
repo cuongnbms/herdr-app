@@ -79,4 +79,32 @@ describe("FilesOverlay", () => {
     expect(await screen.findByRole("button", { name: "Change folder…" })).toBeTruthy();
     vi.mocked(invoke).mockImplementation(prev!);
   });
+
+  it("does not call the root missing when the machine is disconnected", async () => {
+    useApp.setState((s) => ({ machines: { local: { ...s.machines.local, state: "disconnected" } } as never }));
+    const prev = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+      if (cmd === "files_list_all") throw { code: "not_found", message: "machine local is not connected" };
+      return [];
+    }) as never);
+    render(<FilesOverlay />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: "Change folder…" })).toBeNull();
+    expect(screen.getByText("Machine offline")).toBeTruthy();
+    vi.mocked(invoke).mockImplementation(prev!);
+  });
+
+  it("clears the missing state on reload once the root lists again", async () => {
+    const prev = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+      if (cmd === "files_list_all") throw { code: "not_found", message: "gone" };
+      return [];
+    }) as never);
+    render(<FilesOverlay />);
+    expect(await screen.findByRole("button", { name: "Change folder…" })).toBeTruthy();
+    vi.mocked(invoke).mockImplementation(prev!);
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(await screen.findByRole("combobox")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change folder…" })).toBeNull();
+  });
 });

@@ -68,6 +68,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
   const close = () => setOverlay(null);
   const [missing, setMissing] = useState<string | null>(null);
   const rootMissing = root !== null && missing === root.path;
+  const onlineRef = useRef(false);
   const section = useRef<HTMLElement>(null);
   // Take focus from whatever pane had it, so Esc and typing reach this overlay.
   useEffect(() => section.current?.focus(), []);
@@ -84,6 +85,9 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
   }, []);
   const label = ws?.label ?? ref.workspace_id;
   const online = machine?.state === "connected";
+  onlineRef.current = online;
+  // Reload and a change of connection re-check the root: FilesBrowser remounts and lists it again.
+  useEffect(() => setMissing(null), [reloadKey, online]);
 
   return (
     <section ref={section} tabIndex={-1} className="files-overlay" role="dialog" aria-label="Files">
@@ -97,7 +101,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
           </button>
         )}
         <span className="files-head-spacer" />
-        {root && !rootMissing && (
+        {root && (
           <button type="button" className="icon-btn" aria-label="Reload" title="Reload  ⌘R" onClick={reload}>
             <RefreshIcon />
           </button>
@@ -108,7 +112,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
       </header>
       {!online && <div className="files-banner files-banner-offline">Machine offline</div>}
       {root && !rootMissing ? (
-        <FilesBrowser key={`${wsKey(ref)}|${root.path}`} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} onMissing={() => setMissing(root.path)} />
+        <FilesBrowser key={`${wsKey(ref)}|${root.path}`} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} onMissing={() => onlineRef.current && setMissing(root.path)} />
       ) : (
         <div className="files-empty">
           <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
