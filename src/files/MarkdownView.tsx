@@ -1,7 +1,8 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
 import { resolveLink } from "./links";
+import { Outline, type Heading } from "./Outline";
 import { makeSlugger } from "./slug";
 import { useScrollMemory } from "./TextView";
 
@@ -38,6 +39,29 @@ interface Props {
   /** A heading to show instead of the remembered position (a `doc.md#section` link). */
   initialHash?: string | null;
   saveScroll(path: string, top: number): void;
+  /** Whether to show the outline column (when the document has headings). */
+  outline?: boolean;
+  /** Told whether the document has headings to outline; `false` again on unmount. */
+  onOutline?(has: boolean): void;
+}
+
+const readHeadings = (root: HTMLElement): Heading[] =>
+  [...root.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]")].map((el) => ({
+    id: el.id,
+    level: Number(el.tagName[1]),
+    text: el.textContent ?? "",
+  }));
+
+/** The last heading at or above the top of the scroller (with a little slack), else the first. */
+function activeHeading(root: HTMLElement, items: Heading[]): string | null {
+  const top = root.getBoundingClientRect().top + 24;
+  let current = items[0]?.id ?? null;
+  for (const h of items) {
+    const el = byId(root, h.id);
+    if (!el || el.getBoundingClientRect().top > top) break;
+    current = h.id;
+  }
+  return current;
 }
 
 /** One mount per file, so scroll memory pairs with the right file. */
@@ -45,9 +69,30 @@ export function MarkdownView(props: Props) {
   return <RenderedMarkdown key={props.rel} {...props} />;
 }
 
-function RenderedMarkdown({ text, rel, onOpen, initialScroll, initialHash, saveScroll }: Props) {
+function RenderedMarkdown({ text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline }: Props) {
   const root = useRef<HTMLDivElement>(null);
-  const onScroll = useScrollMemory(rel, initialScroll, saveScroll);
+  const saveOnScroll = useScrollMemory(rel, initialScroll, saveScroll);
+  const [headings, setHeadings] = useState<Heading[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const frame = useRef(0);
+  useLayoutEffect(() => {
+    if (!root.current) return;
+    const items = readHeadings(root.current);
+    setHeadings(items);
+    setActiveId(activeHeading(root.current, items));
+  }, [text]);
+  const has = headings.length > 0;
+  useEffect(() => onOutline?.(has), [has, onOutline]);
+  useEffect(() => () => {
+    cancelAnimationFrame(frame.current);
+    onOutline?.(false);
+  }, [onOutline]);
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    saveOnScroll(e);
+    if (!outline || !has) return;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => root.current && setActiveId(activeHeading(root.current, headings)));
+  };
   // react-markdown renders synchronously, so the content is laid out here.
   useLayoutEffect(() => {
     const target = initialHash ? byId(root.current, initialHash) : null;
@@ -92,8 +137,20 @@ function RenderedMarkdown({ text, rel, onOpen, initialScroll, initialHash, saveS
     [rel, onOpen],
   );
   return (
-    <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
-      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+    <div className="files-markdown-wrap">
+      <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
+        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+      </div>
+      {outline && has && (
+        <Outline
+          items={headings}
+          activeId={activeId}
+          onSelect={(id) => {
+            byId(root.current, id)?.scrollIntoView();
+            setActiveId(id);
+          }}
+        />
+      )}
     </div>
   );
 }

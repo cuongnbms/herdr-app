@@ -1320,6 +1320,9 @@ button.composer-model:disabled { cursor: default; }
 
 .files-crumbs { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line); }
 .files-crumb-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); font: 12px var(--mono); }
+.files-outline-btn { margin-left: auto; width: 24px; height: 24px; }
+.files-outline-btn[aria-pressed="true"] { color: var(--accent); }
+.files-outline-btn + .files-mode { margin-left: 0; }
 .files-mode { margin-left: auto; display: flex; padding: 2px; border-radius: var(--r-sm); background: var(--seg-track); }
 .files-mode button { height: 22px; padding: 0 10px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); font-size: 12px; cursor: pointer; }
 .files-mode button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--fg); }
@@ -1349,7 +1352,27 @@ button.composer-model:disabled { cursor: default; }
 .files-text .hljs-deletion { color: var(--diff-del); }
 .files-text .hljs-meta { color: var(--hl-meta); }
 
-.files-markdown { flex: 1; min-height: 0; overflow: auto; padding: 20px 32px; background: var(--surface-0); }
+/* The app body is unselectable; file contents are not, so they can be copied (line numbers stay out). */
+.files-text, .files-markdown { user-select: text; -webkit-user-select: text; cursor: text; }
+.files-markdown-wrap { flex: 1; min-height: 0; display: flex; background: var(--surface-0); }
+.files-markdown { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 20px 32px; background: var(--surface-0); }
+.files-markdown a { cursor: pointer; }
+.files-outline-resize { flex: none; width: 5px; margin-right: -3px; cursor: col-resize; z-index: 1; }
+.files-outline-resize:hover { background: var(--accent-line); }
+.files-outline { flex: none; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 0 6px 8px; border-left: 1px solid var(--line); background: var(--surface-1); font-size: 12.5px; }
+.files-outline-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 1px; padding: 10px 2px 6px 8px; background: var(--surface-1); }
+.files-outline-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.files-outline-head button { height: 20px; padding: 0 5px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); font-size: 11px; font-weight: 600; cursor: pointer; }
+.files-outline-head button:hover { background: var(--active); color: var(--fg); }
+.files-outline ul { margin: 0; padding: 0; list-style: none; }
+.files-outline li { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 8px; border-radius: var(--r-sm); color: var(--fg-2); white-space: nowrap; cursor: pointer; }
+.files-outline li:hover { background: var(--active); color: var(--fg); }
+.files-outline li[aria-current="true"] { color: var(--accent); font-weight: 600; }
+.files-outline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.files-outline-toggle { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 3px; color: var(--fg-3); }
+.files-outline-toggle .icon { width: 12px; height: 12px; transition: transform var(--t-fast); }
+.files-outline-toggle.open .icon { transform: rotate(90deg); }
+.files-outline-toggle[role="button"]:hover { background: var(--active); color: var(--fg); }
 .files-notice { flex: 1; display: grid; place-content: center; justify-items: center; gap: 4px; color: var(--fg-3); font-size: 13px; }
 .files-notice-size { font-size: 12px; font-variant-numeric: tabular-nums; }
 .files-image-wrap { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 16px; background: var(--surface-code); }

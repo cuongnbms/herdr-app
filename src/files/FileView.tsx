@@ -25,6 +25,8 @@ export function FileView({
   initialScroll,
   hash = null,
   saveScroll,
+  outline,
+  onOutline,
 }: {
   machineId: string;
   root: string;
@@ -38,6 +40,10 @@ export function FileView({
   /** The `#fragment` this file was opened with by a link: `L12` shows line 12, else a heading. */
   hash?: string | null;
   saveScroll(path: string, top: number): void;
+  /** Whether rendered markdown shows its outline column. */
+  outline?: boolean;
+  /** Told whether the rendered markdown has an outline to show. */
+  onOutline?(has: boolean): void;
 }) {
   if (content.kind === "image") return <ImageView machineId={machineId} root={root} rel={rel} mtime={content.mtime} />;
   if (content.kind === "text" && content.text === null) {
@@ -55,7 +61,16 @@ export function FileView({
     <>
       {content.truncated && <div className="files-banner">Showing the first 2 MB</div>}
       {isMarkdown(rel) && mode === "render" ? (
-        <MarkdownView text={content.text} rel={rel} onOpen={onOpen} initialScroll={initialScroll} initialHash={hash} saveScroll={saveScroll} />
+        <MarkdownView
+          text={content.text}
+          rel={rel}
+          onOpen={onOpen}
+          initialScroll={initialScroll}
+          initialHash={hash}
+          saveScroll={saveScroll}
+          outline={outline}
+          onOutline={onOutline}
+        />
       ) : (
         <TextView
           text={content.text}

@@ -69,3 +69,34 @@ describe("FileView markdown anchors", () => {
     expect(onOpen).toHaveBeenLastCalledWith("docs/b.md", "café");
   });
 });
+
+describe("FileView outline", () => {
+  const md = (text: string) => ({ kind: "text" as const, text, truncated: false, size: 9, mtime: 1 });
+  it("shows an outline of the rendered headings and scrolls to one on click", () => {
+    const onOutline = vi.fn();
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    render(<FileView {...base} rel="a.md" mode="render" outline onOutline={onOutline} content={md("# One\n\n## Two\n\n```\n# not a heading\n```")} />);
+    const nav = screen.getByRole("navigation", { name: "Outline" });
+    expect([...nav.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["One", "Two"]);
+    expect(onOutline).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("listitem", { name: "Two" }));
+    expect(scroll).toHaveBeenCalled();
+    expect(scroll.mock.contexts[scroll.mock.contexts.length - 1]).toBe(document.getElementById("two"));
+  });
+  it("hides the outline when turned off, and reports none for a file without headings", () => {
+    const onOutline = vi.fn();
+    const { rerender } = render(<FileView {...base} rel="a.md" mode="render" outline={false} onOutline={onOutline} content={md("# One")} />);
+    expect(screen.queryByRole("navigation", { name: "Outline" })).toBeNull();
+    expect(onOutline).toHaveBeenLastCalledWith(true);
+    rerender(<FileView {...base} rel="b.md" mode="render" outline onOutline={onOutline} content={md("just text")} />);
+    expect(screen.queryByRole("navigation", { name: "Outline" })).toBeNull();
+    expect(onOutline).toHaveBeenLastCalledWith(false);
+  });
+  it("reports no outline once the source view replaces the render", () => {
+    const onOutline = vi.fn();
+    const { rerender } = render(<FileView {...base} rel="a.md" mode="render" outline onOutline={onOutline} content={md("# One")} />);
+    rerender(<FileView {...base} rel="a.md" mode="source" outline onOutline={onOutline} content={md("# One")} />);
+    expect(onOutline).toHaveBeenLastCalledWith(false);
+  });
+});

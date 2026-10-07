@@ -4,7 +4,7 @@ import { filesChanged, filesListAll, filesRead } from "../lib/ipc";
 import type { Changed, FileContent, FileList } from "../lib/types";
 import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { CloseIcon, CopyIcon, RefreshIcon } from "../ui/icons";
+import { CloseIcon, CopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -19,6 +19,7 @@ import { latestOnly, STALE } from "./latest";
 import { splitLines } from "./highlightLines";
 import { HIGHLIGHT_LIMIT } from "./limits";
 import { lineOfHash } from "./links";
+import { useOutline } from "./outlineStore";
 import { resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { usePolling } from "./usePolling";
@@ -152,6 +153,9 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   /** The `#fragment` of the link that opened `rel`, used once when it is shown. */
   const [jump, setJump] = useState<{ rel: string; hash: string } | null>(null);
   const [query, setQuery] = useState("");
+  const outline = useOutline((s) => s.shown);
+  const toggleOutline = useOutline((s) => s.toggle);
+  const [hasOutline, setHasOutline] = useState(false);
   const [index, setIndex] = useState(0);
   const goto = useRef<HTMLInputElement>(null);
   const read = useMemo(() => latestOnly(filesRead), []);
@@ -320,6 +324,18 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
               <button type="button" className="icon-btn" aria-label="Copy path" title="Copy path" onClick={copyPath}>
                 <CopyIcon />
               </button>
+              {md && mode === "render" && hasOutline && (
+                <button
+                  type="button"
+                  className="icon-btn files-outline-btn"
+                  aria-label="Outline"
+                  title={outline ? "Hide outline" : "Show outline"}
+                  aria-pressed={outline}
+                  onClick={toggleOutline}
+                >
+                  <OutlineIcon />
+                </button>
+              )}
               {md && shown?.kind === "text" && (
                 <div className="files-mode" role="group" aria-label="Markdown view">
                   {(["render", "source"] as const).map((m) => (
@@ -365,6 +381,8 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
                   hash={jump && jump.rel === active ? jump.hash : null}
                   saveScroll={(rel, top) => setScroll(key, rel, top)}
+                  outline={outline}
+                  onOutline={setHasOutline}
                 />
               ) : error && error.rel === active ? (
                 <div className="files-notice" role="alert">{error.message}</div>
