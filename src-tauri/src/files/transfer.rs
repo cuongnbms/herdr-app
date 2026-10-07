@@ -290,15 +290,33 @@ pub fn upload(
 pub fn download_target(root: &str, rel: &str) -> AppResult<(String, String)> {
     check_rel(rel)?;
     let rel = rel.trim_end_matches('/');
-    if rel.is_empty() {
+    if rel.is_empty() || rel == "." {
         return Err(AppError::new(
             "invalid",
             "cannot download the whole Workspace folder",
         ));
     }
     let (dir, name) = rel.rsplit_once('/').unwrap_or(("", rel));
+    if name == "." {
+        return Err(AppError::new("invalid", format!("invalid path: {rel:?}")));
+    }
     Ok((join_abs(root, dir), name.to_string()))
 }
+
+/// Script for `sh -c` (`$1` the parent folder, `$2` the item): write `./$2` as a tar stream.
+/// `./` keeps a name like `@x` from reading as a bsdtar option. A link to a file is saved as
+/// the file (`-h` reaches only that one entry); a link to a folder is refused; a dangling
+/// link is saved as the link itself.
+const DOWNLOAD_SCRIPT: &str = r#"cd "$1" || exit 1
+h=
+if [ -L "./$2" ]; then
+  if [ -d "./$2" ]; then
+    printf '%s is a link to a folder: download the folder it points to\n' "$2" >&2
+    exit 1
+  fi
+  if [ -e "./$2" ]; then h=-h; fi
+fi
+COPYFILE_DISABLE=1 tar -c $h -f - -- "./$2""#;
 
 /// `$HOME/Downloads`, created if missing.
 pub fn downloads_dir() -> AppResult<PathBuf> {
@@ -405,16 +423,18 @@ pub fn download(
         .prefix(".herdr-download.")
         .tempdir_in(downloads)
         .map_err(|e| AppError::new("io", format!("{}: {e}", downloads.display())))?;
-    let argv = script_argv(
-        "COPYFILE_DISABLE=1 tar -cf - -C \"$1\" -- \"$2\"",
-        &[parent_abs, name],
-    );
+    let argv = script_argv(DOWNLOAD_SCRIPT, &[parent_abs, name]);
     let dest = staging.path().to_path_buf();
     let (exit, io) = run_piped(t, &argv, TRANSFER_TIMEOUT, move |stdin, stdout| {
         drop(stdin);
-        tar::Archive::new(stdout)
-            .unpack(&dest)
-            .map_err(|e| AppError::new("io", format!("download stream: {e}")))
+        let stream_err = |e: io::Error| AppError::new("io", format!("download stream: {e}"));
+        let mut archive = tar::Archive::new(stdout);
+        archive.unpack(&dest).map_err(stream_err)?;
+        // The archive ends at its first zero block; the rest of the last record must still be
+        // read, or the Machine's `tar` fails writing it to a closed pipe.
+        io::copy(&mut archive.into_inner(), &mut io::sink())
+            .map(drop)
+            .map_err(stream_err)
     })?;
     let saved = if exit.code != 0 {
         Err(io_error(exit.code, &exit.stderr))
@@ -746,6 +766,137 @@ mod tests {
         );
         assert_eq!(download_target("/r", "").unwrap_err().code, "invalid");
         assert_eq!(download_target("/r", "../x").unwrap_err().code, "invalid");
+        for rel in [".", "./"] {
+            let e = download_target("/r", rel).unwrap_err();
+            assert_eq!(
+                (e.code.as_str(), e.message.as_str()),
+                ("invalid", "cannot download the whole Workspace folder"),
+                "{rel:?}"
+            );
+        }
+        for rel in ["a/.", "a/./", "a/b/."] {
+            assert_eq!(
+                download_target("/r", rel).unwrap_err().code,
+                "invalid",
+                "{rel:?}"
+            );
+        }
+    }
+
+    /// Runs the real command, then writes a trailer after a pause, like a remote `tar -c` whose
+    /// last record write comes after the archive's end-of-archive blocks were read.
+    struct LateTrailer;
+
+    #[async_trait::async_trait]
+    impl Transport for LateTrailer {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            let mut v: Vec<String> = [
+                "sh",
+                "-c",
+                "\"$@\" || exit; sleep 0.3; head -c 65536 /dev/zero",
+                "sh",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(
+            &self,
+            _s: &crate::transport::SessionEntry,
+        ) -> AppResult<std::path::PathBuf> {
+            unreachable!()
+        }
+        async fn release_socket(&self, _s: &crate::transport::SessionEntry) -> AppResult<()> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn download_reads_the_stream_to_its_end() {
+        let ws = tempfile::tempdir().unwrap();
+        fs::write(ws.path().join("a.md"), "a").unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let saved = download(&LateTrailer, ws.path().to_str().unwrap(), "a.md", dl.path()).unwrap();
+        assert_eq!(fs::read_to_string(saved).unwrap(), "a");
+    }
+
+    #[test]
+    fn download_handles_a_name_starting_with_at() {
+        let ws = tempfile::tempdir().unwrap();
+        fs::write(ws.path().join("@at"), "at").unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let saved = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "@at",
+            dl.path(),
+        )
+        .unwrap();
+        assert_eq!(saved, dl.path().join("@at"));
+        assert_eq!(fs::read_to_string(&saved).unwrap(), "at");
+        assert_eq!(ls(dl.path()), ["@at"]);
+    }
+
+    #[test]
+    fn download_of_a_link_to_a_file_saves_the_file() {
+        let ws = tempfile::tempdir().unwrap();
+        fs::write(ws.path().join("target.md"), "t").unwrap();
+        symlink("target.md", ws.path().join("flink")).unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let saved = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "flink",
+            dl.path(),
+        )
+        .unwrap();
+        assert_eq!(saved, dl.path().join("flink"));
+        assert!(fs::symlink_metadata(&saved).unwrap().file_type().is_file());
+        assert_eq!(fs::read_to_string(&saved).unwrap(), "t");
+        assert_eq!(ls(dl.path()), ["flink"]);
+    }
+
+    #[test]
+    fn download_of_a_link_to_a_folder_is_refused() {
+        let ws = tempfile::tempdir().unwrap();
+        fs::create_dir(ws.path().join("d")).unwrap();
+        fs::write(ws.path().join("d/x.md"), "x").unwrap();
+        symlink("d", ws.path().join("dlink")).unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let err = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "dlink",
+            dl.path(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "io");
+        assert_eq!(
+            err.message,
+            "dlink is a link to a folder: download the folder it points to"
+        );
+        assert!(ls(dl.path()).is_empty());
+    }
+
+    #[test]
+    fn download_of_a_dangling_link_saves_the_link() {
+        let ws = tempfile::tempdir().unwrap();
+        symlink("missing", ws.path().join("dangling")).unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let saved = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "dangling",
+            dl.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_link(&saved).unwrap(),
+            std::path::PathBuf::from("missing")
+        );
+        assert_eq!(ls(dl.path()), ["dangling"]);
     }
 
     #[test]
