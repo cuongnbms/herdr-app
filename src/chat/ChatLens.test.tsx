@@ -188,4 +188,66 @@ describe("ChatLens", () => {
     fireEvent.wheel(container.querySelector(".chat-scroll")!);
     expect(lit()).toBe("fix the header");
   });
+  describe("a sent message", () => {
+    const outgoing = (c: HTMLElement) => [...c.querySelectorAll(".chat-outgoing")];
+    const sendText = (text: string) => {
+      const box = screen.getByRole("textbox");
+      fireEvent.change(box, { target: { value: text } });
+      fireEvent.keyDown(box, { key: "Enter" });
+    };
+
+    it("shows at once, dimmed until the send went through", async () => {
+      let resolve!: (v: unknown) => void;
+      vi.mocked(herdrCall).mockImplementation(() => new Promise((r) => (resolve = r)));
+      const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+      sendText("hello there");
+      expect(outgoing(container).map((e) => e.textContent)).toEqual(["hello there"]);
+      expect(outgoing(container)[0].classList.contains("sending")).toBe(true);
+      await act(async () => resolve({}));
+      expect(outgoing(container)[0].classList.contains("sending")).toBe(false);
+    });
+
+    it("gives way to the transcript's user item", async () => {
+      const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+      act(() => channels[channels.length - 1].onmessage({ type: "reset", items: [], total: 0 }));
+      await act(async () => sendText("hello there"));
+      expect(outgoing(container)).toHaveLength(1);
+      act(() => channels[channels.length - 1].onmessage({ type: "append", items: [{ kind: "user", text: "something else" }] }));
+      expect(outgoing(container)).toHaveLength(1);
+      act(() => channels[channels.length - 1].onmessage({ type: "append", items: [{ kind: "user", text: "hello there" }] }));
+      expect(outgoing(container)).toHaveLength(0);
+    });
+
+    it("goes when the send failed", async () => {
+      vi.mocked(herdrCall).mockRejectedValue({ code: "timeout", message: "timed out" });
+      const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => sendText("hello there"));
+      expect(outgoing(container)).toHaveLength(0);
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("hello there");
+    });
+
+    it("is not shown for a slash command", async () => {
+      const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => sendText("/compact"));
+      expect(outgoing(container)).toHaveLength(0);
+    });
+
+    it("stays through a reset that does not echo it, and goes with one that does", async () => {
+      const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => sendText("one"));
+      act(() => channels[channels.length - 1].onmessage({ type: "reset", items: [{ kind: "user", text: "older" }], total: 1 }));
+      expect(outgoing(container)).toHaveLength(1);
+      const items = [{ kind: "user", text: "older" }, { kind: "user", text: "one" }];
+      act(() => channels[channels.length - 1].onmessage({ type: "reset", items, total: 2 }));
+      expect(outgoing(container)).toHaveLength(0);
+    });
+
+    it("goes with a pane switch", async () => {
+      const { container, rerender } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => sendText("two"));
+      expect(outgoing(container)).toHaveLength(1);
+      rerender(<ChatLens pane={{ ...pane, pane_id: "w1:p2" }} view={idlePi} />);
+      expect(outgoing(container)).toHaveLength(0);
+    });
+  });
 });

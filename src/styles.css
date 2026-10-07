@@ -751,6 +751,10 @@ kbd {
 .chat-user-line .chat-copy { order: -1; }
 .chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-user .chat-images { justify-content: flex-end; }
+/* A sent message the transcript has not echoed yet: dimmed while the send is on its way. */
+.chat-outgoing { transition: opacity 0.15s ease; }
+.chat-outgoing.sending { opacity: 0.5; }
+.chat-outgoing .chat-image { cursor: default; }
 .skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .skill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; color: var(--fg-2); }
 .skill-chip svg { width: 12px; height: 12px; }

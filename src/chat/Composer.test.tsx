@@ -126,6 +126,45 @@ describe("Composer", () => {
     await waitFor(() => expect(localStorage.getItem("herdr-app:draft:devtuf/default/w1:p1")).toBe("try again"));
   });
 
+  it("reports a send before it goes out and settles it once it went through", async () => {
+    let resolve!: () => void;
+    vi.mocked(herdrCall).mockImplementationOnce(() => new Promise<void>((r) => (resolve = r)));
+    const settle = vi.fn();
+    const onSend = vi.fn(() => settle);
+    render(<Composer pane={pane} agent="claude" onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "hello" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("hello", []);
+    expect(settle).not.toHaveBeenCalled();
+    await act(async () => resolve());
+    expect(settle).toHaveBeenCalledWith(true);
+  });
+
+  it("reports a quick reply as a send", async () => {
+    useQuickReplies.setState({ show: true, replies: ["yes"] });
+    const settle = vi.fn();
+    const onSend = vi.fn(() => settle);
+    render(<Composer pane={pane} agent="claude" onSend={onSend} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "yes" })));
+    expect(onSend).toHaveBeenCalledWith("yes", []);
+    expect(settle).toHaveBeenCalledWith(true);
+  });
+
+  it("settles a failed send as failed and keeps the pasted image for the restored draft", async () => {
+    vi.mocked(herdrCall).mockRejectedValue({ code: "timeout", message: "timed out" });
+    const settle = vi.fn();
+    const onSend = vi.fn(() => settle);
+    render(<Composer pane={pane} agent="pi" onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    paste(box, [png()]);
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+    await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
+    expect(onSend).toHaveBeenCalledWith("", [expect.any(String)]);
+    expect(settle).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("img", { name: "Pasted image 1" })).toBeTruthy();
+  });
+
   it("saves a pasted image on the pane's machine and shows it as an attachment", async () => {
     render(<Composer pane={pane} agent="claude" />);
     paste(screen.getByRole("textbox"), [png()]);

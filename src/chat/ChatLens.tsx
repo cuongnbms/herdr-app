@@ -18,6 +18,7 @@ import { Composer } from "./Composer";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { usePiModelPicker } from "./usePiModelPicker";
 import { usePendingTranscript } from "./pendingTranscript";
+import { useOutgoing } from "./outgoing";
 import { ArrowDownIcon } from "../ui/icons";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
@@ -63,6 +64,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const [modelFor, setModelFor] = useState<string | null>(null);
   const picker = usePiModelPicker(pane, modelFor === key && view.agent === "pi", () => setModelFor(null));
   useEffect(() => setModelFor(null), [key]);
+  // Sent messages shown until the transcript echoes them.
+  const outgoing = useOutgoing();
+  const outgoingRef = useRef(0);
+  outgoingRef.current = outgoing.list.length;
 
   // `known`: where `path` was located, when the caller already knows (kept over what opening returns).
   const open = useCallback(
@@ -79,6 +84,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
         if (ev.type === "reset" || ev.type === "error") setLoaded(true);
+        // A reset may come after a send (a slow first load, pi's branch switch): keep what it does not echo.
+        if (ev.type === "append" || ev.type === "reset") outgoing.seen(ev.items);
         if (ev.type === "reset") {
           forceBottom.current = true;
           setOpened((n) => n + 1);
@@ -125,7 +132,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
           }
         });
     },
-    [pane, key, setLensOverride],
+    [pane, key, setLensOverride, outgoing.seen, outgoing.clear],
   );
 
   // The tail dies with an ssh drop: reopen once the Machine is back.
@@ -140,6 +147,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     setChosenOpen(new Map());
     setPicked(null);
     setLocated(null);
+    outgoing.clear();
     open(rememberedTranscript(key));
     return () => {
       generation.current++;
@@ -156,6 +164,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   usePendingTranscript(pane, located, state.items.length === 0, view.status, () => open(null));
 
   const choose = (path: string) => {
+    outgoing.clear();
     rememberTranscript(key, path);
     open(path);
   };
@@ -188,6 +197,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       anchor.current = null;
     } else if (forceBottom.current || (grew && atBottom.current)) {
       if (rows.length > 0) virt.scrollToIndex(rows.length - 1, { align: "end" });
+      // Sent messages sit below the rows: the end is past the last row.
+      if (outgoingRef.current > 0 && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       forceBottom.current = rows.length === 0;
       atBottom.current = true;
       setUnseen(false);
@@ -239,6 +250,19 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     }
   };
 
+  // A message just sent shows at the bottom: follow it there.
+  const sendCount = outgoing.list.length;
+  const prevSends = useRef(0);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const grew = sendCount > prevSends.current;
+    prevSends.current = sendCount;
+    if (!el || !grew) return;
+    atBottom.current = true;
+    setUnseen(false);
+    el.scrollTop = el.scrollHeight;
+  }, [sendCount]);
+
   const jumpBottom = () => {
     if (rows.length > 0) virt.scrollToIndex(rows.length - 1, { align: "end" });
     atBottom.current = true;
@@ -268,7 +292,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     <div className="chat-main">
       {located && <TranscriptPicker located={located} onChoose={choose} />}
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
-      {pending && !err && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
+      {pending && !err && outgoing.list.length === 0 && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
       {!loaded && loadingShown && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} onWheel={unpick} onPointerDown={unpick} onKeyDown={unpick}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
@@ -300,6 +324,20 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
             );
           })}
         </div>
+        {outgoing.list.map((o) => (
+          <div key={o.id} className={`chat-row chat-user chat-outgoing${o.sent ? "" : " sending"}`} aria-busy={!o.sent}>
+            {o.previews.some(Boolean) && (
+              <div className="chat-images">
+                {o.previews.map((url, i) => url && <div key={i} className="chat-image"><img src={url} alt="" /></div>)}
+              </div>
+            )}
+            {o.text !== "" && (
+              <div className="chat-user-line">
+                <div className="chat-bubble">{o.text}</div>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
       {unseen && (
         <button className="chat-new" onClick={jumpBottom}>
@@ -310,7 +348,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {view.status === "blocked" || picker.open ? (
         <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />
       ) : (
-        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} />
+        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} onSend={outgoing.start} />
       )}
     </div>
     <ChatOutline entries={entries} current={current} onJump={jumpTo} />
