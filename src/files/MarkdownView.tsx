@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
 import { clearHighlights, findRanges, firstVisible, repaint, reveal, setHighlight } from "./domFind";
 import { wrapIndex, type FindQuery, type FindStatus } from "./find";
@@ -29,9 +31,30 @@ function rehypeHeadingIds() {
   };
 }
 
-const viewRehypePlugins = [...(rehypePlugins as unknown as unknown[]), rehypeHeadingIds] as never;
+/**
+ * Raw HTML in a file is kept to GitHub's safe set (`<details>`, `<kbd>`, `<sub>`, `<br>`…):
+ * no scripts, frames, styles or event handlers. `<picture>`/`<source>` go too, as their
+ * `srcset` would load remote images; `<img>` goes through the `img` component, which loads
+ * only images inside the root. Raw `id`s and `name`s get a `user-content-` prefix so they
+ * cannot clobber the app's own; anchor lookups below try the prefixed id as well.
+ */
+const sanitizeSchema: SanitizeSchema = {
+  ...defaultSchema,
+  tagNames: defaultSchema.tagNames?.filter((t) => t !== "picture" && t !== "source"),
+  // A dropped tag keeps its children; these hold raw text (CSS, fallback markup) that must go too.
+  strip: [...(defaultSchema.strip ?? []), "style", "noscript", "textarea", "title", "template"],
+};
 
-const byId = (root: HTMLElement | null, id: string) => root?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
+// Sanitizing runs before anything that adds classes (highlighting) and before heading ids.
+const viewRehypePlugins = [
+  rehypeRaw,
+  [rehypeSanitize, sanitizeSchema],
+  ...(rehypePlugins as unknown as unknown[]),
+  rehypeHeadingIds,
+] as never;
+
+const byId = (root: HTMLElement | null, id: string) =>
+  root?.querySelector(`[id="${CSS.escape(id)}"]`) ?? root?.querySelector(`[id="${CSS.escape(`user-content-${id}`)}"]`) ?? null;
 
 interface Props {
   /** Machine and root that relative images are read from. */
@@ -79,7 +102,8 @@ function useDomFind(root: React.RefObject<HTMLDivElement | null>, find: FindQuer
       clearTimeout(timer);
       timer = setTimeout(() => setContentSeq((n) => n + 1), 50);
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    // `open` too: a <details> toggled open shows text to find. (Not `style`: repaint() writes it.)
+    observer.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["open"] });
     return () => {
       observer.disconnect();
       clearTimeout(timer);
@@ -106,11 +130,15 @@ function useDomFind(root: React.RefObject<HTMLDivElement | null>, find: FindQuer
   report.current = onFindStatus;
   useEffect(() => report.current?.({ count, index }), [count, index]);
 
+  // Whether highlights are painted now: with none before or after, there is nothing to repaint.
+  const painted = useRef(false);
   useEffect(() => {
     if (count) {
       setHighlight(MATCH, found.ranges);
       setHighlight(CURRENT, [found.ranges[index]]);
-    } else clearHighlights(MATCH, CURRENT);
+    } else if (painted.current) clearHighlights(MATCH, CURRENT);
+    else return;
+    painted.current = count > 0;
     repaint(root.current);
   }, [found, index]);
 
@@ -125,8 +153,7 @@ function useDomFind(root: React.RefObject<HTMLDivElement | null>, find: FindQuer
 
   useEffect(
     () => () => {
-      clearHighlights(MATCH, CURRENT);
-      repaint(root.current);
+      if (painted.current) clearHighlights(MATCH, CURRENT);
     },
     [root],
   );

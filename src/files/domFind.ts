@@ -3,10 +3,20 @@ import { findMatches } from "./find";
 /** Past this many matches the search stops; highlighting more would stall the view. */
 export const MAX_DOM_MATCHES = 10_000;
 
+/** Whether `el` is in the hidden body of a closed `<details>` (its `<summary>` stays shown). */
+function inClosedDetails(el: Element): boolean {
+  for (let d = el.closest("details:not([open])"); d; d = d.parentElement?.closest("details:not([open])") ?? null) {
+    const summary = [...d.children].find((c) => c.tagName === "SUMMARY");
+    if (!summary?.contains(el)) return true;
+  }
+  return false;
+}
+
 /**
  * DOM ranges for every match of `query` in the text under `root`, in document order. Text is
  * joined across nodes first, so a match may span elements (highlighted code has one span per
- * token). Text inside SVG (mermaid diagrams) is skipped.
+ * token). Text that is not shown is skipped: inside SVG (mermaid diagrams, whose labels are not
+ * text the reader finds) and in closed `<details>`.
  */
 export function findRanges(root: Element, query: string, matchCase: boolean): Range[] {
   if (!query) return [];
@@ -14,7 +24,10 @@ export function findRanges(root: Element, query: string, matchCase: boolean): Ra
   const starts: number[] = [];
   let text = "";
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.parentElement?.closest("svg") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    acceptNode: (n) => {
+      const el = n.parentElement;
+      return !el || el.closest("svg") || inClosedDetails(el) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    },
   });
   for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
     nodes.push(n);

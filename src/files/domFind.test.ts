@@ -31,6 +31,13 @@ describe("findRanges", () => {
     expect(findRanges(dom("<p>node</p><svg><text>node</text></svg>"), "node", false)).toHaveLength(1);
   });
 
+  it("skips the body of a closed <details>, but not its summary", () => {
+    const root = dom("<details><summary>a foo</summary><p>hidden foo</p><details open><summary>foo</summary>foo</details></details><p>foo</p>");
+    expect(findRanges(root, "foo", false).map((r) => r.startContainer.textContent)).toEqual(["a foo", "foo"]);
+    root.querySelector("details")!.setAttribute("open", "");
+    expect(findRanges(root, "foo", false)).toHaveLength(5);
+  });
+
   it("finds nothing for an empty query or root, and stops at the limit", () => {
     expect(findRanges(dom("abc"), "", false)).toEqual([]);
     expect(findRanges(dom(""), "x", false)).toEqual([]);
