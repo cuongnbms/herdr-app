@@ -791,11 +791,8 @@ pub async fn files_upload(
     let sources = transfer::check_sources(&sources)?;
     let dest = transfer::join_abs(&root, &dest_rel);
     let t = mgr.transport(&machine_id)?;
-    let existing: Vec<String> = list::list_dir(&*t, &root, &dest_rel)
-        .await?
-        .into_iter()
-        .map(|e| e.name)
-        .collect();
+    // Every name, not the tree's listing: that one hides heavy folders and is capped.
+    let existing = list::list_names(&*t, &root, &dest_rel).await?;
     if machine_id == crate::machines::LOCAL {
         transfer::check_upload_into_self(std::path::Path::new(&dest), &sources)?;
     }

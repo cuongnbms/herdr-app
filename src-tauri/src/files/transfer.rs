@@ -216,7 +216,7 @@ pub fn upload_cmd(names: &[String]) -> String {
         "set -e\n\
          t=$(mktemp -d \"$1/.herdr-upload.XXXXXX\"); trap 'rm -rf \"$t\"' EXIT\n\
          trap 'exit 1' HUP INT TERM\n\
-         tar -xf - -C \"$t\"\n\
+         tar --no-same-owner -xf - -C \"$t\"\n\
          if [ ! -e \"$t\"/done ]; then echo 'upload was interrupted' >&2; exit 1; fi\n",
     );
     for name in names {
@@ -232,8 +232,10 @@ pub fn upload_cmd(names: &[String]) -> String {
 }
 
 /// Write a tar stream: each source as `i/<name>` (symlinks kept as links), then an empty `done`
-/// entry. Without `done` the remote places nothing.
-pub fn write_upload_stream(w: impl Write, items: &[(Source, String)]) -> AppResult<()> {
+/// entry. Without `done` the remote places nothing. Errors keep their kind, so a broken pipe
+/// (the Machine stopped reading) can be told from a local read failure.
+pub fn write_upload_stream(w: impl Write, items: &[(Source, String)]) -> io::Result<()> {
+    let ctx = |what: String| move |e: io::Error| io::Error::new(e.kind(), format!("{what}: {e}"));
     let mut b = tar::Builder::new(w);
     b.follow_symlinks(false);
     for (s, name) in items {
@@ -243,17 +245,17 @@ pub fn write_upload_stream(w: impl Write, items: &[(Source, String)]) -> AppResu
         } else {
             b.append_path_with_name(&s.path, &in_tar)
         };
-        added.map_err(|e| AppError::new("io", format!("{}: {e}", s.path.display())))?;
+        added.map_err(ctx(s.path.display().to_string()))?;
     }
     let mut h = tar::Header::new_gnu();
     h.set_size(0);
     h.set_mode(0o644);
     h.set_entry_type(tar::EntryType::Regular);
     b.append_data(&mut h, "done", &b""[..])
-        .map_err(|e| AppError::new("io", format!("cannot append done marker: {e}")))?;
+        .map_err(ctx("cannot append done marker".into()))?;
     b.into_inner()
         .map(drop)
-        .map_err(|e| AppError::new("io", format!("upload stream: {e}")))
+        .map_err(ctx("upload stream".into()))
 }
 
 /// Copy `sources` into the folder `dest_abs` on the Machine, never replacing anything. `existing`
@@ -275,14 +277,37 @@ pub fn upload(
     let names: Vec<String> = items.iter().map(|(_, n)| n.clone()).collect();
     let argv = script_argv(&upload_cmd(&names), &[dest_abs]);
     let (exit, io) = run_piped(t, &argv, TRANSFER_TIMEOUT, move |stdin, _| {
-        write_upload_stream(stdin, &items)
+        Ok(write_upload_stream(stdin, &items))
     })?;
-    match io {
-        // The stream failed before `done`, so the remote's "interrupted" is only a symptom.
-        Err(local) if exit.stderr.contains("upload was interrupted") => Err(local),
+    upload_outcome(exit, io, names)
+}
+
+/// The result of an Upload from the Machine's exit and the local stream's result.
+fn upload_outcome(
+    exit: Exit,
+    io: AppResult<io::Result<()>>,
+    names: Vec<String>,
+) -> AppResult<Vec<String>> {
+    let local = match io {
+        Ok(Ok(())) => None,
+        Ok(Err(e)) => Some((
+            AppError::new("io", e.to_string()),
+            e.kind() == io::ErrorKind::BrokenPipe,
+        )),
+        Err(e) => Some((e, false)),
+    };
+    match local {
+        // A local failure cut the stream, so whatever the Machine reports (its "interrupted",
+        // or its tar's complaint about the cut) is only a symptom. A broken pipe is the
+        // opposite: the Machine stopped reading, and its stderr says why.
+        Some((e, broken_pipe))
+            if exit.code == 0 || !broken_pipe || exit.stderr.contains("upload was interrupted") =>
+        {
+            Err(e)
+        }
         _ if exit.code != 0 => Err(io_error(exit.code, &exit.stderr)),
-        Err(local) => Err(local),
-        Ok(()) => Ok(names),
+        Some((e, _)) => Err(e),
+        None => Ok(names),
     }
 }
 
@@ -656,6 +681,107 @@ mod tests {
         assert_eq!(fs::read_to_string(to.path().join("b.md")).unwrap(), "old");
         // a.md was moved before the failure and stays; no staging dir is left.
         assert_eq!(ls(to.path()), ["a.md", "b.md"]);
+    }
+
+    #[tokio::test]
+    async fn upload_skips_names_the_tree_hides() {
+        let from = tempfile::tempdir().unwrap();
+        fs::create_dir(from.path().join("dist")).unwrap();
+        fs::write(from.path().join("dist/new.js"), "new").unwrap();
+        fs::write(from.path().join(".env"), "new").unwrap();
+        let to = tempfile::tempdir().unwrap();
+        fs::create_dir(to.path().join("dist")).unwrap();
+        fs::write(to.path().join("dist/old.js"), "old").unwrap();
+        fs::write(to.path().join(".env"), "old").unwrap();
+        let dest = to.path().to_str().unwrap();
+        let existing = crate::files::list::list_names(&LocalTransport, dest, "")
+            .await
+            .unwrap();
+        let sources = vec![
+            src(&from.path().join("dist")),
+            src(&from.path().join(".env")),
+        ];
+        assert_eq!(
+            upload(&LocalTransport, dest, &existing, sources).unwrap(),
+            ["dist (1)", ".env (1)"]
+        );
+        assert_eq!(ls(&to.path().join("dist")), ["old.js"]);
+        assert_eq!(ls(&to.path().join("dist (1)")), ["new.js"]);
+    }
+
+    #[test]
+    fn upload_cmd_never_restores_the_macs_owner() {
+        assert!(upload_cmd(&[]).contains("tar --no-same-owner -xf - -C \"$t\"\n"));
+    }
+
+    fn exit(code: i32, stderr: &str) -> Exit {
+        Exit {
+            code,
+            stderr: stderr.into(),
+        }
+    }
+    fn local(kind: io::ErrorKind) -> io::Error {
+        io::Error::new(kind, "/src/a.md: local failure")
+    }
+
+    #[test]
+    fn upload_outcome_prefers_the_local_error_unless_the_pipe_broke() {
+        let names = || vec!["a.md".to_string()];
+        let msg = |r: AppResult<Vec<String>>| r.unwrap_err().message;
+        // A local read error wins over whatever the Machine's tar says about the cut stream.
+        assert_eq!(
+            msg(upload_outcome(
+                exit(1, "tar: Unexpected EOF in archive"),
+                Ok(Err(local(io::ErrorKind::PermissionDenied))),
+                names()
+            )),
+            "/src/a.md: local failure"
+        );
+        assert_eq!(
+            msg(upload_outcome(
+                exit(1, "upload was interrupted"),
+                Ok(Err(local(io::ErrorKind::BrokenPipe))),
+                names()
+            )),
+            "/src/a.md: local failure"
+        );
+        // A broken pipe only echoes the Machine's failure.
+        assert_eq!(
+            msg(upload_outcome(
+                exit(1, "mktemp: cannot create"),
+                Ok(Err(local(io::ErrorKind::BrokenPipe))),
+                names()
+            )),
+            "mktemp: cannot create"
+        );
+        assert_eq!(
+            msg(upload_outcome(
+                exit(1, "a.md already exists, try again"),
+                Ok(Ok(())),
+                names()
+            )),
+            "a.md already exists, try again"
+        );
+        assert_eq!(
+            msg(upload_outcome(
+                exit(0, ""),
+                Ok(Err(local(io::ErrorKind::BrokenPipe))),
+                names()
+            )),
+            "/src/a.md: local failure"
+        );
+        assert_eq!(
+            msg(upload_outcome(
+                exit(1, "tar: boom"),
+                Err(AppError::new("io", "transfer thread panicked")),
+                names()
+            )),
+            "transfer thread panicked"
+        );
+        assert_eq!(
+            upload_outcome(exit(0, ""), Ok(Ok(())), names()).unwrap(),
+            names()
+        );
     }
 
     #[test]
