@@ -19,6 +19,11 @@ export function wsKey(ref: WorkspaceRef): string {
   return [ref.machine_id, ref.session, ref.workspace_id].join("/");
 }
 
+/** Tabs, folds and scroll hold root-relative paths, so each root of a Workspace has its own. */
+export function filesKey(ref: WorkspaceRef, root: string): string {
+  return `${wsKey(ref)}|${root}`;
+}
+
 interface FilesState {
   byWs: Record<string, FilesWs>;
   ws: (key: string) => FilesWs;

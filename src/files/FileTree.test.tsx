@@ -10,7 +10,7 @@ describe("FileTree", () => {
       args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "x.ts", kind: "file" }],
     );
     const onOpen = vi.fn();
-    render(<FileTree machineId="local" root="/r" wsKey="local/default/w1" onOpen={onOpen} reloadKey={0} />);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w1" onOpen={onOpen} reloadKey={0} />);
     fireEvent.click(await screen.findByText("a.md"));
     expect(onOpen).toHaveBeenLastCalledWith("a.md", false);
     fireEvent.doubleClick(screen.getByText("a.md"));
@@ -22,7 +22,7 @@ describe("FileTree", () => {
 
   it("shows a retry row when a folder fails", async () => {
     vi.mocked(invoke).mockRejectedValueOnce({ code: "io", message: "Permission denied" });
-    render(<FileTree machineId="local" root="/r" wsKey="local/default/w2" onOpen={() => {}} reloadKey={0} />);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w2" onOpen={() => {}} reloadKey={0} />);
     expect(await screen.findByText("Could not list: Permission denied")).toBeTruthy();
     vi.mocked(invoke).mockResolvedValueOnce([{ name: "ok.md", kind: "file" }]);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -34,11 +34,11 @@ describe("FileTree", () => {
     vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
       args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
     );
-    const { rerender } = render(<FileTree machineId="local" root="/r" wsKey="local/default/w3" onOpen={() => {}} reloadKey={0} />);
+    const { rerender } = render(<FileTree machineId="local" root="/r" filesKey="local/default/w3" onOpen={() => {}} reloadKey={0} />);
     fireEvent.click(await screen.findByText("src"));
     await screen.findByText("x.ts");
     const before = vi.mocked(invoke).mock.calls.length;
-    rerender(<FileTree machineId="local" root="/r" wsKey="local/default/w3" onOpen={() => {}} reloadKey={1} />);
+    rerender(<FileTree machineId="local" root="/r" filesKey="local/default/w3" onOpen={() => {}} reloadKey={1} />);
     await waitFor(() => expect(vi.mocked(invoke).mock.calls.length).toBe(before + 2));
   });
 
@@ -48,7 +48,7 @@ describe("FileTree", () => {
       args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "x.ts", kind: "file" }],
     );
     const onOpen = vi.fn();
-    render(<FileTree machineId="local" root="/r" wsKey="local/default/w4" onOpen={onOpen} reloadKey={0} />);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w4" onOpen={onOpen} reloadKey={0} />);
     const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
     src.focus();
     fireEvent.keyDown(src, { key: "ArrowRight" });
@@ -71,7 +71,7 @@ describe("FileTree", () => {
       args.rel === "" ? [{ name: "lib", kind: "dirlink" }] : [{ name: "y.ts", kind: "file" }],
     );
     const onOpen = vi.fn();
-    render(<FileTree machineId="local" root="/r" wsKey="local/default/w5" onOpen={onOpen} reloadKey={0} />);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w5" onOpen={onOpen} reloadKey={0} />);
     const lib = (await screen.findByText("lib")).closest("[role=treeitem]") as HTMLElement;
     expect(lib.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(lib);
@@ -88,7 +88,7 @@ describe("FileTree", () => {
     vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
       args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
     );
-    render(<FileTree machineId="local" root="/r" wsKey="local/default/w6" onOpen={() => {}} reloadKey={0} />);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w6" onOpen={() => {}} reloadKey={0} />);
     const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
     fireEvent.click(src, { detail: 1 });
     fireEvent.click(src, { detail: 2 });

@@ -6,7 +6,7 @@ import { useFiles } from "./store";
 interface Props {
   machineId: string;
   root: string;
-  wsKey: string;
+  filesKey: string;
   onOpen: (rel: string, pin: boolean) => void;
   /** Changing it refetches the root and every expanded folder. */
   reloadKey: number;
@@ -24,8 +24,8 @@ const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirli
 /** A linked folder looks like a folder, named like a symlink. */
 const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
-export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
-  const expanded = useFiles((s) => s.byWs[wsKey]?.expanded ?? NO_DIRS);
+export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props) {
+  const expanded = useFiles((s) => s.byWs[filesKey]?.expanded ?? NO_DIRS);
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -103,13 +103,13 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
       case "ArrowRight":
         e.preventDefault();
         if (!isDir) break;
-        if (!open) toggleDir(wsKey, rel);
+        if (!open) toggleDir(filesKey, rel);
         else if (all[at + 1] && Number(all[at + 1].getAttribute("aria-level")) > Number(el.getAttribute("aria-level"))) all[at + 1].focus();
         break;
       case "ArrowLeft": {
         e.preventDefault();
         if (isDir && open) {
-          toggleDir(wsKey, rel);
+          toggleDir(filesKey, rel);
           break;
         }
         const level = Number(el.getAttribute("aria-level"));
@@ -123,7 +123,7 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
       }
       case "Enter":
         e.preventDefault();
-        if (isDir) toggleDir(wsKey, rel);
+        if (isDir) toggleDir(filesKey, rel);
         else onOpen(rel, true);
         break;
     }
@@ -158,7 +158,7 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
             onClick={(e) => {
               // The second click of a double click would collapse what the first expanded.
               if (isDir) {
-                if (e.detail <= 1) toggleDir(wsKey, rel);
+                if (e.detail <= 1) toggleDir(filesKey, rel);
               } else onOpen(rel, false);
             }}
             onDoubleClick={() => {

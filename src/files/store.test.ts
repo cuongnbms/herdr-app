@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useFiles, wsKey } from "./store";
+import { filesKey, useFiles, wsKey } from "./store";
 
 const K = wsKey({ machine_id: "local", session: "default", workspace_id: "w1" });
 const s = () => useFiles.getState().ws(K);
@@ -64,5 +64,12 @@ describe("files tabs", () => {
     expect(s().expanded).toEqual([]);
     setScroll(K, "a", 42);
     expect(s().scroll).toEqual({ a: 42 });
+  });
+
+  it("keeps roots of one workspace apart", () => {
+    const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
+    useFiles.getState().open(filesKey(ref, "/a"), "x.ts", { pin: true });
+    expect(useFiles.getState().ws(filesKey(ref, "/b")).tabs).toEqual([]);
+    expect(useFiles.getState().ws(filesKey(ref, "/a")).tabs).toEqual(["x.ts"]);
   });
 });

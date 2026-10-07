@@ -17,7 +17,7 @@ import { FileView, type FileMode } from "./FileView";
 import { GoToFile } from "./GoToFile";
 import { latestOnly, STALE } from "./latest";
 import { resolveRoot, type Root } from "./root";
-import { useFiles, wsKey } from "./store";
+import { filesKey, useFiles, wsKey } from "./store";
 import { usePolling } from "./usePolling";
 
 const SIDE_MIN = 200;
@@ -39,7 +39,7 @@ export function FilesOverlay() {
   if (!ref) return null;
   return (
     <ActionsProvider>
-      <FilesShell wsRef={ref} />
+      <FilesShell key={wsKey(ref)} wsRef={ref} />
     </ActionsProvider>
   );
 }
@@ -48,22 +48,30 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
   const [reloadKey, setReloadKey] = useState(0);
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
   const machines = useApp((s) => s.machines);
-  const selected = useApp((s) => s.selected);
   const setOverlay = useApp((s) => s.setFilesOverlay);
   const actions = useActions();
   const folder = useFolder(ref);
   const machine = machines[ref.machine_id];
   const ws = machine?.sessions.find((s) => s.name === ref.session)?.workspaces.find((w) => w.workspace_id === ref.workspace_id);
 
-  const root = useMemo<Root | null>(() => {
+  // Resolved when the overlay opens, and again only when the Workspace folder is set: a cd in
+  // the pane must not move the root under the open tabs.
+  const resolve = () => {
     // The selected pane's cwd counts only when that pane belongs to this workspace.
+    const { selected } = useApp.getState();
     let cwd: string | null = null;
     if (selected && selected.machine_id === ref.machine_id && selected.session === ref.session && ws) {
       cwd = ws.tabs.flatMap((t) => t.panes).find((p) => p.pane_id === selected.pane_id)?.cwd ?? null;
     }
     return resolveRoot(ref, ws, cwd);
-    // `folder` re-runs this when the stored workspace folder changes.
-  }, [ref.machine_id, ref.session, ref.workspace_id, ws, selected, folder]);
+  };
+  const [root, setRoot] = useState<Root | null>(resolve);
+  const folderSeen = useRef(folder);
+  useEffect(() => {
+    if (folderSeen.current === folder) return;
+    folderSeen.current = folder;
+    setRoot(resolve());
+  }, [folder]);
 
   const close = () => setOverlay(null);
   const [missing, setMissing] = useState<string | null>(null);
@@ -112,7 +120,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
       </header>
       {!online && <div className="files-banner files-banner-offline">Machine offline</div>}
       {root && !rootMissing ? (
-        <FilesBrowser key={`${wsKey(ref)}|${root.path}`} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} onMissing={() => onlineRef.current && setMissing(root.path)} />
+        <FilesBrowser key={filesKey(ref, root.path)} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} onMissing={() => onlineRef.current && setMissing(root.path)} />
       ) : (
         <div className="files-empty">
           <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
@@ -127,7 +135,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
 
 function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { onMissing(): void; wsRef: WorkspaceRef; root: string; online: boolean; reloadKey: number; reload(): void }) {
   const machineId = wsRef.machine_id;
-  const key = wsKey(wsRef);
+  const key = filesKey(wsRef, root);
   const state = useFiles((s) => s.ws(key));
   const { open, pin, close, cycle, setScroll } = useFiles.getState();
   const active = state.active;
@@ -272,7 +280,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
         <GoToFile list={list} recent={state.recent} onOpen={onOpen} inputRef={goto} />
         <div className="files-side-scroll">
           <ChangedList changed={changed} onOpen={onOpen} />
-          <FileTree machineId={machineId} root={root} wsKey={key} onOpen={onOpen} reloadKey={reloadKey} />
+          <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} />
         </div>
       </aside>
       <div className="files-resize" role="separator" aria-orientation="vertical" onMouseDown={startDrag} />
