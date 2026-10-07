@@ -20,6 +20,9 @@ function errMessage(e: unknown): string {
 }
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirlink";
+/** A linked folder looks like a folder, named like a symlink. */
+const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
 export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
   const expanded = useFiles((s) => s.byWs[wsKey]?.expanded ?? NO_DIRS);
@@ -86,7 +89,7 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
     const all = items();
     const at = all.indexOf(el);
     const rel = el.dataset.rel ?? "";
-    const isDir = el.dataset.kind === "dir";
+    const isDir = isFolder(el.dataset.kind);
     const open = el.getAttribute("aria-expanded") === "true";
     switch (e.key) {
       case "ArrowDown":
@@ -139,7 +142,7 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
     }
     return (entries[dir] ?? []).map((ent) => {
       const rel = join(dir, ent.name);
-      const isDir = ent.kind === "dir";
+      const isDir = isFolder(ent.kind);
       const open = isDir && expanded.includes(rel);
       return (
         <div key={rel} role="none">
@@ -150,9 +153,14 @@ export function FileTree({ machineId, root, wsKey, onOpen, reloadKey }: Props) {
             aria-expanded={isDir ? open : undefined}
             data-rel={rel}
             data-kind={ent.kind}
-            className={`files-tree-row files-tree-${ent.kind}`}
+            className={`files-tree-row ${kindClass(ent.kind)}`}
             style={{ paddingLeft: 8 + depth * 14 }}
-            onClick={() => (isDir ? toggleDir(wsKey, rel) : onOpen(rel, false))}
+            onClick={(e) => {
+              // The second click of a double click would collapse what the first expanded.
+              if (isDir) {
+                if (e.detail <= 1) toggleDir(wsKey, rel);
+              } else onOpen(rel, false);
+            }}
             onDoubleClick={() => {
               if (!isDir) onOpen(rel, true);
             }}

@@ -64,4 +64,35 @@ describe("FileTree", () => {
     fireEvent.keyDown(src, { key: "ArrowLeft" });
     expect(src.getAttribute("aria-expanded")).toBe("false");
   });
+
+  it("expands a linked folder like a folder", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "lib", kind: "dirlink" }] : [{ name: "y.ts", kind: "file" }],
+    );
+    const onOpen = vi.fn();
+    render(<FileTree machineId="local" root="/r" wsKey="local/default/w5" onOpen={onOpen} reloadKey={0} />);
+    const lib = (await screen.findByText("lib")).closest("[role=treeitem]") as HTMLElement;
+    expect(lib.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(lib);
+    fireEvent.click(await screen.findByText("y.ts"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenLastCalledWith("lib/y.ts", false);
+    lib.focus();
+    fireEvent.keyDown(lib, { key: "ArrowLeft" });
+    expect(lib.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("double-clicking a folder toggles it once", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
+    );
+    render(<FileTree machineId="local" root="/r" wsKey="local/default/w6" onOpen={() => {}} reloadKey={0} />);
+    const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
+    fireEvent.click(src, { detail: 1 });
+    fireEvent.click(src, { detail: 2 });
+    fireEvent.doubleClick(src);
+    expect(src.getAttribute("aria-expanded")).toBe("true");
+  });
 });

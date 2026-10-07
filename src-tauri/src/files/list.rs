@@ -12,6 +12,8 @@ pub enum EntryKind {
     File,
     Dir,
     Symlink,
+    /// A symlink to a folder: it expands like a folder.
+    DirLink,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -28,12 +30,15 @@ for e in * .*; do
   case "$e" in *"
 "*) continue;; esac
   [ -e "./$e" ] || [ -L "./$e" ] || continue
-  if [ -L "./$e" ]; then k=l; elif [ -d "./$e" ]; then k=d; else k=f; fi
+  if [ -L "./$e" ]; then
+    if [ -d "./$e" ]; then k=L; else k=l; fi
+  elif [ -d "./$e" ]; then k=d; else k=f; fi
   printf '%s\t%s\n' "$k" "$e"
 done"#;
 
-/// One level of `rel` below `root`: folders first, then files and symlinks, each sorted
-/// case-insensitively. Heavy folders (`SKIP_DIRS`) are left out.
+/// One level of `rel` below `root`: folders (linked ones too) first, then files and symlinks,
+/// each sorted case-insensitively. Heavy folders (`SKIP_DIRS`) are left out; a linked folder
+/// is kept whatever its name, as `complete/files.rs` (`find -type d`) keeps it too.
 pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec<Entry>> {
     check_rel(rel)?;
     let out = exec_bytes(t, &script_argv(LIST_SCRIPT, &[root, rel])).await?;
@@ -56,6 +61,7 @@ pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec
             let kind = match k {
                 "d" => EntryKind::Dir,
                 "l" => EntryKind::Symlink,
+                "L" => EntryKind::DirLink,
                 "f" => EntryKind::File,
                 _ => return None,
             };
@@ -68,7 +74,12 @@ pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec
             })
         })
         .collect();
-    entries.sort_by_key(|e| (e.kind != EntryKind::Dir, e.name.to_lowercase()));
+    entries.sort_by_key(|e| {
+        (
+            !matches!(e.kind, EntryKind::Dir | EntryKind::DirLink),
+            e.name.to_lowercase(),
+        )
+    });
     entries.truncate(MAX_DIR_ENTRIES);
     Ok(entries)
 }
@@ -104,6 +115,8 @@ mod tests {
             ],
         );
         std::os::unix::fs::symlink("b.md", root.join("link")).unwrap();
+        std::os::unix::fs::symlink("src", root.join("srclink")).unwrap();
+        std::os::unix::fs::symlink("gone", root.join("dangling")).unwrap();
         let got = list_dir(&LocalTransport, &root.to_string_lossy(), "")
             .await
             .unwrap();
@@ -113,10 +126,12 @@ mod tests {
             names,
             vec![
                 ("src", &EntryKind::Dir),
+                ("srclink", &EntryKind::DirLink),
                 ("-dash.md", &EntryKind::File),
                 ("A.txt", &EntryKind::File),
                 ("b.md", &EntryKind::File),
                 ("build", &EntryKind::File),
+                ("dangling", &EntryKind::Symlink),
                 ("it's.md", &EntryKind::File),
                 ("link", &EntryKind::Symlink),
             ]
@@ -131,6 +146,10 @@ mod tests {
                 kind: EntryKind::File
             }]
         );
+        let linked = list_dir(&LocalTransport, &root.to_string_lossy(), "srclink")
+            .await
+            .unwrap();
+        assert_eq!(linked, sub);
     }
 
     #[tokio::test]

@@ -163,7 +163,8 @@ export interface GitChange {
 
 export interface FileEntry {
   name: string;
-  kind: "file" | "dir" | "symlink";
+  /** `dirlink` is a symlink to a folder: it expands like a folder. */
+  kind: "file" | "dir" | "symlink" | "dirlink";
 }
 export interface FileContent {
   kind: "text" | "binary" | "image";
