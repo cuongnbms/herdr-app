@@ -8,7 +8,7 @@ use crate::{
         list::{self, Entry},
         paths::resolve_root,
         read::{self, FileContent},
-        watch::WatchEvent,
+        watch::{watch_refusal, WatchEvent},
         watch_manager::{FilesWatch, WatchSink},
     },
     git::{self, GitStatus},
@@ -766,18 +766,20 @@ pub async fn files_watch(
 ) -> Result<u64, AppError> {
     let info = mgr.info(&machine_id)?;
     let root = resolve_root(&info.home, &root)?;
-    if complete::files::is_home(&info.home, &root) {
-        return Err(AppError::new(
-            "invalid",
-            "auto-refresh is off for the home folder",
-        ));
+    if let Some(why) = watch_refusal(&info.home, &root) {
+        return Err(AppError::new("invalid", why));
     }
     let transport = mgr.transport(&machine_id)?;
-    let sink: WatchSink = Arc::new(move |e: WatchEvent| {
-        if let Err(err) = events.send(e) {
-            tracing::warn!("files watch event send failed: {err}");
-        }
-    });
+    let files_watch = Arc::clone(&watch);
+    // A Channel that can no longer deliver means the UI is gone: stop this watch.
+    let sink = move |id: u64| -> WatchSink {
+        Arc::new(move |e: WatchEvent| {
+            if let Err(err) = events.send(e) {
+                tracing::warn!("files watch event send failed, stopping it: {err}");
+                files_watch.stop(id);
+            }
+        })
+    };
     Ok(watch.start(transport, machine_id == machines::LOCAL, root, sink))
 }
 

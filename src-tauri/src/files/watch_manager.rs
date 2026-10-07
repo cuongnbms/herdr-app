@@ -12,16 +12,21 @@ use ::notify::{EventKind, RecursiveMode, Watcher};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use super::watch::{
     adds_excluded_dir, dedupe, exit_message, inotify_cmd, parse_inotify_line, parse_poll_record,
-    poll_cmd, Backoff, Change, PollRecord, WatchEvent,
+    poll_cmd, root_removed, Backoff, Change, PollRecord, WatchEvent, ESTABLISHED,
 };
 use crate::complete::files::SKIP_DIRS;
 use crate::error::{AppError, AppResult};
 use crate::transport::{exec, Transport};
 
 const DEBOUNCE: Duration = Duration::from_millis(300);
+/// A batch is sent once its first change is this old, even while changes keep coming.
+const MAX_BATCH_AGE: Duration = Duration::from_secs(1);
+/// How much of a session's stderr is kept for its exit message.
+const STDERR_KEEP: usize = 64 * 1024;
 /// Inotify sessions that end without a single event before the run settles for the poll.
 const INOTIFY_FAILURES: usize = 3;
 
@@ -36,13 +41,20 @@ pub struct FilesWatch {
 
 impl FilesWatch {
     /// Abort the running watch and start one on `root`; the returned id is for `stop`.
-    pub fn start(&self, t: Arc<dyn Transport>, local: bool, root: String, sink: WatchSink) -> u64 {
-        let id = self.last_id.fetch_add(1, Ordering::Relaxed) + 1;
+    /// `sink` is made with that id, so it can stop its own watch (e.g. once the UI is gone).
+    pub fn start(
+        &self,
+        t: Arc<dyn Transport>,
+        local: bool,
+        root: String,
+        sink: impl FnOnce(u64) -> WatchSink,
+    ) -> u64 {
         let mut current = self.current.lock().unwrap();
+        let id = self.last_id.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some((_, old)) = current.take() {
             old.abort();
         }
-        *current = Some((id, tokio::spawn(run_watch(t, local, root, sink))));
+        *current = Some((id, tokio::spawn(run_watch(t, local, root, sink(id)))));
         id
     }
 
@@ -173,7 +185,73 @@ fn missing_pipe(name: &str) -> AppError {
     AppError::new("io", format!("watch has no {name}"))
 }
 
-/// Portable fallback: one batch per scan of the remote `find` loop.
+fn io_err(e: std::io::Error) -> AppError {
+    AppError::new("io", e.to_string())
+}
+
+/// Tell the UI the root is gone, and end the session.
+fn root_gone(sink: &WatchSink, root: &str) -> AppError {
+    sink(WatchEvent::Changes {
+        changes: vec![root_removed()],
+    });
+    AppError::new("not_found", format!("folder removed: {root}"))
+}
+
+/// Changes waiting to be sent: sent `DEBOUNCE` after the last one, or once the first is
+/// `MAX_BATCH_AGE` old, so a steady writer still gets through.
+#[derive(Default)]
+struct Batch {
+    changes: Vec<Change>,
+    since: Option<Instant>,
+}
+
+impl Batch {
+    fn push(&mut self, change: Change) {
+        self.since.get_or_insert_with(Instant::now);
+        self.changes.push(change);
+    }
+
+    /// Send what is waiting, if anything.
+    fn flush(&mut self, sink: &WatchSink) {
+        self.since = None;
+        if !self.changes.is_empty() {
+            sink(WatchEvent::Changes {
+                changes: dedupe(std::mem::take(&mut self.changes)),
+            });
+        }
+    }
+
+    /// Completes when the batch is due; never while it is empty.
+    async fn due(&self) {
+        match self.since {
+            Some(since) => {
+                let age = since.elapsed();
+                tokio::time::sleep(DEBOUNCE.min(MAX_BATCH_AGE.saturating_sub(age))).await
+            }
+            None => std::future::pending().await,
+        }
+    }
+}
+
+/// The last `STDERR_KEEP` bytes of a session's stderr.
+#[derive(Default)]
+struct StderrTail(String);
+
+impl StderrTail {
+    fn push(&mut self, text: &str) {
+        self.0.push_str(text);
+        if self.0.len() > STDERR_KEEP {
+            let mut cut = self.0.len() - STDERR_KEEP;
+            while !self.0.is_char_boundary(cut) {
+                cut += 1;
+            }
+            self.0.drain(..cut);
+        }
+    }
+}
+
+/// Portable fallback: one batch per scan of the remote `find` loop. The first finished scan
+/// means the watch is up.
 pub(crate) async fn watch_poll(
     t: &dyn Transport,
     root: &str,
@@ -184,36 +262,40 @@ pub(crate) async fn watch_poll(
     let _stdin = child.stdin.take();
     let stdout = child.stdout.take().ok_or_else(|| missing_pipe("stdout"))?;
     let mut reader = BufReader::new(stdout);
-    sink(WatchEvent::Resync);
+    let mut established = false;
     let mut batch: Vec<Change> = Vec::new();
     let mut rec = Vec::new();
     loop {
         rec.clear();
-        let n = reader
-            .read_until(0, &mut rec)
-            .await
-            .map_err(|e| AppError::new("io", e.to_string()))?;
+        let n = reader.read_until(0, &mut rec).await.map_err(io_err)?;
         if n == 0 || rec.last() != Some(&0) {
             return Err(ended(&mut child).await);
         }
         rec.pop();
-        backoff.reset();
-        match parse_poll_record(root, &rec) {
+        let record = parse_poll_record(root, &rec);
+        if !matches!(record, Some(PollRecord::RootGone)) {
+            backoff.reset();
+        }
+        match record {
             Some(PollRecord::Change(change)) => batch.push(change),
-            Some(PollRecord::End) => {
-                if !batch.is_empty() {
-                    sink(WatchEvent::Changes {
-                        changes: dedupe(std::mem::take(&mut batch)),
-                    });
-                }
+            // The reload this asks for covers what the first scan found.
+            Some(PollRecord::End) if !established => {
+                established = true;
+                batch.clear();
+                sink(WatchEvent::Resync);
             }
-            None => {}
+            Some(PollRecord::End) if !batch.is_empty() => sink(WatchEvent::Changes {
+                changes: dedupe(std::mem::take(&mut batch)),
+            }),
+            Some(PollRecord::RootGone) => return Err(root_gone(sink, root)),
+            _ => {}
         }
     }
 }
 
 /// `Ok(())` means restart: a heavy folder appeared, and `inotifywait -r` would otherwise
-/// watch everything inside it.
+/// watch everything inside it. Stderr is read alongside stdout: `Watches established.` there
+/// means the watch is up, and the rest is kept for the exit message.
 pub(crate) async fn watch_inotify(
     t: &dyn Transport,
     root: &str,
@@ -222,49 +304,66 @@ pub(crate) async fn watch_inotify(
 ) -> AppResult<()> {
     let mut child = spawn_stream(t, &inotify_cmd(root))?;
     let _stdin = child.stdin.take();
-    let stdout = child.stdout.take().ok_or_else(|| missing_pipe("stdout"))?;
-    let mut lines = BufReader::new(stdout).lines();
-    sink(WatchEvent::Resync);
-    let mut batch: Vec<Change> = Vec::new();
+    let mut out = BufReader::new(child.stdout.take().ok_or_else(|| missing_pipe("stdout"))?);
+    let mut err = BufReader::new(child.stderr.take().ok_or_else(|| missing_pipe("stderr"))?);
+    let mut err_open = true;
+    let mut stderr = StderrTail::default();
+    let mut batch = Batch::default();
+    // A line cut short by a flush stays here: `read_until` appends where it left off.
+    let (mut line, mut err_line) = (Vec::new(), Vec::new());
     loop {
-        // Wait indefinitely for the first event; then flush once 300 ms pass without another.
-        let next = if batch.is_empty() {
-            Some(lines.next_line().await)
-        } else {
-            tokio::time::timeout(DEBOUNCE, lines.next_line()).await.ok()
-        };
-        match next {
-            None => sink(WatchEvent::Changes {
-                changes: dedupe(std::mem::take(&mut batch)),
-            }),
-            Some(Ok(Some(line))) => {
-                backoff.reset();
-                if let Some(change) = parse_inotify_line(root, &line) {
-                    let restart = adds_excluded_dir(&change);
-                    batch.push(change);
-                    if restart {
-                        sink(WatchEvent::Changes {
-                            changes: dedupe(batch),
-                        });
-                        return Ok(());
+        tokio::select! {
+            biased;
+            () = batch.due() => batch.flush(sink),
+            r = err.read_until(b'\n', &mut err_line), if err_open => {
+                if r.map_err(io_err)? == 0 {
+                    err_open = false;
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&err_line).into_owned();
+                err_line.clear();
+                if text.trim() == ESTABLISHED {
+                    sink(WatchEvent::Resync);
+                } else {
+                    stderr.push(&text);
+                }
+            }
+            r = out.read_until(b'\n', &mut line) => {
+                let n = r.map_err(io_err)?;
+                if n == 0 || line.last() != Some(&b'\n') {
+                    // Events read just before the session ended still count.
+                    batch.flush(sink);
+                    if err_open {
+                        let mut rest = Vec::new();
+                        let read = err.read_to_end(&mut rest);
+                        let _ = tokio::time::timeout(Duration::from_secs(2), read).await;
+                        err_line.extend(rest);
                     }
+                    stderr.push(&String::from_utf8_lossy(&err_line));
+                    return Err(AppError::new("io", exit_message(&stderr.0)));
+                }
+                backoff.reset();
+                let text = String::from_utf8_lossy(&line[..n - 1]).into_owned();
+                line.clear();
+                let Some(change) = parse_inotify_line(root, &text) else {
+                    continue;
+                };
+                if change == root_removed() {
+                    batch.flush(sink);
+                    return Err(root_gone(sink, root));
+                }
+                let restart = adds_excluded_dir(&change);
+                batch.push(change);
+                if restart {
+                    batch.flush(sink);
+                    return Ok(());
                 }
             }
-            Some(Ok(None)) => {
-                // Events read just before the session ended still count.
-                if !batch.is_empty() {
-                    sink(WatchEvent::Changes {
-                        changes: dedupe(std::mem::take(&mut batch)),
-                    });
-                }
-                return Err(ended(&mut child).await);
-            }
-            Some(Err(e)) => return Err(AppError::new("io", e.to_string())),
         }
     }
 }
 
-/// FSEvents (or the OS equivalent) on this machine, batched with the same debounce.
+/// FSEvents (or the OS equivalent) on this machine, batched the same way.
 pub(crate) async fn watch_local(
     root: &str,
     sink: &WatchSink,
@@ -284,28 +383,23 @@ pub(crate) async fn watch_local(
     if let Ok(canonical) = std::fs::canonicalize(root) {
         roots.push(canonical);
     }
-    let mut batch: Vec<Change> = Vec::new();
+    let mut batch = Batch::default();
     loop {
-        let next = if batch.is_empty() {
-            Some(rx.recv().await)
-        } else {
-            tokio::time::timeout(DEBOUNCE, rx.recv()).await.ok()
-        };
-        match next {
-            None => sink(WatchEvent::Changes {
-                changes: dedupe(std::mem::take(&mut batch)),
-            }),
-            Some(Some(Ok(event))) => {
-                backoff.reset();
-                batch.extend(
-                    event
-                        .paths
-                        .iter()
-                        .filter_map(|p| local_change(&roots, p, &event.kind)),
-                );
-            }
-            Some(Some(Err(e))) => return Err(AppError::new("io", format!("watch error: {e}"))),
-            Some(None) => return Err(AppError::new("io", "watcher stopped")),
+        tokio::select! {
+            biased;
+            () = batch.due() => batch.flush(sink),
+            next = rx.recv() => match next {
+                Some(Ok(event)) => {
+                    backoff.reset();
+                    for p in &event.paths {
+                        if let Some(change) = local_change(&roots, p, &event.kind) {
+                            batch.push(change);
+                        }
+                    }
+                }
+                Some(Err(e)) => return Err(AppError::new("io", format!("watch error: {e}"))),
+                None => return Err(AppError::new("io", "watcher stopped")),
+            },
         }
     }
 }
@@ -319,7 +413,10 @@ fn local_change(roots: &[PathBuf], path: &Path, kind: &EventKind) -> Option<Chan
     }
     let rel = roots.iter().find_map(|r| path.strip_prefix(r).ok())?;
     let rel = rel.to_string_lossy().into_owned();
-    if rel.split('/').any(|seg| SKIP_DIRS.contains(&seg)) {
+    // What happens inside a heavy folder is dropped; the folder's own creation still counts.
+    let mut above = rel.split('/');
+    above.next_back();
+    if above.any(|seg| SKIP_DIRS.contains(&seg)) {
         return None;
     }
     let (is_dir, removed) = match std::fs::symlink_metadata(path) {
@@ -391,8 +488,8 @@ mod tests {
             watch_poll(&LocalTransport, &r, &sink, &mut Backoff::default()).await
         });
         assert!(matches!(rx.recv().await, Some(WatchEvent::Resync)));
-        // Marker mtimes have 1 s resolution on some filesystems: write after the first scan.
-        tokio::time::sleep(Duration::from_millis(2500)).await;
+        // Marker mtimes have 1 s resolution on some filesystems: write a second after the first scan.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
         std::fs::write(root.join("x y.md"), "hi").unwrap();
         until(&mut rx, |c| c.path == "x y.md" && !c.is_dir).await;
         std::fs::create_dir(root.join("node_modules")).unwrap();
@@ -417,10 +514,45 @@ mod tests {
             watch_poll(&LocalTransport, &link, &sink, &mut Backoff::default()).await
         });
         assert!(matches!(rx.recv().await, Some(WatchEvent::Resync)));
-        tokio::time::sleep(Duration::from_millis(2500)).await;
+        tokio::time::sleep(Duration::from_millis(1200)).await;
         std::fs::write(dir.path().join("real/n.md"), "hi").unwrap();
         until(&mut rx, |c| c.path == "n.md").await;
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn poll_watches_a_root_named_like_a_heavy_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("build");
+        std::fs::create_dir(&root).unwrap();
+        let r = root.to_string_lossy().into_owned();
+        let (sink, mut rx) = collect();
+        let task = tokio::spawn(async move {
+            watch_poll(&LocalTransport, &r, &sink, &mut Backoff::default()).await
+        });
+        assert!(matches!(rx.recv().await, Some(WatchEvent::Resync)));
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        std::fs::write(root.join("new.md"), "hi").unwrap();
+        until(&mut rx, |c| c.path == "new.md").await;
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn poll_reports_the_root_removed_and_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("p");
+        std::fs::create_dir(&root).unwrap();
+        let r = root.to_string_lossy().into_owned();
+        let (sink, mut rx) = collect();
+        let task = tokio::spawn(async move {
+            watch_poll(&LocalTransport, &r, &sink, &mut Backoff::default()).await
+        });
+        assert!(matches!(rx.recv().await, Some(WatchEvent::Resync)));
+        std::fs::remove_dir(&root).unwrap();
+        until(&mut rx, |c| *c == root_removed()).await;
+        let ended = tokio::time::timeout(Duration::from_secs(5), task).await;
+        let err = ended.expect("poll still running").unwrap().unwrap_err();
+        assert_eq!(err.code, "not_found");
     }
 
     #[tokio::test]
@@ -450,6 +582,8 @@ mod tests {
         event_every: Option<usize>,
         /// Inotify sessions stay up instead of failing, so the run never moves on.
         hold_inotify: bool,
+        /// Every inotify session runs this script instead.
+        inotify_script: Option<&'static str>,
     }
 
     #[async_trait::async_trait]
@@ -464,9 +598,11 @@ mod tests {
                 }
             } else if argv[2].contains("inotifywait") {
                 let n = self.inotify.fetch_add(1, SeqCst) + 1;
-                if self.hold_inotify {
+                if let Some(script) = self.inotify_script {
+                    script
+                } else if self.hold_inotify {
                     "sleep 30"
-                } else if self.event_every.is_some_and(|k| n % k == 0) {
+                } else if self.event_every.is_some_and(|k| n.is_multiple_of(k)) {
                     "echo 'CLOSE_WRITE,CLOSE|/r/a.md'; echo 'no space' >&2; exit 1"
                 } else {
                     "echo 'no space' >&2; exit 1"
@@ -524,6 +660,115 @@ mod tests {
             .filter(|e| matches!(e, WatchEvent::Error { .. }))
             .count();
         assert_eq!(errors, 3, "{seen:?}");
+        // Sessions that never got their watches in place ask for no reload.
+        assert!(
+            !seen.iter().any(|e| matches!(e, WatchEvent::Resync)),
+            "{seen:?}"
+        );
+    }
+
+    /// Run `watch_inotify` on root `/r` with `script` as the session; the task and its events.
+    fn inotify_session(
+        script: &'static str,
+    ) -> (
+        tokio::task::JoinHandle<AppResult<()>>,
+        mpsc::UnboundedReceiver<WatchEvent>,
+    ) {
+        let (sink, rx) = collect();
+        let fake = Fake {
+            inotify_script: Some(script),
+            ..Default::default()
+        };
+        let task = tokio::spawn(async move {
+            watch_inotify(&fake, "/r", &sink, &mut Backoff::default()).await
+        });
+        (task, rx)
+    }
+
+    async fn next(rx: &mut mpsc::UnboundedReceiver<WatchEvent>) -> WatchEvent {
+        tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("no event")
+            .expect("sink dropped")
+    }
+
+    #[tokio::test]
+    async fn inotify_resyncs_once_watches_are_established_and_keeps_the_real_error() {
+        let (task, mut rx) = inotify_session(
+            "echo 'Setting up watches.  Beware: since -r was given, this may take a while!' >&2; echo 'Watches established.' >&2; sleep 0.2; echo 'Failed to watch /r/x; upper limit on inotify watches reached!' >&2; exit 1",
+        );
+        assert_eq!(next(&mut rx).await, WatchEvent::Resync);
+        let err = task.await.unwrap().unwrap_err();
+        assert_eq!(
+            err.message,
+            "Failed to watch /r/x; upper limit on inotify watches reached!"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_steady_writer_still_gets_a_batch_within_a_second() {
+        let (task, mut rx) = inotify_session(
+            "echo 'Watches established.' >&2; sleep 0.2; while :; do echo 'CLOSE_WRITE,CLOSE|/r/a.md'; sleep 0.1; done",
+        );
+        assert_eq!(next(&mut rx).await, WatchEvent::Resync);
+        let started = tokio::time::Instant::now();
+        let first = next(&mut rx).await;
+        assert!(matches!(first, WatchEvent::Changes { .. }), "{first:?}");
+        assert!(
+            started.elapsed() < Duration::from_millis(1600),
+            "{:?}",
+            started.elapsed()
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_does_not_end_the_session() {
+        let (task, mut rx) = inotify_session(
+            "echo 'Watches established.' >&2; sleep 0.2; printf 'CLOSE_WRITE,CLOSE|/r/\\377.md\\n'; echo 'CLOSE_WRITE,CLOSE|/r/b.md'; sleep 30",
+        );
+        assert_eq!(next(&mut rx).await, WatchEvent::Resync);
+        let WatchEvent::Changes { changes } = next(&mut rx).await else {
+            panic!("expected changes");
+        };
+        let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["\u{FFFD}.md", "b.md"]);
+        assert!(!task.is_finished());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn inotify_reports_the_root_removed_and_ends() {
+        // inotifywait itself keeps running once its root is gone.
+        let (task, mut rx) = inotify_session(
+            "echo 'Watches established.' >&2; sleep 0.2; echo 'DELETE|/r/a.md'; echo 'DELETE_SELF|/r/'; sleep 30",
+        );
+        assert_eq!(next(&mut rx).await, WatchEvent::Resync);
+        assert_eq!(
+            next(&mut rx).await,
+            WatchEvent::Changes {
+                changes: vec![Change {
+                    path: "a.md".into(),
+                    is_dir: false,
+                    removed: true
+                }]
+            }
+        );
+        assert_eq!(
+            next(&mut rx).await,
+            WatchEvent::Changes {
+                changes: vec![root_removed()]
+            }
+        );
+        let ended = tokio::time::timeout(Duration::from_secs(5), task).await;
+        assert_eq!(
+            ended
+                .expect("session still running")
+                .unwrap()
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
     }
 
     #[tokio::test]
@@ -598,12 +843,55 @@ mod tests {
         let root = dir.path().to_string_lossy().into_owned();
         let w = FilesWatch::default();
         let (sink, _rx) = collect();
-        let first = w.start(Arc::new(LocalTransport), true, root.clone(), sink.clone());
-        let second = w.start(Arc::new(LocalTransport), true, root, sink);
+        let s = sink.clone();
+        let first = w.start(Arc::new(LocalTransport), true, root.clone(), |_| s);
+        let second = w.start(Arc::new(LocalTransport), true, root, |_| sink);
         assert!(second > first);
         w.stop(first);
         assert!(w.is_running());
         w.stop(second);
         assert!(!w.is_running());
+    }
+
+    #[tokio::test]
+    async fn a_sink_can_stop_its_own_watch() {
+        // As `files_watch` does once its Channel can no longer deliver.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().into_owned();
+        let w = Arc::new(FilesWatch::default());
+        let w2 = w.clone();
+        w.start(Arc::new(LocalTransport), true, root, move |id| {
+            Arc::new(move |_| w2.stop(id))
+        });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while w.is_running() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "watch still running"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[test]
+    fn local_changes_keep_a_new_heavy_folder_but_not_what_is_inside() {
+        use ::notify::event::{CreateKind, EventKind};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("node_modules")).unwrap();
+        std::fs::write(dir.path().join("node_modules/x.js"), "").unwrap();
+        let roots = [dir.path().to_path_buf()];
+        let kind = EventKind::Create(CreateKind::Any);
+        assert_eq!(
+            local_change(&roots, &dir.path().join("node_modules"), &kind),
+            Some(Change {
+                path: "node_modules".into(),
+                is_dir: true,
+                removed: false
+            })
+        );
+        assert_eq!(
+            local_change(&roots, &dir.path().join("node_modules/x.js"), &kind),
+            None
+        );
     }
 }
