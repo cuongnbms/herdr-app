@@ -60,7 +60,8 @@ The Changed group and Go to file get no menu. The Workspace root itself cannot b
 
 A name already in the destination gets the first free Finder-style name: `report (1).md`,
 `report (2).md`; folders and dotfiles have no extension (`src (1)`, `.env (1)`); only the last
-dot splits (`a.tar (1).gz`). Items of one Upload never take each other's names.
+dot splits (`a.tar (1).gz`). Items of one Upload never take each other's names. Names compare
+case-insensitively, since a Mac volume treats `Report.md` and `report.md` as one name.
 
 ### Download
 
@@ -136,7 +137,7 @@ separate thread, and kills the child once 600 s pass (`TRANSFER_TIMEOUT`), which
 `finish_download`, `rename_excl`):
 
 1. `download_target(root, rel)`: `check_rel`, refuses the root itself.
-2. On the Machine: `tar -cf - -C '<parent>' -- '<name>'`.
+2. On the Machine: `COPYFILE_DISABLE=1 tar -cf - -C '<parent>' -- '<name>'` (no macOS `._*` files).
 3. On the Mac the stream unpacks into `~/Downloads/.herdr-download.XXXXXX` (`tempfile`). The
    `tar` crate skips entries with `..` or absolute paths.
 4. The item moves to the first free Finder-style name with `renamex_np(RENAME_EXCL)`
@@ -179,6 +180,8 @@ separate thread, and kills the child once 600 s pass (`TRANSFER_TIMEOUT`), which
 | ssh drops | Exit 255 and ssh's stderr |
 | 600 s pass | Child killed, `transfer timed out after 600s`; staging removed by `trap` (Machine) or drop (Mac) |
 | `~/Downloads` not writable | io error naming the path |
+| Local Machine: Upload a folder into itself or a folder inside it | `invalid` "cannot upload {name} into itself" (tar would read what it writes) |
+| Local Machine: Download a folder that contains `~/Downloads` | `invalid` "cannot download a folder that contains Downloads" |
 
 ## Testing
 
