@@ -52,19 +52,15 @@ pub async fn run_watch(t: Arc<dyn Transport>, local: bool, root: String, sink: W
             watch_local(&root, &tracked, &mut backoff).await
         } else {
             if has_inotify.is_none() {
-                has_inotify = Some(
-                    exec(
-                        &*t,
-                        &[
-                            "sh".into(),
-                            "-c".into(),
-                            "command -v inotifywait >/dev/null 2>&1".into(),
-                        ],
-                    )
-                    .await
-                    .map(|o| o.status == 0)
-                    .unwrap_or(false),
-                );
+                // Only a definite yes/no is cached: an unreachable Machine is probed again.
+                match probe_inotify(&*t).await {
+                    Ok(found) => has_inotify = Some(found),
+                    Err(e) => {
+                        sink(WatchEvent::Error { message: e.message });
+                        pause(&mut backoff).await;
+                        continue;
+                    }
+                }
             }
             if has_inotify == Some(true) && !poll_only {
                 inotify = true;
@@ -73,16 +69,41 @@ pub async fn run_watch(t: Arc<dyn Transport>, local: bool, root: String, sink: W
                 watch_poll(&*t, &root, &tracked, &mut backoff).await
             }
         };
-        if let Err(e) = result {
-            sink(WatchEvent::Error { message: e.message });
-            if inotify && !got_event.load(Ordering::Relaxed) {
+        // Only consecutive inotify sessions that failed without an event count.
+        if inotify {
+            if got_event.load(Ordering::Relaxed) {
+                silent_failures = 0;
+            } else if result.is_err() {
                 silent_failures += 1;
                 if silent_failures >= INOTIFY_FAILURES {
                     poll_only = true;
                 }
             }
-            tokio::time::sleep(backoff.next_delay()).await;
         }
+        if let Err(e) = result {
+            sink(WatchEvent::Error { message: e.message });
+            pause(&mut backoff).await;
+        }
+    }
+}
+
+/// Backoff sleep; tests do not wait.
+async fn pause(backoff: &mut Backoff) {
+    let delay = backoff.next_delay();
+    if !cfg!(test) {
+        tokio::time::sleep(delay).await;
+    }
+}
+
+/// Whether the Machine has `inotifywait`; an error when the answer is not a definite yes/no
+/// (e.g. ssh could not connect).
+async fn probe_inotify(t: &dyn Transport) -> AppResult<bool> {
+    let script = "command -v inotifywait >/dev/null 2>&1 && echo yes || echo no";
+    let out = exec(t, &["sh".into(), "-c".into(), script.into()]).await?;
+    match out.stdout.trim() {
+        "yes" => Ok(true),
+        "no" => Ok(false),
+        _ => Err(AppError::new("io", exit_message(&out.stderr))),
     }
 }
 
@@ -194,7 +215,15 @@ pub(crate) async fn watch_inotify(
                     }
                 }
             }
-            Some(Ok(None)) => return Err(ended(&mut child).await),
+            Some(Ok(None)) => {
+                // Events read just before the session ended still count.
+                if !batch.is_empty() {
+                    sink(WatchEvent::Changes {
+                        changes: dedupe(std::mem::take(&mut batch)),
+                    });
+                }
+                return Err(ended(&mut child).await);
+            }
             Some(Err(e)) => return Err(AppError::new("io", e.to_string())),
         }
     }
@@ -371,6 +400,118 @@ mod tests {
         drop(child.stdin.take());
         let status = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
         assert!(status.is_ok(), "poll loop still running after stdin closed");
+    }
+
+    /// A Machine whose probe, inotify sessions and poll sessions are canned `sh` commands,
+    /// counting how often each started.
+    #[derive(Default)]
+    struct Fake {
+        probes: std::sync::atomic::AtomicUsize,
+        inotify: std::sync::atomic::AtomicUsize,
+        poll: std::sync::atomic::AtomicUsize,
+        /// The first probe fails like an unreachable ssh.
+        first_probe_fails: bool,
+        /// Every n-th inotify session (1-based) delivers an event before ending.
+        event_every: Option<usize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Fake {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            use std::sync::atomic::Ordering::SeqCst;
+            let script = if argv[2].contains("command -v") {
+                if self.probes.fetch_add(1, SeqCst) == 0 && self.first_probe_fails {
+                    "echo 'ssh: connect failed' >&2; exit 255"
+                } else {
+                    "echo yes"
+                }
+            } else if argv[2].contains("inotifywait") {
+                let n = self.inotify.fetch_add(1, SeqCst) + 1;
+                if self.event_every.is_some_and(|k| n % k == 0) {
+                    "echo 'CLOSE_WRITE,CLOSE|/r/a.md'; echo 'no space' >&2; exit 1"
+                } else {
+                    "echo 'no space' >&2; exit 1"
+                }
+            } else {
+                self.poll.fetch_add(1, SeqCst);
+                "sleep 30"
+            };
+            vec!["sh".into(), "-c".into(), script.into()]
+        }
+        async fn local_socket(
+            &self,
+            _: &crate::transport::SessionEntry,
+        ) -> crate::error::AppResult<std::path::PathBuf> {
+            unimplemented!()
+        }
+        async fn release_socket(
+            &self,
+            _: &crate::transport::SessionEntry,
+        ) -> crate::error::AppResult<()> {
+            unimplemented!()
+        }
+    }
+
+    /// Run `run_watch` on `fake` until `done` holds (failing after 15 s); the events seen so far.
+    async fn run_until(fake: Arc<Fake>, done: impl Fn(&Fake) -> bool) -> Vec<WatchEvent> {
+        let (sink, mut rx) = collect();
+        let t: Arc<dyn crate::transport::Transport> = fake.clone();
+        let task = tokio::spawn(run_watch(t, false, "/r".into(), sink));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        while !done(&fake) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "condition never met"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        task.abort();
+        let mut seen = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            seen.push(e);
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn three_silent_inotify_failures_switch_to_poll() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let fake = Arc::new(Fake::default());
+        let seen = run_until(fake.clone(), |f| f.poll.load(SeqCst) >= 1).await;
+        assert_eq!(fake.inotify.load(SeqCst), 3);
+        assert_eq!(fake.probes.load(SeqCst), 1);
+        let errors = seen
+            .iter()
+            .filter(|e| matches!(e, WatchEvent::Error { .. }))
+            .count();
+        assert_eq!(errors, 3, "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn inotify_sessions_with_events_in_between_do_not_switch_to_poll() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let fake = Arc::new(Fake {
+            event_every: Some(3),
+            ..Default::default()
+        });
+        run_until(fake.clone(), |f| f.inotify.load(SeqCst) >= 12).await;
+        assert_eq!(fake.poll.load(SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_probe_is_retried_not_cached_as_absent() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let fake = Arc::new(Fake {
+            first_probe_fails: true,
+            ..Default::default()
+        });
+        let seen = run_until(fake.clone(), |f| f.inotify.load(SeqCst) >= 1).await;
+        assert_eq!(fake.probes.load(SeqCst), 2);
+        assert_eq!(fake.poll.load(SeqCst), 0);
+        assert!(
+            matches!(seen.first(), Some(WatchEvent::Error { message }) if message == "ssh: connect failed"),
+            "{seen:?}"
+        );
     }
 
     #[tokio::test]
