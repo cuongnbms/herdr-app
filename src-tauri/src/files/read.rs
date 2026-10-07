@@ -35,7 +35,7 @@ pub struct FileStat {
 const READ_SCRIPT: &str = r#"cd "$1" || exit 3
 f="./$2"
 [ -f "$f" ] || exit 3
-stat -c '%s %Y' -- "$f" 2>/dev/null || stat -f '%z %m' -- "$f" || exit 3
+stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f" || exit 3
 [ "$3" = img ] && exit 0
 if head -c 8192 -- "$f" | od -An -c | grep -qF '\0'; then echo 1; exit 0; fi
 echo 0
@@ -46,7 +46,7 @@ head -c 2097152 -- "$f""#;
 const IMAGE_SCRIPT: &str = r#"cd "$1" || exit 3
 f="./$2"
 [ -f "$f" ] || exit 3
-s=$(stat -c '%s %Y' -- "$f" 2>/dev/null || stat -f '%z %m' -- "$f") || exit 3
+s=$(stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f") || exit 3
 echo "$s"
 [ "${s%% *}" -le "$3" ] || exit 4
 cat -- "$f""#;
@@ -56,7 +56,7 @@ const STAT_SCRIPT: &str = r#"cd "$1" || exit 3
 shift
 for r; do
   f="./$r"
-  s=$(stat -c '%s %Y' -- "$f" 2>/dev/null || stat -f '%z %m' -- "$f" 2>/dev/null) || s=-
+  s=$(stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f" 2>/dev/null) || s=-
   printf '%s\n' "$s"
 done"#;
 
@@ -244,5 +244,26 @@ mod tests {
                 .code,
             "invalid"
         );
+    }
+
+    #[tokio::test]
+    async fn symlinks_report_their_target() {
+        let (_t, r) = root();
+        std::fs::write(format!("{r}/huge.png"), vec![0u8; MAX_IMAGE_BYTES + 1]).unwrap();
+        std::os::unix::fs::symlink("huge.png", format!("{r}/link.png")).unwrap();
+        let e = read_image(&LocalTransport, &r, "link.png")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, "invalid");
+
+        std::fs::write(format!("{r}/big.txt"), vec![b'x'; MAX_TEXT_BYTES + 10]).unwrap();
+        std::os::unix::fs::symlink("big.txt", format!("{r}/link.txt")).unwrap();
+        let c = read_file(&LocalTransport, &r, "link.txt").await.unwrap();
+        assert!(c.truncated);
+        assert_eq!(c.size, (MAX_TEXT_BYTES + 10) as u64);
+        let s = stat_files(&LocalTransport, &r, &["link.txt".into()])
+            .await
+            .unwrap();
+        assert_eq!(s[0].unwrap().size, (MAX_TEXT_BYTES + 10) as u64);
     }
 }
