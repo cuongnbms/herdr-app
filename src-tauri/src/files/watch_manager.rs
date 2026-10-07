@@ -345,7 +345,8 @@ pub(crate) async fn watch_inotify(
                     return Err(AppError::new("io", exit_message(&stderr.0)));
                 }
                 backoff.reset();
-                let text = String::from_utf8_lossy(&line[..n - 1]).into_owned();
+                // `n` counts only this call's bytes; a resumed line holds more.
+                let text = String::from_utf8_lossy(&line[..line.len() - 1]).into_owned();
                 line.clear();
                 let Some(change) = parse_inotify_line(root, &text) else {
                     continue;
@@ -736,6 +737,21 @@ mod tests {
         let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
         assert_eq!(paths, ["\u{FFFD}.md", "b.md"]);
         assert!(!task.is_finished());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_line_split_around_a_stderr_line_keeps_its_whole_path() {
+        // The stderr line wins the select! while half the stdout line is buffered.
+        let (task, mut rx) = inotify_session(
+            "echo 'Watches established.' >&2; sleep 0.2; printf 'CLOSE_WRITE,CLOSE|/r/ab'; sleep 0.2; echo noise >&2; sleep 0.2; printf 'c.md\\n'; sleep 30",
+        );
+        assert_eq!(next(&mut rx).await, WatchEvent::Resync);
+        let WatchEvent::Changes { changes } = next(&mut rx).await else {
+            panic!("expected changes");
+        };
+        let paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["abc.md"]);
         task.abort();
     }
 
