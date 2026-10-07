@@ -4,7 +4,7 @@ import { filesChanged, filesListAll, filesRead } from "../lib/ipc";
 import type { Changed, FileContent, FileList } from "../lib/types";
 import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { CloseIcon, CopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
+import { CloseIcon, CopyIcon, FileCopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -300,6 +300,14 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       (e) => console.error("copy failed", e),
     );
   };
+  const cut = shown?.truncated ? " (first 2 MB only)" : "";
+  const copyContents = () => {
+    if (shown?.text == null) return;
+    writeText(shown.text).then(
+      () => showToast(`Contents copied${cut}`),
+      (e) => console.error("copy failed", e),
+    );
+  };
 
   return (
     <div className="files-body" style={{ ["--files-side" as string]: `${side}px` }}>
@@ -329,6 +337,11 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
               <button type="button" className="icon-btn" aria-label="Copy path" title="Copy path" onClick={copyPath}>
                 <CopyIcon />
               </button>
+              {shown?.kind === "text" && shown.text !== null && (
+                <button type="button" className="icon-btn" aria-label="Copy contents" title={`Copy contents${cut}`} onClick={copyContents}>
+                  <FileCopyIcon />
+                </button>
+              )}
               {md && mode === "render" && hasOutline && (
                 <button
                   type="button"

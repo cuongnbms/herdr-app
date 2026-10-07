@@ -3,18 +3,24 @@ import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /** File texts that files_read answers with, by rel ("x" otherwise). */
 const texts = vi.hoisted(() => ({}) as Record<string, string>);
+/** Rels that files_read reports as cut at the read limit. */
+const truncated = vi.hoisted(() => new Set<string>());
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args?: { rel?: string }) => {
     if (cmd === "files_list_all") return { paths: [], capped: false, refused: false };
     if (cmd === "files_changed") return { repo: false, total: 0, changes: [] };
     if (cmd === "files_read") {
       const text = texts[args?.rel ?? ""] ?? "x";
-      return { kind: "text", text, truncated: false, size: text.length, mtime: 1 };
+      return { kind: "text", text, truncated: truncated.has(args?.rel ?? ""), size: text.length, mtime: 1 };
     }
     return [];
   }),
   Channel: class {},
 }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { showToast } from "../ui/Toast";
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
@@ -224,6 +230,25 @@ describe("FilesOverlay", () => {
       expect(count()).toBe("2 / 3");
       fireEvent.click(screen.getByRole("button", { name: "Match case" }));
       expect(count()).toBe("1 / 2");
+    });
+
+    it("Copy contents copies the file's text", async () => {
+      texts["a.ts"] = "one\ntwo";
+      await openTabs("a.ts");
+      fireEvent.click(await screen.findByRole("button", { name: "Copy contents" }));
+      expect(writeText).toHaveBeenCalledWith("one\ntwo");
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied"));
+    });
+
+    it("Copy contents of a cut file says only the first 2 MB was copied", async () => {
+      texts["big.ts"] = "head";
+      truncated.add("big.ts");
+      await openTabs("big.ts");
+      const btn = await screen.findByRole("button", { name: "Copy contents" });
+      expect(btn.getAttribute("title")).toBe("Copy contents (first 2 MB only)");
+      fireEvent.click(btn);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied (first 2 MB only)"));
+      truncated.delete("big.ts");
     });
 
     it("⌘R reloads the lists and the open file", async () => {
