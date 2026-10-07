@@ -192,4 +192,23 @@ describe("FileTree", () => {
     rerender(<FileTree machineId="local" root="/r" filesKey="local/default/w13" onOpen={() => {}} reloadKey={0} showHeavy />);
     expect(await screen.findByText("node_modules")).toBeTruthy();
   });
+
+  it("relists only loaded folders named by a change batch, once per batch", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "lib", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
+    );
+    const props = { machineId: "local", root: "/r", filesKey: "local/default/w9", onOpen: () => {}, reloadKey: 0 };
+    const { rerender } = render(<FileTree {...props} changes={null} />);
+    fireEvent.click(await screen.findByText("src"));
+    await screen.findByText("x.ts");
+    vi.mocked(invoke).mockClear();
+    const batch = { seq: 1, changes: [{ path: "src/new.ts", isDir: false, removed: false }, { path: "lib/y.ts", isDir: false, removed: false }] };
+    rerender(<FileTree {...props} changes={batch} />);
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("files_list_dir", { machineId: "local", root: "/r", rel: "src", showHeavy: false });
+    rerender(<FileTree {...props} changes={batch} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1);
+  });
 });

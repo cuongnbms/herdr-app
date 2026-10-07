@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { filesListDir } from "../lib/ipc";
-import type { FileEntry } from "../lib/types";
+import type { FileChange, FileEntry } from "../lib/types";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { ChevronIcon, FileIcon, FolderIcon, FolderOpenIcon } from "../ui/icons";
 import { useFiles } from "./store";
 import { copyItems } from "./treeMenu";
+import { dirsToRelist } from "./watchDirs";
 
 interface Props {
   machineId: string;
@@ -16,6 +17,8 @@ interface Props {
   reloadKey: number;
   /** Lists heavy folders (`.git`, `node_modules`…) too; changing it refetches like `reloadKey`. */
   showHeavy?: boolean;
+  /** A batch from the Files watch; each new `seq` relists the loaded folders it touched. */
+  changes?: { seq: number; changes: FileChange[] } | null;
 }
 
 const NO_DIRS: string[] = [];
@@ -30,7 +33,7 @@ const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirli
 /** A linked folder looks like a folder, named like a symlink. */
 const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
-export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHeavy = false }: Props) {
+export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHeavy = false, changes = null }: Props) {
   const expanded = useFiles((s) => s.byWs[filesKey]?.expanded ?? NO_DIRS);
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -95,6 +98,26 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
       if (!(rel in entries) && !(rel in errors) && !inflight.current.has(rel)) load(rel);
     }
   }, [expanded, entries, errors, load]);
+
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const handledSeq = useRef<number | null>(null);
+  // A change batch relists the folders it touched that are loaded, and forgets removed folders.
+  useEffect(() => {
+    if (!changes || changes.seq === handledSeq.current) return;
+    handledSeq.current = changes.seq;
+    const removed = changes.changes.filter((c) => c.isDir && c.removed).map((c) => c.path);
+    const gone = (key: string) => removed.some((p) => key === p || key.startsWith(p + "/"));
+    if (removed.length) {
+      for (const key of inflight.current) if (gone(key)) inflight.current.delete(key);
+      const keepLive = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !gone(k)));
+      setEntries(keepLive);
+      setErrors(keepLive);
+    }
+    for (const dir of dirsToRelist(changes.changes)) {
+      if (dir in entriesRef.current && !gone(dir)) load(dir);
+    }
+  }, [changes, load]);
 
   const retry = (rel: string) => {
     setErrors(({ [rel]: _drop, ...rest }) => rest);
