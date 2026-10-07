@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
+import { clearHighlights, findRanges, firstVisible, repaint, reveal, setHighlight } from "./domFind";
+import { wrapIndex, type FindQuery, type FindStatus } from "./find";
 import { resolveLink } from "./links";
 import { MarkdownImage } from "./MarkdownImage";
 import { Outline, type Heading } from "./Outline";
@@ -47,6 +49,87 @@ interface Props {
   outline?: boolean;
   /** Told whether the document has headings to outline; `false` again on unmount. */
   onOutline?(has: boolean): void;
+  /** `index` is the number of steps taken from the first match on screen; it wraps here. */
+  find?: FindQuery | null;
+  /** Told the match count and the current match whenever either changes. */
+  onFindStatus?(status: FindStatus): void;
+}
+
+const MATCH = "files-find";
+const CURRENT = "files-find-current";
+
+/**
+ * Find in the rendered text under `root`. Matches are painted with the CSS Custom Highlight
+ * API: the DOM belongs to React and mermaid, so marking matches must not add elements to it.
+ */
+function useDomFind(root: React.RefObject<HTMLDivElement | null>, find: FindQuery | null | undefined, onFindStatus?: (s: FindStatus) => void) {
+  const query = find?.query ?? "";
+  const matchCase = find?.matchCase ?? false;
+  const steps = find?.index ?? 0;
+  /** `fresh` marks a new search (it scrolls to its match); a content change keeps the view. */
+  const [found, setFound] = useState<{ ranges: Range[]; base: number; fresh: boolean }>({ ranges: [], base: 0, fresh: false });
+  // Bumped when the rendered DOM changes after the first paint (reload, mermaid, images).
+  const [contentSeq, setContentSeq] = useState(0);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setContentSeq((n) => n + 1), 50);
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [root]);
+
+  // A new search starts at the first match on screen, so it begins where you are reading.
+  useLayoutEffect(() => {
+    const el = root.current;
+    const ranges = el && query ? findRanges(el, query, matchCase) : [];
+    setFound({ ranges, base: el ? firstVisible(ranges, el) : 0, fresh: true });
+  }, [root, query, matchCase]);
+
+  useEffect(() => {
+    const el = root.current;
+    if (!contentSeq || !el || !query) return;
+    const ranges = findRanges(el, query, matchCase);
+    setFound((f) => ({ ranges, base: Math.min(f.base, Math.max(0, ranges.length - 1)), fresh: false }));
+  }, [contentSeq]);
+
+  const count = found.ranges.length;
+  const index = count ? wrapIndex(found.base, steps, count) : 0;
+  const report = useRef(onFindStatus);
+  report.current = onFindStatus;
+  useEffect(() => report.current?.({ count, index }), [count, index]);
+
+  useEffect(() => {
+    if (count) {
+      setHighlight(MATCH, found.ranges);
+      setHighlight(CURRENT, [found.ranges[index]]);
+    } else clearHighlights(MATCH, CURRENT);
+    repaint(root.current);
+  }, [found, index]);
+
+  // `steps` is not wrapped, so stepping onto the same match, as with a single match, reveals it again.
+  const revealed = useRef<{ found: unknown; steps: number }>({ found: null, steps: 0 });
+  useEffect(() => {
+    const last = revealed.current;
+    const moved = (found !== last.found && found.fresh) || steps !== last.steps;
+    revealed.current = { found, steps };
+    if (moved && count && root.current) reveal(found.ranges[index], root.current);
+  }, [found, steps]);
+
+  useEffect(
+    () => () => {
+      clearHighlights(MATCH, CURRENT);
+      repaint(root.current);
+    },
+    [root],
+  );
 }
 
 const readHeadings = (root: HTMLElement): Heading[] =>
@@ -73,8 +156,9 @@ export function MarkdownView(props: Props) {
   return <RenderedMarkdown key={props.rel} {...props} />;
 }
 
-function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline }: Props) {
+function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline, find, onFindStatus }: Props) {
   const root = useRef<HTMLDivElement>(null);
+  useDomFind(root, find, onFindStatus);
   const saveOnScroll = useScrollMemory(rel, initialScroll, saveScroll);
   const [headings, setHeadings] = useState<Heading[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);

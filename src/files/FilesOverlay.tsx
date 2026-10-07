@@ -233,9 +233,11 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const toLine = jump !== null && jump.rel === active && lineOfHash(jump.hash) !== null;
   const mode: FileMode = active ? (modes[active] ?? (large || toLine ? "source" : "render")) : "render";
   const setMode = (rel: string, m: FileMode) => setModes((s) => ({ ...s, [rel]: m }));
+  // The other view searches afresh from what it shows on screen.
+  useEffect(() => setIndex(0), [mode]);
   const md = active !== null && isMarkdown(active);
-  const searchable =
-    shown !== null && shown.kind === "text" && shown.text !== null && !(md && mode === "render");
+  // Rendered markdown is searched in its rendered text, everything else in its source.
+  const searchable = shown !== null && shown.kind === "text" && shown.text !== null;
   /** Reported by the view, which owns the matches and where the search starts. */
   const [status, setStatus] = useState<FindStatus>({ count: 0, index: 0 });
   const count = findOpen && searchable && query ? status.count : 0;
@@ -257,8 +259,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       cycle(key, e.code === "BracketRight" ? 1 : -1);
     } else if (!e.shiftKey && k === "f") {
       e.preventDefault();
-      if (!active || !shown || shown.kind !== "text" || shown.text === null) return;
-      if (md && mode === "render") setMode(active, "source");
+      if (!active || !searchable) return;
       setFindOpen(true);
       setFindFocus((n) => n + 1);
     } else if (k === "g") {

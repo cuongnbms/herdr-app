@@ -76,6 +76,8 @@ export function FileView({
           saveScroll={saveScroll}
           outline={outline}
           onOutline={onOutline}
+          find={find}
+          onFindStatus={onFindStatus}
         />
       ) : (
         <TextView

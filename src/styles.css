@@ -1373,6 +1373,9 @@ button.composer-model:disabled { cursor: default; }
 .files-code { padding-right: 24px; }
 .files-match { border-radius: 2px; background: var(--accent-soft); color: inherit; }
 .files-match.current { outline: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* Find in rendered markdown paints with the CSS Custom Highlight API: only colours apply. */
+::highlight(files-find) { background-color: var(--accent-soft); }
+::highlight(files-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .files-text .hljs-comment, .files-text .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .files-text .hljs-keyword, .files-text .hljs-selector-tag, .files-text .hljs-literal, .files-text .hljs-doctag { color: var(--hl-keyword); }
 .files-text .hljs-string, .files-text .hljs-regexp, .files-text .hljs-addition { color: var(--hl-string); }

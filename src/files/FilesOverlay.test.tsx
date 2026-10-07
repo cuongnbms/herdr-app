@@ -219,13 +219,17 @@ describe("FilesOverlay", () => {
       expect(useFiles.getState().ws(key).active).toBe("c.ts");
     });
 
-    it("⌘F switches rendered markdown to Source and opens find; again refocuses it", async () => {
-      texts["doc.md"] = "# Doc\n\nfoo";
+    it("⌘F finds in rendered markdown without leaving Render; again refocuses it", async () => {
+      texts["doc.md"] = "# Doc\n\nfoo and Foo";
       await openTabs("doc.md");
       await screen.findByRole("heading", { name: "Doc" });
       press("f");
-      expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true");
+      expect(screen.getByRole("button", { name: "Render" }).getAttribute("aria-pressed")).toBe("true");
       const input = screen.getByPlaceholderText("Find in file");
+      fireEvent.change(input, { target: { value: "foo" } });
+      expect(document.querySelector(".files-find-count")!.textContent).toBe("1 / 2");
+      press("g");
+      expect(document.querySelector(".files-find-count")!.textContent).toBe("2 / 2");
       expect(document.activeElement).toBe(input);
       input.blur();
       press("f");
