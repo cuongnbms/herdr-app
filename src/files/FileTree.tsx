@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { filesListDir } from "../lib/ipc";
 import type { FileEntry } from "../lib/types";
+import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
+import { ArrowDownIcon, ArrowUpIcon, FolderInputIcon } from "../ui/icons";
+import { startDownload, startUpload } from "./transfer";
 import { useFiles } from "./store";
 
 interface Props {
@@ -41,6 +46,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
     setErrors({});
     setFocusRel(null);
   }
+  const [menu, setMenu] = useState<{ x: number; y: number; rel: string | null; dir: string } | null>(null);
   const gen = useRef(0);
   const inflight = useRef(new Set<string>());
   const expandedRef = useRef(expanded);
@@ -90,6 +96,23 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   const retry = (rel: string) => {
     setErrors(({ [rel]: _drop, ...rest }) => rest);
     load(rel);
+  };
+
+  const upload = async (dir: string, directory: boolean) => {
+    const picked = await openDialog({ multiple: true, directory });
+    if (picked === null) return;
+    const paths = typeof picked === "string" ? [picked] : picked;
+    if (await startUpload(machineId, root, dir, paths)) load(dir);
+  };
+
+  const menuItems = (m: { rel: string | null; dir: string }): MenuItem[] => {
+    const list: MenuItem[] = [
+      { label: "Upload Files…", icon: ArrowUpIcon, onSelect: () => void upload(m.dir, false) },
+      { label: "Upload Folder…", icon: FolderInputIcon, onSelect: () => void upload(m.dir, true) },
+    ];
+    const rel = m.rel;
+    if (rel !== null) list.push({ label: "Download", icon: ArrowDownIcon, onSelect: () => void startDownload(machineId, root, rel) });
+    return list;
   };
 
   const items = () => Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);
@@ -189,6 +212,11 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
             onDoubleClick={() => {
               if (!isDir) onOpen(rel, true);
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenu({ x: e.clientX, y: e.clientY, rel, dir: isDir ? rel : dir });
+            }}
           >
             <span className="files-tree-caret">{isDir ? (open ? "▾" : "▸") : ""}</span>
             <span className="files-tree-name">{ent.name}</span>
@@ -200,8 +228,18 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
   };
 
   return (
-    <div className="files-tree" role="tree" ref={treeRef} onKeyDown={onKeyDown}>
+    <div
+      className="files-tree"
+      role="tree"
+      ref={treeRef}
+      onKeyDown={onKeyDown}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, rel: null, dir: "" });
+      }}
+    >
       {renderDir("", 0)}
+      {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />, document.body)}
     </div>
   );
 }

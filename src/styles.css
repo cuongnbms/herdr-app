@@ -1307,7 +1307,7 @@ button.composer-model:disabled { cursor: default; }
 .files-changed-code { flex: none; width: 12px; color: var(--amber); font-weight: 600; text-align: center; }
 .files-changed-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
-.files-tree { padding: 4px 0; font-size: 12.5px; outline: none; }
+.files-tree { min-height: 100%; box-sizing: border-box; padding: 4px 0; font-size: 12.5px; outline: none; }
 .files-tree-row { display: flex; align-items: center; gap: 4px; height: 24px; padding-right: 8px; color: var(--fg-2); cursor: pointer; white-space: nowrap; user-select: none; }
 .files-tree-row:hover { background: var(--hover); color: var(--fg); }
 .files-tree-row:focus-visible { background: var(--active); color: var(--fg); outline: none; box-shadow: inset 2px 0 0 var(--accent); }

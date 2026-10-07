@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
+const dialogOpen = vi.fn();
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: (...a: unknown[]) => dialogOpen(...a) }));
+const startUpload = vi.fn(async (..._a: unknown[]) => true);
+const startDownload = vi.fn(async (..._a: unknown[]) => {});
+vi.mock("./transfer", () => ({
+  startUpload: (...a: unknown[]) => startUpload(...a),
+  startDownload: (...a: unknown[]) => startDownload(...a),
+}));
 import { invoke } from "@tauri-apps/api/core";
 import { FileTree } from "./FileTree";
 
@@ -135,5 +143,67 @@ describe("FileTree", () => {
     await screen.findByText("old.md");
     rerender(<FileTree machineId="local" root="/s" filesKey="local/default/w9" onOpen={() => {}} reloadKey={0} />);
     expect(screen.queryByText("old.md")).toBeNull();
+  });
+});
+
+describe("FileTree context menu", () => {
+  const listing = async (_cmd: string, args: any) =>
+    args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "x.ts", kind: "file" }];
+  const menuLabels = () => screen.getAllByRole("menuitem").map((b) => b.textContent);
+
+  it("offers Upload and Download on rows, Upload only on empty space", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    render(<FileTree machineId="m" root="/r" filesKey="m/default/c1" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("src"));
+    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…", "Download"]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.contextMenu(screen.getByRole("tree"));
+    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…"]);
+  });
+
+  it("uploads into the folder, the file's folder, or the root, then reloads it", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    dialogOpen.mockResolvedValue(["/Users/u/n.md"]);
+    render(<FileTree machineId="m" root="/r" filesKey="m/default/c2" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.click(await screen.findByText("src"));
+    await screen.findByText("x.ts");
+
+    fireEvent.contextMenu(screen.getByText("x.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload Files…" }));
+    await waitFor(() => expect(startUpload).toHaveBeenLastCalledWith("m", "/r", "src", ["/Users/u/n.md"]));
+    expect(dialogOpen).toHaveBeenLastCalledWith({ multiple: true, directory: false });
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([, a]: any) => a.rel === "src").length).toBe(2));
+
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload Folder…" }));
+    await waitFor(() => expect(startUpload).toHaveBeenLastCalledWith("m", "/r", "src", ["/Users/u/n.md"]));
+    expect(dialogOpen).toHaveBeenLastCalledWith({ multiple: true, directory: true });
+
+    fireEvent.contextMenu(screen.getByRole("tree"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload Files…" }));
+    await waitFor(() => expect(startUpload).toHaveBeenLastCalledWith("m", "/r", "", ["/Users/u/n.md"]));
+  });
+
+  it("does nothing when the open panel is cancelled", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    startUpload.mockClear();
+    dialogOpen.mockResolvedValue(null);
+    render(<FileTree machineId="m" root="/r" filesKey="m/default/c3" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload Files…" }));
+    await waitFor(() => expect(dialogOpen).toHaveBeenCalled());
+    expect(startUpload).not.toHaveBeenCalled();
+  });
+
+  it("downloads the row", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    render(<FileTree machineId="m" root="/r" filesKey="m/default/c4" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Download" }));
+    expect(startDownload).toHaveBeenCalledWith("m", "/r", "a.md");
   });
 });
