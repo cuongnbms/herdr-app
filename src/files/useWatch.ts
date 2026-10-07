@@ -44,7 +44,8 @@ export function useWatch(opts: Options) {
         (e) => {
           if (!stopped) latest.current.onError(e?.message ?? String(e));
         },
-      );
+      )
+      .catch(() => {});
     return () => {
       stopped = true;
       if (id !== null) void filesUnwatch(id).catch(() => {});

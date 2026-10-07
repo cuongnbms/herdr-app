@@ -7,7 +7,7 @@ export function imageUrl(buf: ArrayBuffer, rel: string): string {
   return URL.createObjectURL(new Blob([buf], type ? { type } : undefined));
 }
 
-/** `mtime` changing (a poll found the image changed) fetches it again. */
+/** `mtime` changing (the watch reported the image changed) fetches it again. */
 export function ImageView({ machineId, root, rel, mtime }: { machineId: string; root: string; rel: string; mtime: number }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
