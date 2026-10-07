@@ -258,10 +258,16 @@ function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initia
     }),
     [rel, onOpen, machineId, fileRoot],
   );
+  // Parsing and highlighting the document is the slow part; find re-renders this view on every
+  // keystroke, so the same element lets React skip the document.
+  const doc = useMemo(
+    () => <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>,
+    [text, components],
+  );
   return (
     <div className="files-markdown-wrap">
       <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
-        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        {doc}
       </div>
       {outline && has && (
         <Outline

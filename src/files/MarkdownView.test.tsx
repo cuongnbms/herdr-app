@@ -4,6 +4,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => new ArrayBuff
 vi.mock("mermaid", () => ({
   default: { initialize: vi.fn(), parse: vi.fn(async () => ({})), render: vi.fn(async () => ({ svg: "<svg></svg>" })) },
 }));
+/** Counts react-markdown renders, so a test can tell the document was not parsed again. */
+const markdownRenders = vi.hoisted(() => ({ n: 0 }));
+vi.mock("react-markdown", async (orig) => {
+  const mod = await orig<typeof import("react-markdown")>();
+  const Counted = (props: Parameters<typeof mod.default>[0]) => {
+    markdownRenders.n++;
+    return mod.default(props);
+  };
+  return { ...mod, default: Counted };
+});
 import { invoke } from "@tauri-apps/api/core";
 import { MarkdownView } from "./MarkdownView";
 
@@ -34,6 +44,14 @@ describe("MarkdownView find", () => {
     expect(texts("files-find-current")).toEqual(["foo"]);
     rerender(<MarkdownView {...base} text={text} find={{ query: "foo", index: 0, matchCase: true }} onFindStatus={status} />);
     expect(status).toHaveBeenLastCalledWith({ count: 2, index: 0 });
+  });
+
+  it("does not render the document again while the query is typed", () => {
+    const { rerender } = render(<MarkdownView {...base} text="docs here" find={null} />);
+    const before = markdownRenders.n;
+    for (const query of ["d", "do", "doc"]) rerender(<MarkdownView {...base} text="docs here" find={{ query, index: 0, matchCase: false }} />);
+    expect(markdownRenders.n).toBe(before);
+    expect(texts("files-find")).toEqual(["doc"]);
   });
 
   it("clears the highlights when find closes", () => {

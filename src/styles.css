@@ -1371,11 +1371,12 @@ button.composer-model:disabled { cursor: default; }
 /* Drawn as generated content: WebKit still paints the selection over user-select:none text. */
 .files-gutter::before { content: attr(data-line); }
 .files-code { padding-right: 24px; }
-.files-match { border-radius: 2px; background: var(--accent-soft); color: inherit; }
-.files-match.current { outline: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* Find paints amber, not accent: an accent tint reads as the text selection. */
+.files-match { border-radius: 2px; background: color-mix(in srgb, var(--amber) 32%, transparent); color: inherit; }
+.files-match.current, .files-match.current * { background: var(--amber); color: #1a1206; }
 /* Find in rendered markdown paints with the CSS Custom Highlight API: only colours apply. */
-::highlight(files-find) { background-color: var(--accent-soft); }
-::highlight(files-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+::highlight(files-find) { background-color: color-mix(in srgb, var(--amber) 32%, transparent); }
+::highlight(files-find-current) { background-color: var(--amber); color: #1a1206; }
 .files-text .hljs-comment, .files-text .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .files-text .hljs-keyword, .files-text .hljs-selector-tag, .files-text .hljs-literal, .files-text .hljs-doctag { color: var(--hl-keyword); }
 .files-text .hljs-string, .files-text .hljs-regexp, .files-text .hljs-addition { color: var(--hl-string); }
