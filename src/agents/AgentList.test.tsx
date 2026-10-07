@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn().mockResolvedValue(undefined) }));
 import { herdrCall } from "../lib/ipc";
 import { useApp } from "../store/app";
-import { setFolder } from "../workspaces/folder";
+import { getFolder, setFolder } from "../workspaces/folder";
 import { AgentList, workspaceGroups } from "./AgentList";
 import type { MachineView, PaneView } from "../lib/types";
 
@@ -96,11 +96,31 @@ describe("AgentList", () => {
     expect(screen.getByText("Guard export").closest(".tab-group")).toBeNull();
   });
 
-  it("opens the new agent dialog from the header button", () => {
+  it("picks the agent from a menu under the header button", () => {
+    setFolder({ machine_id: "local", session: "default", workspace_id: "w2" }, "/srv/web");
     render(<AgentList />);
     fireEvent.click(screen.getByRole("button", { name: "New agent in web" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["claude", "pi", "shell"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "claude" }));
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", { workspace_id: "w2", cwd: "/srv/web", label: "claude", focus: false });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("starts in a pane's cwd and keeps it as the folder when none is stored", () => {
+    render(<AgentList />);
+    fireEvent.click(screen.getByRole("button", { name: "New agent in web" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "shell" }));
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", { workspace_id: "w2", cwd: "/x", label: "shell", focus: false });
+    expect(getFolder({ machine_id: "local", session: "default", workspace_id: "w2" })).toBe("/x");
+  });
+
+  it("asks for a folder in the dialog when the workspace has none to offer", () => {
+    render(<AgentList />);
+    fireEvent.click(screen.getByRole("button", { name: "New agent in empty" }));
+    expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.getByRole("dialog", { name: "New agent" })).toBeTruthy();
-    expect(screen.getByText("New agent in web", { selector: "h3" })).toBeTruthy();
+    expect(screen.getByText("New agent in empty", { selector: "h3" })).toBeTruthy();
   });
 
   it("opens the new workspace dialog from the session header", () => {

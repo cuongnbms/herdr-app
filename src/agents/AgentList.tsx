@@ -6,9 +6,9 @@ import { useApp } from "../store/app";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
 import { BotIcon, CloseIcon, FolderIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon, TerminalIcon } from "../ui/icons";
-import { folderName, suggestFolder, useFolder } from "../workspaces/folder";
+import { folderName, setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
-import { AGENTS, openAgentTab } from "./openAgentTab";
+import { AGENTS, openAgentTab, type Agent } from "./openAgentTab";
 import { useTabReorder } from "./tabDnd";
 
 export interface PaneEntry {
@@ -109,14 +109,23 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
     ws.tabs.map((t) => t.tab_id),
     (tab_id, insert_index) => a?.guard(call("tab.move", { tab_id, insert_index })),
   );
+  // Starts straight away in the workspace folder, else a pane's cwd, which then becomes the folder.
+  const cwd = folder ?? suggestFolder(ws);
+  const start = (agent: Agent) => {
+    if (folder === null && cwd) setFolder(ref, cwd);
+    a?.guard(() => openAgentTab(machineId, session, ws.workspace_id, agent, cwd));
+  };
+  const agentItem = (agent: Agent, label: string): MenuItem => ({ label, icon: agent === "shell" ? TerminalIcon : BotIcon, onSelect: () => start(agent) });
+  // Without a folder to start in, the dialog asks for one.
+  const add = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!a) return;
+    if (!cwd) return a.newAgent(machineId, session, ws);
+    const r = e.currentTarget.getBoundingClientRect();
+    a.menuAt(r.left, r.bottom + 4, AGENTS.map((agent) => agentItem(agent, agent)));
+  };
   const items: MenuItem[] = a
     ? [
-        // Starts straight away in the workspace folder (else a pane's cwd, else herdr's default).
-        ...AGENTS.map((agent) => ({
-          label: `New ${agent}`,
-          icon: agent === "shell" ? TerminalIcon : BotIcon,
-          onSelect: () => a.guard(() => openAgentTab(machineId, session, ws.workspace_id, agent, folder ?? suggestFolder(ws))),
-        })),
+        ...AGENTS.map((agent) => agentItem(agent, `New ${agent}`)),
         { label: "Browse files", icon: FolderOpenIcon, onSelect: () => useApp.getState().setFilesOverlay(ref) },
         { label: "Change folder…", icon: FolderOpenIcon, onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
         { label: "Rename workspace…", icon: PencilIcon, onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
@@ -129,7 +138,7 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
         <FolderIcon className="ws-icon" />
         <span className="ws-label">{ws.label}</span>
         {folderText !== ws.label && <span className="ws-folder">{folderText}</span>}
-        <button className="ws-add" aria-label={`New agent in ${ws.label}`} onClick={() => a?.newAgent(machineId, session, ws)}>
+        <button className="ws-add" aria-label={`New agent in ${ws.label}`} onClick={add}>
           <PlusIcon />
         </button>
       </div>
