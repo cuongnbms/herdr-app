@@ -278,15 +278,17 @@ pub(crate) async fn watch_poll(
         }
         match record {
             Some(PollRecord::Change(change)) => batch.push(change),
-            // The reload this asks for covers what the first scan found.
-            Some(PollRecord::End) if !established => {
-                established = true;
-                batch.clear();
-                sink(WatchEvent::Resync);
+            Some(PollRecord::End) => {
+                if !established {
+                    established = true;
+                    sink(WatchEvent::Resync);
+                }
+                if !batch.is_empty() {
+                    sink(WatchEvent::Changes {
+                        changes: dedupe(std::mem::take(&mut batch)),
+                    });
+                }
             }
-            Some(PollRecord::End) if !batch.is_empty() => sink(WatchEvent::Changes {
-                changes: dedupe(std::mem::take(&mut batch)),
-            }),
             Some(PollRecord::RootGone) => return Err(root_gone(sink, root)),
             _ => {}
         }
