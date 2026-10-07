@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
@@ -121,7 +122,8 @@ pub struct Exit {
 }
 
 /// Run `argv` on the Machine with piped stdio and `io` on its stdin/stdout in a separate thread,
-/// while this thread waits for the child and kills it at `timeout` (which also unblocks `io`).
+/// while this thread waits for the child and, at `timeout`, stops its whole process group (SIGTERM,
+/// then SIGKILL after a short grace), which closes the pipes and so unblocks `io`.
 /// `io` must drop stdin to signal EOF. Returns the child's exit and `io`'s own result.
 pub fn run_piped<T: Send + 'static>(
     t: &dyn Transport,
@@ -138,6 +140,7 @@ pub fn run_piped<T: Send + 'static>(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .map_err(|e| AppError::new("io", format!("cannot start {prog}: {e}")))?;
     let stdin = child.stdin.take().expect("piped stdin");
@@ -151,20 +154,19 @@ pub fn run_piped<T: Send + 'static>(
     });
     let io_thread = thread::spawn(move || io(stdin, stdout));
 
+    let pgid = child.id() as libc::pid_t;
     let deadline = Instant::now() + timeout;
     let mut wait_err = None;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_group(&mut child, pgid);
                 break None;
             }
             Ok(None) => thread::sleep(Duration::from_millis(50)),
             Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_group(&mut child, pgid);
                 wait_err = Some(AppError::new("io", e.to_string()));
                 break None;
             }
@@ -193,12 +195,27 @@ pub fn run_piped<T: Send + 'static>(
     }
 }
 
+/// Stop the child's whole process group (a shell's grandchildren keep the pipes open): SIGTERM,
+/// up to 500 ms grace, then SIGKILL; always reaps the child.
+fn stop_group(child: &mut std::process::Child, pgid: libc::pid_t) {
+    // SAFETY: killpg only signals the group we created for this child.
+    unsafe { libc::killpg(pgid, libc::SIGTERM) };
+    let grace = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < grace && !matches!(child.try_wait(), Ok(Some(_))) {
+        thread::sleep(Duration::from_millis(10));
+    }
+    // The leader may be gone while a grandchild lingers, so kill the group regardless.
+    unsafe { libc::killpg(pgid, libc::SIGKILL) };
+    let _ = child.wait();
+}
+
 /// Script for `sh -c` (destination is `$1`): unpack the tar stream into a staging dir, require
 /// the `done` marker, then move each item into place without ever replacing anything.
 pub fn upload_cmd(names: &[String]) -> String {
     let mut s = String::from(
         "set -e\n\
          t=$(mktemp -d \"$1/.herdr-upload.XXXXXX\"); trap 'rm -rf \"$t\"' EXIT\n\
+         trap 'exit 1' HUP INT TERM\n\
          tar -xf - -C \"$t\"\n\
          if [ ! -e \"$t\"/done ]; then echo 'upload was interrupted' >&2; exit 1; fi\n",
     );
@@ -509,5 +526,32 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, "timeout");
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn run_piped_timeout_stops_grandchildren_and_removes_staging() {
+        let to = tempfile::tempdir().unwrap();
+        let argv = script_argv(
+            &upload_cmd(&["a.md".into()]),
+            &[to.path().to_str().unwrap()],
+        );
+        let started = std::time::Instant::now();
+        let err = run_piped(
+            &LocalTransport,
+            &argv,
+            Duration::from_millis(300),
+            move |stdin, mut stdout| {
+                let _keep = stdin;
+                let mut v = Vec::new();
+                stdout
+                    .read_to_end(&mut v)
+                    .map(drop)
+                    .map_err(|e| AppError::new("io", e.to_string()))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "timeout");
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(ls(to.path()).is_empty(), "{:?}", ls(to.path()));
     }
 }
