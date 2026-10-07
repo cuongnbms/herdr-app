@@ -162,6 +162,18 @@ describe("FileTree context menu", () => {
     expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…"]);
   });
 
+  it("a right-click on the open menu does not swap it for the root menu", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    render(<FileTree machineId="m" root="/r" filesKey="m/default/c6" onOpen={() => {}} reloadKey={0} />);
+    fireEvent.contextMenu(await screen.findByText("a.md"));
+    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…", "Download"]);
+    fireEvent.contextMenu(screen.getByRole("menuitem", { name: "Download" }));
+    // The menu's own overlay closes it; the tree must not open its root menu in its place.
+    expect(screen.queryAllByRole("menuitem").map((b) => b.textContent)).not.toEqual(["Upload Files…", "Upload Folder…"]);
+    expect(screen.queryAllByRole("menuitem")).toEqual([]);
+  });
+
   it("uploads into the folder, the file's folder, or the root, then reloads it", async () => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(listing as any);

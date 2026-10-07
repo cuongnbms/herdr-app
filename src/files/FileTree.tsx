@@ -238,6 +238,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
       ref={treeRef}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => {
+        // React bubbles events from the portalled menu here too; only the tree's own space counts.
+        if (!treeRef.current?.contains(e.target as Node)) return;
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY, rel: null, dir: "" });
       }}
