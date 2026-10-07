@@ -2,7 +2,7 @@
 use crate::error::AppResult;
 use crate::transport::{exec, Transport};
 
-const SKIP: &[&str] = &[
+pub const SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     ".venv",
@@ -24,7 +24,7 @@ pub async fn list_files(t: &dyn Transport, home: &str, cwd: &str) -> AppResult<V
     if cwd.trim_end_matches('/') == home.trim_end_matches('/') {
         return Ok(Vec::new());
     }
-    let skip = SKIP
+    let skip = SKIP_DIRS
         .iter()
         .map(|n| format!("-name {n}"))
         .collect::<Vec<_>>()

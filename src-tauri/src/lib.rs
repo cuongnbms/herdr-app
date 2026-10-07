@@ -2,6 +2,7 @@ pub mod attach;
 pub mod commands;
 pub mod complete;
 pub mod error;
+pub mod files;
 pub mod fonts;
 pub mod git;
 pub mod herdr;

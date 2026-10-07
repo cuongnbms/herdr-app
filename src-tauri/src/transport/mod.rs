@@ -33,6 +33,12 @@ pub struct ExecOutput {
     pub stderr: String,
 }
 
+pub struct ExecBytes {
+    pub status: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+}
+
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// Wrap an argv so it runs on the Machine (`tty` requests a pseudo-terminal).
@@ -57,6 +63,20 @@ pub async fn exec_input(
     argv: &[String],
     input: Option<&[u8]>,
 ) -> AppResult<ExecOutput> {
+    let out = run(t, argv, input).await?;
+    Ok(ExecOutput {
+        status: out.status,
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: out.stderr,
+    })
+}
+
+/// `exec` with stdout kept as raw bytes, for file content that need not be UTF-8.
+pub async fn exec_bytes(t: &dyn Transport, argv: &[String]) -> AppResult<ExecBytes> {
+    run(t, argv, None).await
+}
+
+async fn run(t: &dyn Transport, argv: &[String], input: Option<&[u8]>) -> AppResult<ExecBytes> {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
     let wrapped = t.wrap(argv, false);
@@ -86,9 +106,9 @@ pub async fn exec_input(
     match tokio::time::timeout(EXEC_TIMEOUT, run).await {
         Ok(out) => {
             let out = out?;
-            Ok(ExecOutput {
+            Ok(ExecBytes {
                 status: out.status.code().unwrap_or(-1),
-                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stdout: out.stdout,
                 stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
             })
         }
@@ -682,6 +702,17 @@ broken               running  /only-one-path\n";
             "incompatible",
             "a broken override is reported, not replaced"
         );
+    }
+
+    #[tokio::test]
+    async fn exec_bytes_keeps_non_utf8_stdout() {
+        let argv: Vec<String> = ["sh", "-c", "printf '\\377\\000a'"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let o = exec_bytes(&local::LocalTransport, &argv).await.unwrap();
+        assert_eq!(o.status, 0);
+        assert_eq!(o.stdout, vec![0xff, 0x00, b'a']);
     }
 
     #[tokio::test]
