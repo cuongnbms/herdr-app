@@ -7,8 +7,9 @@ use crate::{
         all::{self, FileList},
         changed::{self, Changed},
         list::{self, Entry},
-        paths::resolve_root,
+        paths::{check_rel, resolve_root},
         read::{self, FileContent, FileStat},
+        transfer,
     },
     git::{self, GitStatus},
     herdr::rpc,
@@ -775,4 +776,54 @@ pub async fn files_changed(
     let root = files_root(&mgr, &machine_id, &root)?;
     let t = mgr.transport(&machine_id)?;
     changed::changed(&*t, &root).await
+}
+
+#[tauri::command]
+pub async fn files_upload(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    dest_rel: String,
+    sources: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    check_rel(&dest_rel)?;
+    let sources = transfer::check_sources(&sources)?;
+    let dest = transfer::join_abs(&root, &dest_rel);
+    let t = mgr.transport(&machine_id)?;
+    let existing: Vec<String> = list::list_dir(&*t, &root, &dest_rel)
+        .await?
+        .into_iter()
+        .map(|e| e.name)
+        .collect();
+    if machine_id == crate::machines::LOCAL {
+        transfer::check_upload_into_self(std::path::Path::new(&dest), &sources)?;
+    }
+    tokio::task::spawn_blocking(move || transfer::upload(&*t, &dest, &existing, sources))
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn files_download(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+) -> Result<String, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let (parent, name) = transfer::download_target(&root, &rel)?;
+    let downloads = transfer::downloads_dir()?;
+    if machine_id == crate::machines::LOCAL {
+        transfer::check_download_contains_downloads(
+            &std::path::Path::new(&parent).join(&name),
+            &downloads,
+        )?;
+    }
+    let t = mgr.transport(&machine_id)?;
+    let saved =
+        tokio::task::spawn_blocking(move || transfer::download(&*t, &parent, &name, &downloads))
+            .await
+            .map_err(|e| AppError::new("io", e.to_string()))??;
+    Ok(saved.to_string_lossy().into_owned())
 }

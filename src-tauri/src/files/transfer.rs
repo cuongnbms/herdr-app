@@ -428,6 +428,39 @@ pub fn download(
     saved
 }
 
+/// Canonical form of `p`, or `p` itself when it cannot be resolved.
+fn canon(p: &Path) -> PathBuf {
+    fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// On the local Machine, uploading a folder into itself or below itself would never end.
+pub fn check_upload_into_self(dest_abs: &Path, sources: &[Source]) -> AppResult<()> {
+    let dest = canon(dest_abs);
+    for s in sources.iter().filter(|s| s.is_dir) {
+        if dest.starts_with(canon(&s.path)) {
+            return Err(AppError::new(
+                "invalid",
+                format!("cannot upload {} into itself", s.name),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// On the local Machine, a folder holding `~/Downloads` would be copied into its own copy.
+pub fn check_download_contains_downloads(src_abs: &Path, downloads: &Path) -> AppResult<()> {
+    let is_dir = fs::symlink_metadata(src_abs)
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+    if is_dir && canon(downloads).starts_with(canon(src_abs)) {
+        return Err(AppError::new(
+            "invalid",
+            "cannot download a folder that contains Downloads",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,5 +833,40 @@ mod tests {
         make_tree_writable(&top);
         fs::remove_dir_all(&top).unwrap();
         assert!(!top.exists());
+    }
+
+    #[test]
+    fn refuses_to_upload_a_folder_into_itself() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("x/inner")).unwrap();
+        let s = vec![src(&d.path().join("x"))];
+        assert_eq!(
+            check_upload_into_self(&d.path().join("x/inner"), &s)
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert_eq!(
+            check_upload_into_self(&d.path().join("x"), &s)
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert!(check_upload_into_self(d.path(), &s).is_ok());
+    }
+
+    #[test]
+    fn refuses_to_download_a_folder_that_contains_downloads() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join("Downloads")).unwrap();
+        fs::create_dir_all(home.path().join("w")).unwrap();
+        let dl = home.path().join("Downloads");
+        assert_eq!(
+            check_download_contains_downloads(home.path(), &dl)
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert!(check_download_contains_downloads(&home.path().join("w"), &dl).is_ok());
     }
 }
