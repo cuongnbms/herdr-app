@@ -8,6 +8,7 @@ describe("GoToFile", () => {
     const onOpen = vi.fn();
     render(<GoToFile list={{ paths: ["docs/tree.md", "src/a.ts"], capped: false, refused: false }} recent={[]} onOpen={onOpen} inputRef={createRef()} />);
     const input = screen.getByPlaceholderText(/^Go to file…\s+⌘P$/);
+    fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "tree" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpen).toHaveBeenCalledWith("docs/tree.md", true);
@@ -28,6 +29,7 @@ describe("GoToFile", () => {
     const onOpen = vi.fn();
     render(<GoToFile list={{ paths: ["a.ts", "b.ts"], capped: false, refused: false }} recent={["b.ts"]} onOpen={onOpen} inputRef={createRef()} />);
     const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
     fireEvent.change(input, { target: { value: "  " } });
     expect(screen.getAllByRole("option")[0].textContent).toContain("b.ts");
     fireEvent.keyDown(input, { key: "ArrowDown" });
@@ -47,5 +49,18 @@ describe("GoToFile", () => {
     expect(screen.queryAllByRole("option").length).toBe(0);
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpen).not.toHaveBeenCalled();
+  });
+  it("hides the list on blur although the query is not empty; a row click still opens", () => {
+    const onOpen = vi.fn();
+    render(<GoToFile list={{ paths: ["a.ts", "b.ts"], capped: false, refused: false }} recent={[]} onOpen={onOpen} inputRef={createRef()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "a" } });
+    expect(screen.getAllByRole("option").length).toBe(1);
+    fireEvent.blur(input);
+    expect(screen.queryAllByRole("option").length).toBe(0);
+    fireEvent.focus(input);
+    fireEvent.mouseDown(screen.getAllByRole("option")[0]);
+    expect(onOpen).toHaveBeenCalledWith("a.ts", true);
   });
 });

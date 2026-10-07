@@ -19,7 +19,9 @@ export function GoToFile({ list, recent, onOpen, inputRef }: Props) {
     () => (list && !refused ? rankFiles(query.trim(), list.paths, recent, GOTO_RESULTS) : []),
     [list, refused, query, recent],
   );
-  const visible = results.length > 0 && (query !== "" || focused);
+  // Only while focused: a list left open after blur covers the tree, and Esc would close the overlay.
+  // Rows act on mousedown with preventDefault, so clicking one keeps the focus.
+  const visible = results.length > 0 && focused;
   const active = Math.min(sel, Math.max(results.length - 1, 0));
 
   const choose = (rel: string) => {
