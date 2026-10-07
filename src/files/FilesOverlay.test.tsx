@@ -415,6 +415,15 @@ describe("FilesOverlay", () => {
       expect(listAlls()).toBe(1);
     });
 
+    it("a resync after the watch failed reloads, even the first one", async () => {
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      await waitFor(() => expect(listAlls()).toBe(1));
+      act(() => watch().onmessage!({ type: "error", message: "ssh: connect failed" }));
+      act(() => watch().onmessage!({ type: "resync" }));
+      await waitFor(() => expect(listAlls()).toBe(2));
+    });
+
     it("the first resync after coming back online reloads", async () => {
       render(<FilesOverlay />);
       await waitFor(() => expect(watch()).toBeTruthy());

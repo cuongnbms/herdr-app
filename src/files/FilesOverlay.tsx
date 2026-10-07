@@ -232,7 +232,11 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       }
       setBatch((prev) => ({ seq: (prev?.seq ?? 0) + 1, changes }));
     },
-    onError: setWatchError,
+    onError: (message) => {
+      // Changes made while the watch was down are only caught by reloading on its next Resync.
+      skipResync.current = false;
+      setWatchError(message);
+    },
   });
 
   // A different file starts with a fresh find, and a link's fragment applies to its own file only.
