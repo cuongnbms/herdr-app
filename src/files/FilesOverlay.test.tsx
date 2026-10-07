@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 /** File texts that files_read answers with, by rel ("x" otherwise). */
@@ -18,6 +18,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
+import { HIGHLIGHT_LIMIT } from "./limits";
 import { filesKey, useFiles } from "./store";
 
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -137,5 +138,22 @@ describe("FilesOverlay", () => {
     act(() => setFolder(ref, "/new"));
     expect(screen.getByText("/new")).toBeTruthy();
     expect(screen.queryByRole("tab")).toBeNull();
+  });
+
+  it("opens a small markdown file rendered and one over the highlight limit as source", async () => {
+    texts["small.md"] = "# Small";
+    texts["big.md"] = "# Big\n" + "x".repeat(HIGHLIGHT_LIMIT);
+    const key = filesKey(ref, "/r");
+    useFiles.getState().open(key, "small.md", { pin: true });
+    render(<FilesOverlay />);
+    expect(await screen.findByRole("heading", { name: "Small" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Render" }).getAttribute("aria-pressed")).toBe("true");
+    act(() => useFiles.getState().open(key, "big.md", { pin: true }));
+    await waitFor(() => expect(screen.getByRole("tab", { selected: true }).textContent).toContain("big.md"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.queryByRole("heading", { name: "Big" })).toBeNull();
+    // Render stays one click away.
+    fireEvent.click(screen.getByRole("button", { name: "Render" }));
+    expect(screen.getByRole("heading", { name: "Big" })).toBeTruthy();
   });
 });

@@ -16,6 +16,7 @@ import { FileTree } from "./FileTree";
 import { FileView, type FileMode } from "./FileView";
 import { GoToFile } from "./GoToFile";
 import { latestOnly, STALE } from "./latest";
+import { HIGHLIGHT_LIMIT } from "./limits";
 import { resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { usePolling } from "./usePolling";
@@ -215,7 +216,9 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const onOpen = useCallback((rel: string, pinned: boolean) => open(key, rel, { pin: pinned }), [key, open]);
   const onLink = useCallback((rel: string) => open(key, rel, { pin: false }), [key, open]);
 
-  const mode: FileMode = active ? (modes[active] ?? "render") : "render";
+  // Rendering parses on the main thread, so text past the highlight limit opens as source.
+  const large = shown?.text != null && shown.text.length > HIGHLIGHT_LIMIT;
+  const mode: FileMode = active ? (modes[active] ?? (large ? "source" : "render")) : "render";
   const setMode = (rel: string, m: FileMode) => setModes((s) => ({ ...s, [rel]: m }));
   const md = active !== null && isMarkdown(active);
   const searchable =
