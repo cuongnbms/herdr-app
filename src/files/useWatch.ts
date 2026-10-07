@@ -12,6 +12,9 @@ interface Options {
   onError(message: string): void;
 }
 
+/** Serializes watch starts across effects. Never rejects. */
+let pending: Promise<void> = Promise.resolve();
+
 /** Follows `root` on the backend while enabled; events arrive over a Channel. */
 export function useWatch(opts: Options) {
   const latest = useRef(opts);
@@ -29,15 +32,19 @@ export function useWatch(opts: Options) {
       else if (e.type === "changes") latest.current.onChanges(e.changes);
       else latest.current.onError(e.message);
     };
-    filesWatch(machineId, root, events).then(
-      (watchId) => {
-        id = watchId;
-        if (stopped) void filesUnwatch(watchId).catch(() => {});
-      },
-      (e) => {
-        if (!stopped) latest.current.onError(e?.message ?? String(e));
-      },
-    );
+    // Start in effect order: the backend holds one watch, so a stale start must never land after a newer one.
+    pending = pending
+      .then(() => (stopped ? null : filesWatch(machineId, root, events)))
+      .then(
+        (watchId) => {
+          if (watchId === null) return;
+          id = watchId;
+          if (stopped) void filesUnwatch(watchId).catch(() => {});
+        },
+        (e) => {
+          if (!stopped) latest.current.onError(e?.message ?? String(e));
+        },
+      );
     return () => {
       stopped = true;
       if (id !== null) void filesUnwatch(id).catch(() => {});
