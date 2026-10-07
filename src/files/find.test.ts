@@ -18,4 +18,10 @@ describe("findMatches", () => {
     ]);
     expect(findMatches(["aİb"], "İB")).toEqual([{ line: 0, start: 1, end: 3 }]);
   });
+  it("matches astral letters, uppercase or not", () => {
+    // Deseret: "𐐀" lowercases to "𐐨", both two units long.
+    expect(findMatches(["a𐐀b"], "𐐀")).toEqual([{ line: 0, start: 1, end: 3 }]);
+    expect(findMatches(["a𐐨b"], "𐐀")).toEqual([{ line: 0, start: 1, end: 3 }]);
+    expect(findMatches(["İ𐐀x"], "𐐨X")).toEqual([{ line: 0, start: 1, end: 4 }]);
+  });
 });

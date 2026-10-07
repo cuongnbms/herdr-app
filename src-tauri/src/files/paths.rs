@@ -14,7 +14,11 @@ pub fn check_rel(rel: &str) -> AppResult<()> {
 /// Expand a leading `~` against the Machine's home; the result is absolute, without a
 /// trailing `/` (except `/` itself).
 pub fn resolve_root(home: &str, root: &str) -> AppResult<String> {
-    let expanded = expand_home(root, home);
+    let mut expanded = expand_home(root, home);
+    // A home of `/` expands `~` to "" (the trailing `/` is trimmed).
+    if expanded.is_empty() && root.starts_with('~') {
+        expanded = "/".to_string();
+    }
     if !expanded.starts_with('/') || expanded.contains('\0') {
         return Err(AppError::new("invalid", format!("invalid root: {root:?}")));
     }
@@ -86,6 +90,8 @@ mod tests {
         );
         assert_eq!(resolve_root("/home/u", "/srv/x").unwrap(), "/srv/x");
         assert_eq!(resolve_root("/home/u", "/").unwrap(), "/");
+        assert_eq!(resolve_root("/", "~").unwrap(), "/");
+        assert_eq!(resolve_root("/", "~/w").unwrap(), "/w");
         assert_eq!(
             resolve_root("/home/u", "rel/x").unwrap_err().code,
             "invalid"
