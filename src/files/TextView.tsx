@@ -49,19 +49,21 @@ export function TextView({
   text,
   path,
   initialScroll,
-  onScroll,
+  saveScroll,
   find,
 }: {
   text: string;
   path: string;
   initialScroll: number;
-  onScroll(top: number): void;
+  /** Called with the last scroll position when this file is left (another path, or unmount). */
+  saveScroll(top: number): void;
   find: { query: string; index: number } | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lines = useMemo(() => highlightLines(text, path), [text, path]);
   const plain = useMemo(() => lines.map((l) => l.map((s) => s.text).join("")), [lines]);
-  const matches = useMemo(() => (find ? findMatches(plain, find.query) : []), [plain, find]);
+  const query = find?.query ?? null;
+  const matches = useMemo(() => (query ? findMatches(plain, query) : []), [plain, query]);
   const byLine = useMemo(() => {
     const map = new Map<number, Match[]>();
     for (const m of matches) {
@@ -86,9 +88,13 @@ export function TextView({
   // estimateSize is not part of the virtualizer's measurement cache key, so re-measure on change.
   useLayoutEffect(() => virt.measure(), [rowH]);
 
-  // Restore the remembered scroll position when this file is shown.
+  // Restore the remembered scroll position when this file is shown; save it when it is left.
+  // Scrolling itself only updates a ref, so it re-renders nothing.
+  const lastTop = useRef(initialScroll);
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = initialScroll;
+    lastTop.current = initialScroll;
+    return () => saveScroll(lastTop.current);
   }, [path]);
 
   useEffect(() => {
@@ -98,7 +104,7 @@ export function TextView({
   const gutter = `${String(lines.length).length + 1}ch`;
 
   return (
-    <div ref={scrollRef} className="files-text" onScroll={(e) => onScroll(e.currentTarget.scrollTop)}>
+    <div ref={scrollRef} className="files-text" onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)}>
       <div className="files-text-body" style={{ height: virt.getTotalSize(), position: "relative" }}>
         {virt.getVirtualItems().map((row) => (
           <div

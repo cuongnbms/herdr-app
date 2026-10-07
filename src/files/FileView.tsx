@@ -22,7 +22,7 @@ export function FileView({
   onOpen,
   find,
   initialScroll,
-  onScroll,
+  saveScroll,
 }: {
   machineId: string;
   root: string;
@@ -33,7 +33,7 @@ export function FileView({
   onOpen(rel: string): void;
   find: { query: string; index: number } | null;
   initialScroll: number;
-  onScroll(top: number): void;
+  saveScroll(top: number): void;
 }) {
   if (content.kind === "image") return <ImageView machineId={machineId} root={root} rel={rel} />;
   if (content.kind === "binary" || content.text === null) {
@@ -50,7 +50,7 @@ export function FileView({
       {isMarkdown(rel) && mode === "render" ? (
         <MarkdownView text={content.text} rel={rel} onOpen={onOpen} />
       ) : (
-        <TextView text={content.text} path={rel} initialScroll={initialScroll} onScroll={onScroll} find={find} />
+        <TextView text={content.text} path={rel} initialScroll={initialScroll} saveScroll={saveScroll} find={find} />
       )}
     </>
   );

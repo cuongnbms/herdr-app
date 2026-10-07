@@ -136,9 +136,12 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
 function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { onMissing(): void; wsRef: WorkspaceRef; root: string; online: boolean; reloadKey: number; reload(): void }) {
   const machineId = wsRef.machine_id;
   const key = filesKey(wsRef, root);
-  const state = useFiles((s) => s.ws(key));
+  // One field each: a write to another field (folds, scroll) re-renders nothing here.
+  const tabs = useFiles((s) => s.ws(key).tabs);
+  const preview = useFiles((s) => s.ws(key).preview);
+  const active = useFiles((s) => s.ws(key).active);
+  const recent = useFiles((s) => s.ws(key).recent);
   const { open, pin, close, cycle, setScroll } = useFiles.getState();
-  const active = state.active;
 
   const [side, setSide] = useState(SIDE_DEFAULT);
   const [list, setList] = useState<FileList | null>(null);
@@ -277,7 +280,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   return (
     <div className="files-body" style={{ ["--files-side" as string]: `${side}px` }}>
       <aside className="files-side">
-        <GoToFile list={list} recent={state.recent} onOpen={onOpen} inputRef={goto} />
+        <GoToFile list={list} recent={recent} onOpen={onOpen} inputRef={goto} />
         <div className="files-side-scroll">
           <ChangedList changed={changed} onOpen={onOpen} />
           <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} />
@@ -286,8 +289,8 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       <div className="files-resize" role="separator" aria-orientation="vertical" onMouseDown={startDrag} />
       <div className="files-main">
         <FileTabs
-          tabs={state.tabs}
-          preview={state.preview}
+          tabs={tabs}
+          preview={preview}
           active={active}
           onSelect={(rel) => open(key, rel, { pin: false })}
           onPin={(rel) => pin(key, rel)}
@@ -337,8 +340,8 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   onMode={(m) => setMode(active, m)}
                   onOpen={onLink}
                   find={findOpen && searchable && query ? { query, index } : null}
-                  initialScroll={state.scroll[active] ?? 0}
-                  onScroll={(top) => setScroll(key, active, top)}
+                  initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
+                  saveScroll={(top) => setScroll(key, active, top)}
                 />
               ) : error && error.rel === active ? (
                 <div className="files-notice">{error.message}</div>
