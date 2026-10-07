@@ -173,19 +173,10 @@ export interface FileContent {
   size: number;
   mtime: number;
 }
-export interface FileStat {
-  size: number;
-  mtime: number;
-}
 export interface FileList {
   paths: string[];
   capped: boolean;
   refused: boolean;
-}
-export interface Changed {
-  repo: boolean;
-  total: number;
-  changes: GitChange[];
 }
 
 export interface FileChange {

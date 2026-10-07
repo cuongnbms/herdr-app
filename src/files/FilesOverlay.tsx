@@ -1,14 +1,13 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { filesChanged, filesListAll, filesRead } from "../lib/ipc";
-import type { Changed, FileContent, FileList } from "../lib/types";
+import { filesListAll, filesRead } from "../lib/ipc";
+import type { FileChange, FileContent, FileList } from "../lib/types";
 import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
 import { CloseIcon, CopyIcon, EyeIcon, EyeOffIcon, FileCopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
-import { ChangedList } from "./ChangedList";
 import type { FindStatus } from "./find";
 import { FindBar } from "./FindBar";
 import { FileTabs } from "./FileTabs";
@@ -21,7 +20,8 @@ import { lineOfHash } from "./links";
 import { useOutline } from "./outlineStore";
 import { absPath, resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
-import { usePolling } from "./usePolling";
+import { useWatch } from "./useWatch";
+import { parentDir } from "./watchDirs";
 
 const SIDE_MIN = 200;
 const SIDE_MAX = 600;
@@ -142,7 +142,9 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const [side, setSide] = useState(SIDE_DEFAULT);
   const [showHeavy, setShowHeavy] = useState(false);
   const [list, setList] = useState<FileList | null>(null);
-  const [changed, setChanged] = useState<Changed | null>(null);
+  /** Numbered so the tree handles each batch once; the counter only grows while this browser lives. */
+  const [batch, setBatch] = useState<{ seq: number; changes: FileChange[] } | null>(null);
+  const [watchError, setWatchError] = useState<string | null>(null);
   const [doc, setDoc] = useState<{ rel: string; content: FileContent } | null>(null);
   const [error, setError] = useState<{ rel: string; message: string } | null>(null);
   const [removed, setRemoved] = useState<string | null>(null);
@@ -170,7 +172,10 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
           setError(null);
           setRemoved(null);
         },
-        (e) => setError({ rel, message: errMessage(e) }),
+        (e) => {
+          if ((e as { code?: string } | null)?.code === "not_found") setRemoved(rel);
+          else setError({ rel, message: errMessage(e) });
+        },
       );
     },
     [read, machineId, root],
@@ -190,25 +195,36 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
         if ((e as { code?: string } | null)?.code === "not_found") onMissing();
       },
     );
-    filesChanged(machineId, root).then((c) => !gone && setChanged(c), () => {});
     return () => {
       gone = true;
     };
   }, [machineId, root, reloadKey]);
 
   const shown = doc && doc.rel === active ? doc.content : null;
-  usePolling({
+  useWatch({
     enabled: online,
     machineId,
     root,
-    rel: shown && active ? active : null,
-    mtime: shown?.mtime ?? null,
-    size: shown?.size ?? null,
-    onChanged: (reason) => {
-      if (reason === "removed") setRemoved(active);
-      else if (active) load(active);
+    onResync: () => {
+      setWatchError(null);
+      reload();
     },
-    onChanges: setChanged,
+    onChanges: (changes) => {
+      setWatchError(null);
+      if (changes.some((c) => c.path === "" && c.removed)) {
+        onMissing();
+        return;
+      }
+      if (active) {
+        const own = changes.find((c) => c.path === active);
+        if (own) {
+          if (own.removed) setRemoved(active);
+          else load(active);
+        } else if (changes.some((c) => c.isDir && c.path === parentDir(active))) load(active);
+      }
+      setBatch((prev) => ({ seq: (prev?.seq ?? 0) + 1, changes }));
+    },
+    onError: setWatchError,
   });
 
   // A different file starts with a fresh find, and a link's fragment applies to its own file only.
@@ -314,7 +330,6 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       <aside className="files-side">
         <GoToFile list={list} recent={recent} onOpen={onOpen} inputRef={goto} />
         <div className="files-side-scroll">
-          <ChangedList changed={changed} onOpen={onOpen} />
           <div className="files-tree-head">
             <span>FILES</span>
             <button
@@ -328,11 +343,16 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
               {showHeavy ? <EyeIcon /> : <EyeOffIcon />}
             </button>
           </div>
-          <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} showHeavy={showHeavy} />
+          <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} showHeavy={showHeavy} changes={batch} />
         </div>
       </aside>
       <div className="files-resize" role="separator" aria-orientation="vertical" onMouseDown={startDrag} />
       <div className="files-main">
+        {online && watchError && (
+          <div className="files-banner files-banner-error" role="status">
+            Auto-refresh stopped: {watchError}
+          </div>
+        )}
         <FileTabs
           tabs={tabs}
           preview={preview}

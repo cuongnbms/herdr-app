@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { showToast } from "../ui/Toast";
-import type { AttachEvent, Changed, ChatEvent, ChatItem, FileContent, FileEntry, FileList, FileStat, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
+import type { AttachEvent, ChatEvent, ChatItem, FileContent, FileEntry, FileList, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
@@ -124,8 +124,5 @@ export const filesRead = (machineId: string, root: string, rel: string) =>
   invoke<FileContent>("files_read", { machineId, root, rel });
 export const filesImage = (machineId: string, root: string, rel: string) =>
   invoke<ArrayBuffer>("files_image", { machineId, root, rel });
-export const filesStat = (machineId: string, root: string, rels: string[]) =>
-  invoke<(FileStat | null)[]>("files_stat", { machineId, root, rels });
-export const filesChanged = (machineId: string, root: string) => invoke<Changed>("files_changed", { machineId, root });
 export const filesWatch = (machineId: string, root: string, events: Channel<WatchEvent>) => invoke<number>("files_watch", { machineId, root, events });
 export const filesUnwatch = (id: number) => invoke<void>("files_unwatch", { id });

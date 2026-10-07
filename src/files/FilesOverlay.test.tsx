@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const channels = vi.hoisted(() => [] as { onmessage?: (e: unknown) => void }[]);
 /** File texts that files_read answers with, by rel ("x" otherwise). */
 const texts = vi.hoisted(() => ({}) as Record<string, string>);
 /** Rels that files_read reports as cut at the read limit. */
@@ -8,14 +9,19 @@ const truncated = vi.hoisted(() => new Set<string>());
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args?: { rel?: string }) => {
     if (cmd === "files_list_all") return { paths: [], capped: false, refused: false };
-    if (cmd === "files_changed") return { repo: false, total: 0, changes: [] };
+    if (cmd === "files_watch") return 1;
     if (cmd === "files_read") {
       const text = texts[args?.rel ?? ""] ?? "x";
       return { kind: "text", text, truncated: truncated.has(args?.rel ?? ""), size: text.length, mtime: 1 };
     }
     return [];
   }),
-  Channel: class {},
+  Channel: class {
+    onmessage?: (e: unknown) => void;
+    constructor() {
+      channels.push(this);
+    }
+  },
 }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
 vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
@@ -31,7 +37,7 @@ import { showToast } from "../ui/Toast";
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
-import { HIGHLIGHT_LIMIT, POLL_MS } from "./limits";
+import { HIGHLIGHT_LIMIT } from "./limits";
 import { filesKey, useFiles } from "./store";
 
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -39,6 +45,7 @@ const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
 describe("FilesOverlay", () => {
   beforeEach(() => {
     localStorage.clear();
+    channels.length = 0;
     useFiles.setState(useFiles.getInitialState(), true);
     useApp.setState({
       machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
@@ -306,7 +313,7 @@ describe("FilesOverlay", () => {
     });
   });
 
-  describe("read errors and polling", () => {
+  describe("read errors and the watch", () => {
     const key = filesKey(ref, "/r");
     let prev: ReturnType<ReturnType<typeof vi.mocked<typeof invoke>>["getMockImplementation"]>;
     beforeEach(() => {
@@ -342,18 +349,62 @@ describe("FilesOverlay", () => {
       expect(shown()).toBeTruthy();
     });
 
-    it("shows File removed when polling finds the open file gone", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
-        if (cmd === "files_stat") return [null];
-        return prev!(cmd, args as never);
-      }) as never);
+    const watch = () => channels[channels.length - 1];
+
+    it("reloads the open file when the watch reports it written", async () => {
       useFiles.getState().open(key, "a.ts", { pin: true });
       const { container } = render(<FilesOverlay />);
       await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
-      expect(screen.queryByText("File removed")).toBeNull();
-      await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
-      expect(screen.getByText("File removed")).toBeTruthy();
+      await waitFor(() => expect(watch()).toBeTruthy());
+      const reads = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length;
+      const before = reads();
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "a.ts", isDir: false, removed: false }] }));
+      // jsdom lays out no rows of the text view, so the re-read itself is what shows.
+      await waitFor(() => expect(reads()).toBe(before + 1));
+    });
+
+    it("shows File removed when the watch reports the open file removed", async () => {
+      useFiles.getState().open(key, "a.ts", { pin: true });
+      const { container } = render(<FilesOverlay />);
+      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "a.ts", isDir: false, removed: true }] }));
+      expect(await screen.findByText("File removed")).toBeTruthy();
+    });
+
+    it("shows File removed when a parent-folder change finds the open file gone", async () => {
+      useFiles.getState().open(key, "src/a.ts", { pin: true });
+      const { container } = render(<FilesOverlay />);
+      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
+      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
+        if (cmd === "files_read") throw { code: "not_found", message: "no such file" };
+        return prev!(cmd, args as never);
+      }) as never);
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "src", isDir: true, removed: false }] }));
+      expect(await screen.findByText("File removed")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("a resync reloads the lists and the open file", async () => {
+      useFiles.getState().open(key, "a.ts", { pin: true });
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      vi.mocked(invoke).mockClear();
+      act(() => watch().onmessage!({ type: "resync" }));
+      await waitFor(() => {
+        const cmds = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+        expect(cmds).toContain("files_list_all");
+        expect(cmds).toContain("files_read");
+        expect(cmds).toContain("files_list_dir");
+      });
+    });
+
+    it("shows and clears the auto-refresh error", async () => {
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      act(() => watch().onmessage!({ type: "error", message: "upper limit on inotify watches reached!" }));
+      expect(screen.getByRole("status").textContent).toBe("Auto-refresh stopped: upper limit on inotify watches reached!");
+      act(() => watch().onmessage!({ type: "resync" }));
+      expect(screen.queryByRole("status")).toBeNull();
     });
   });
 });
