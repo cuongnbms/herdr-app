@@ -66,22 +66,38 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
   }, [ref.machine_id, ref.session, ref.workspace_id, ws, selected, folder]);
 
   const close = () => setOverlay(null);
+  const [missing, setMissing] = useState<string | null>(null);
+  const rootMissing = root !== null && missing === root.path;
+  const section = useRef<HTMLElement>(null);
+  // Take focus from whatever pane had it, so Esc and typing reach this overlay.
+  useEffect(() => section.current?.focus(), []);
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const el = document.activeElement;
+      const typing = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.closest(".files-overlay") !== null;
+      if (typing || document.querySelector(".overlay")) return;
+      useApp.getState().setFilesOverlay(null);
+    };
+    window.addEventListener("keydown", onEsc, false);
+    return () => window.removeEventListener("keydown", onEsc, false);
+  }, []);
   const label = ws?.label ?? ref.workspace_id;
   const online = machine?.state === "connected";
 
   return (
-    <section className="files-overlay" role="dialog" aria-label="Files">
+    <section ref={section} tabIndex={-1} className="files-overlay" role="dialog" aria-label="Files">
       <header className="files-head" data-tauri-drag-region>
         <span className="files-title">Files · {label}</span>
-        {root && <span className="files-root" title={root.path}>{root.path}</span>}
+        {root && !rootMissing && <span className="files-root" title={root.path}>{root.path}</span>}
         {machine?.kind === "ssh" && <span className="files-machine">{machine.label}</span>}
-        {root?.source === "pane" && (
+        {root?.source === "pane" && !rootMissing && (
           <button type="button" className="btn btn-xs files-set-folder" onClick={() => setFolder(ref, root.path)}>
             Set as workspace folder
           </button>
         )}
         <span className="files-head-spacer" />
-        {root && (
+        {root && !rootMissing && (
           <button type="button" className="icon-btn" aria-label="Reload" title="Reload  ⌘R" onClick={reload}>
             <RefreshIcon />
           </button>
@@ -91,12 +107,12 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
         </button>
       </header>
       {!online && <div className="files-banner files-banner-offline">Machine offline</div>}
-      {root ? (
-        <FilesBrowser key={`${wsKey(ref)}|${root.path}`} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} />
+      {root && !rootMissing ? (
+        <FilesBrowser key={`${wsKey(ref)}|${root.path}`} wsRef={ref} root={root.path} online={online} reloadKey={reloadKey} reload={reload} onMissing={() => setMissing(root.path)} />
       ) : (
         <div className="files-empty">
-          <p>This workspace has no folder.</p>
-          <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, "")}>
+          <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
+          <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, root?.path ?? "")}>
             Change folder…
           </button>
         </div>
@@ -105,12 +121,11 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
   );
 }
 
-function FilesBrowser({ wsRef, root, online, reloadKey, reload }: { wsRef: WorkspaceRef; root: string; online: boolean; reloadKey: number; reload(): void }) {
+function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { onMissing(): void; wsRef: WorkspaceRef; root: string; online: boolean; reloadKey: number; reload(): void }) {
   const machineId = wsRef.machine_id;
   const key = wsKey(wsRef);
   const state = useFiles((s) => s.ws(key));
   const { open, pin, close, cycle, setScroll } = useFiles.getState();
-  const setOverlay = useApp((s) => s.setFilesOverlay);
   const active = state.active;
 
   const [side, setSide] = useState(SIDE_DEFAULT);
@@ -147,7 +162,14 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload }: { wsRef: Works
 
   useEffect(() => {
     let gone = false;
-    filesListAll(machineId, root).then((l) => !gone && setList(l), () => !gone && setList(null));
+    filesListAll(machineId, root).then(
+      (l) => !gone && setList(l),
+      (e) => {
+        if (gone) return;
+        setList(null);
+        if ((e as { code?: string } | null)?.code === "not_found") onMissing();
+      },
+    );
     filesChanged(machineId, root).then((c) => !gone && setChanged(c), () => {});
     return () => {
       gone = true;
@@ -189,13 +211,6 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload }: { wsRef: Works
   );
 
   const keys = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-      if (document.querySelector(".overlay")) return;
-      setOverlay(null);
-      return;
-    }
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
     if (!e.shiftKey && k === "p") {
