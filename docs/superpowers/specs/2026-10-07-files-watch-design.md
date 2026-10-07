@@ -57,9 +57,9 @@ Out:
 
 ### `src-tauri/src/files/watch_manager.rs`
 
-- `FilesWatch` (app state) holds one slot `(key, JoinHandle)`; key = machine id + root.
-  `start` with the same key keeps the running watch (the new Channel replaces the sink);
-  another key aborts the old one first. `stop` aborts.
+- `FilesWatch` (app state) holds one slot `(id, JoinHandle)`. `start` aborts whatever runs and
+  returns a new `u64` id; `stop(id)` aborts only when `id` is still the current one, so a late
+  `unwatch` from an overlay that already re-subscribed cannot end the new watch.
 - Aborting drops the ssh child (`kill_on_drop`), its stdin closes, the remote watchdog kills
   `inotifywait` / the poll loop.
 - The run loop, until aborted:
@@ -73,13 +73,15 @@ Out:
   5. When the stream ends: the reason from stderr (`exit_message`) goes out as `Error { message }`,
      sleep the backoff, retry. After 3 consecutive inotify failures with no event in between,
      switch to the poll loop for this watch.
-- Events (`#[serde(tag = "kind")]`): `Resync`, `Changes { changes }`, `Error { message }`.
+- Events (`#[serde(tag = "type", rename_all = "snake_case")]`, like `ChatEvent`): `Resync`,
+  `Changes { changes }`, `Error { message }`.
 
 ### Commands
 
-- `files_watch(machine_id, root, events: Channel<WatchEvent>)`: resolves the root with
-  `files_root` like the other `files_*` commands, then `FilesWatch::start`.
-- `files_unwatch()`: `FilesWatch::stop`.
+- `files_watch(machine_id, root, events: Channel<WatchEvent>) -> u64`: resolves the root with
+  `files_root` like the other `files_*` commands, refuses the home folder (`is_home`, as Go to
+  file does: a recursive watch there exhausts inotify), then `FilesWatch::start`.
+- `files_unwatch(id)`: `FilesWatch::stop(id)`.
 
 ### Removed
 
@@ -91,7 +93,7 @@ Out:
 
 `useWatch({ enabled, machineId, root, onChanges, onResync, onError })`: while enabled, makes a
 `Channel`, calls `filesWatch`, and on cleanup (offline, new root, overlay closed) calls
-`filesUnwatch`. Events from a Channel of an earlier subscription are ignored. Callbacks are
+`filesUnwatch(id)` with the id it got. A rejected `filesWatch` (e.g. the home folder) goes to `onError`. Events from a Channel of an earlier subscription are ignored. Callbacks are
 read through a ref so they are not dependencies.
 
 ### `FilesBrowser` (`FilesOverlay.tsx`)
