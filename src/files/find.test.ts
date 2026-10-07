@@ -10,4 +10,12 @@ describe("findMatches", () => {
     ]);
     expect(findMatches(["x"], "")).toEqual([]);
   });
+  it("keeps offsets of the line when lowercasing changes its length", () => {
+    // "İ".toLowerCase() is two units long.
+    expect(findMatches(["İx foo FOO"], "foo")).toEqual([
+      { line: 0, start: 3, end: 6 },
+      { line: 0, start: 7, end: 10 },
+    ]);
+    expect(findMatches(["aİb"], "İB")).toEqual([{ line: 0, start: 1, end: 3 }]);
+  });
 });
