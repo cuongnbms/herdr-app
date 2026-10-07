@@ -1,8 +1,8 @@
 use serde::Serialize;
 
-use super::paths::script_argv;
+use super::paths::{io_error, script_argv};
 use super::MAX_CHANGED;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::git::{parse_porcelain_v2, GitChange};
 use crate::transport::{exec, Transport};
 
@@ -27,7 +27,7 @@ exec git --no-optional-locks status --porcelain=v2 -z -uall -- ."#;
 pub async fn changed(t: &dyn Transport, root: &str) -> AppResult<Changed> {
     let o = exec(t, &script_argv(CHANGED_SCRIPT, &[root])).await?;
     if o.status != 0 {
-        return Err(AppError::new("io", o.stderr.trim().to_string()));
+        return Err(io_error(o.status, &o.stderr));
     }
     let Some((prefix, rest)) = o.stdout.split_once('\0') else {
         return Ok(Changed {
@@ -39,6 +39,8 @@ pub async fn changed(t: &dyn Transport, root: &str) -> AppResult<Changed> {
     let mut changes: Vec<GitChange> = parse_porcelain_v2(rest, usize::MAX)
         .changes
         .into_iter()
+        // The `-- .` pathspec already limits the status to the root; stripping the prefix
+        // (and dropping a path without it) is a defence should git report one outside.
         .filter_map(|c| {
             let path = c.path.strip_prefix(prefix)?.to_string();
             Some(GitChange { path, ..c })
@@ -157,5 +159,13 @@ mod tests {
             .iter()
             .any(|c| c.code == "R " && c.path == "new.txt"));
         assert!(!got.changes.iter().any(|c| c.path == "old.txt"));
+    }
+
+    #[tokio::test]
+    async fn a_failure_without_stderr_reports_the_exit_status() {
+        let e = changed(&crate::files::Canned("exit 2"), "/r")
+            .await
+            .unwrap_err();
+        assert_eq!((e.code.as_str(), e.message.as_str()), ("io", "exit 2"));
     }
 }

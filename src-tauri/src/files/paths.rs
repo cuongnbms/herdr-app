@@ -1,3 +1,4 @@
+use crate::complete::dirs::expand_home;
 use crate::error::{AppError, AppResult};
 
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp"];
@@ -13,13 +14,7 @@ pub fn check_rel(rel: &str) -> AppResult<()> {
 /// Expand a leading `~` against the Machine's home; the result is absolute, without a
 /// trailing `/` (except `/` itself).
 pub fn resolve_root(home: &str, root: &str) -> AppResult<String> {
-    let expanded = if root == "~" {
-        home.to_string()
-    } else if let Some(rest) = root.strip_prefix("~/") {
-        format!("{}/{rest}", home.trim_end_matches('/'))
-    } else {
-        root.to_string()
-    };
+    let expanded = expand_home(root, home);
     if !expanded.starts_with('/') || expanded.contains('\0') {
         return Err(AppError::new("invalid", format!("invalid root: {root:?}")));
     }
@@ -30,8 +25,21 @@ pub fn resolve_root(home: &str, root: &str) -> AppResult<String> {
 pub fn is_image(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel);
     match name.rsplit_once('.') {
-        Some((_, ext)) => IMAGE_EXTS.contains(&ext.to_ascii_lowercase().as_str()),
-        None => false,
+        // `.png` is a dotfile with no stem, not an image.
+        Some((stem, ext)) if !stem.is_empty() => {
+            IMAGE_EXTS.contains(&ext.to_ascii_lowercase().as_str())
+        }
+        _ => false,
+    }
+}
+
+/// An `io` error for a script that failed: its stderr, or `exit N` when it printed nothing.
+pub fn io_error(status: i32, stderr: &str) -> AppError {
+    let msg = stderr.trim();
+    if msg.is_empty() {
+        AppError::new("io", format!("exit {status}"))
+    } else {
+        AppError::new("io", msg.to_string())
     }
 }
 
@@ -91,5 +99,23 @@ mod tests {
         assert!(is_image("x.svg"));
         assert!(!is_image("x.svgz"));
         assert!(!is_image("png"));
+        assert!(!is_image(".png"));
+        assert!(!is_image("dir/.PNG"));
+    }
+
+    #[test]
+    fn io_error_falls_back_to_the_exit_status() {
+        let e = io_error(7, "  \n");
+        assert_eq!((e.code.as_str(), e.message.as_str()), ("io", "exit 7"));
+        assert_eq!(io_error(1, "boom\n").message, "boom");
+    }
+
+    #[test]
+    fn script_argv_passes_args_positionally() {
+        assert_eq!(
+            script_argv("echo \"$1\"", &["a b", "$(x)"]),
+            vec!["sh", "-c", "echo \"$1\"", "sh", "a b", "$(x)"]
+        );
+        assert_eq!(script_argv("true", &[]), vec!["sh", "-c", "true", "sh"]);
     }
 }

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::paths::{check_rel, script_argv};
+use super::paths::{check_rel, io_error, script_argv};
 use super::MAX_DIR_ENTRIES;
 use crate::complete::files::SKIP_DIRS;
 use crate::error::{AppError, AppResult};
@@ -22,9 +22,14 @@ pub struct Entry {
     pub kind: EntryKind,
 }
 
-/// `$1` is the root, `$2` the folder below it. Exit 3 when either cannot be entered.
+/// `$1` is the root, `$2` the folder below it. Exit 3 when the root is not a folder, 4 when
+/// `$2` does not exist, 5 when it is not a folder, 6 when a folder cannot be entered.
 /// An unmatched glob yields its own pattern, so entries that do not exist are skipped.
-const LIST_SCRIPT: &str = r#"cd "$1" && cd "./$2" || exit 3
+const LIST_SCRIPT: &str = r#"[ -d "$1" ] || exit 3
+cd "$1" || exit 6
+[ -e "./$2" ] || [ -L "./$2" ] || exit 4
+[ -d "./$2" ] || exit 5
+cd "./$2" || exit 6
 for e in * .*; do
   case "$e" in .|..) continue;; esac
   case "$e" in *"
@@ -44,16 +49,30 @@ pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec
     let out = exec_bytes(t, &script_argv(LIST_SCRIPT, &[root, rel])).await?;
     match out.status {
         0 => {}
-        3 => {
-            return Err(AppError::new(
-                "not_found",
-                format!("no such folder: {rel:?}"),
-            ))
+        3 => return Err(not_found(format!("no such folder: {root:?}"))),
+        4 => return Err(not_found(format!("no such folder: {rel:?}"))),
+        5 => return Err(not_found(format!("not a folder: {rel:?}"))),
+        6 => {
+            let msg = out.stderr.trim();
+            let msg = if msg.is_empty() {
+                format!("cannot open folder: {rel:?}")
+            } else {
+                msg.to_string()
+            };
+            return Err(AppError::new("io", msg));
         }
-        _ => return Err(AppError::new("io", out.stderr.trim().to_string())),
+        s => return Err(io_error(s, &out.stderr)),
     }
-    let mut entries: Vec<Entry> = out
-        .stdout
+    Ok(parse_entries(&out.stdout))
+}
+
+fn not_found(msg: String) -> AppError {
+    AppError::new("not_found", msg)
+}
+
+/// The script's `kind<TAB>name` lines, heavy folders dropped, sorted and capped.
+fn parse_entries(stdout: &[u8]) -> Vec<Entry> {
+    let mut entries: Vec<Entry> = stdout
         .split(|b| *b == b'\n')
         .filter_map(|line| {
             let line = String::from_utf8_lossy(line);
@@ -74,14 +93,16 @@ pub async fn list_dir(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec
             })
         })
         .collect();
-    entries.sort_by_key(|e| {
+    // The exact name breaks ties between names equal ignoring case, so the order is stable.
+    entries.sort_by_cached_key(|e| {
         (
             !matches!(e.kind, EntryKind::Dir | EntryKind::DirLink),
             e.name.to_lowercase(),
+            e.name.clone(),
         )
     });
     entries.truncate(MAX_DIR_ENTRIES);
-    Ok(entries)
+    entries
 }
 
 #[cfg(test)]
@@ -156,16 +177,59 @@ mod tests {
     async fn missing_folder_is_not_found_and_escape_is_invalid() {
         let tmp = tempfile::tempdir().unwrap();
         let r = tmp.path().to_string_lossy().into_owned();
+        std::fs::write(tmp.path().join("f"), "x").unwrap();
+        let e = list_dir(&LocalTransport, &r, "nope").await.unwrap_err();
         assert_eq!(
-            list_dir(&LocalTransport, &r, "nope")
-                .await
-                .unwrap_err()
-                .code,
-            "not_found"
+            (e.code.as_str(), e.message.as_str()),
+            ("not_found", "no such folder: \"nope\"")
         );
+        let e = list_dir(&LocalTransport, &r, "f").await.unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("not_found", "not a folder: \"f\"")
+        );
+        let gone = format!("{r}/gone");
+        let e = list_dir(&LocalTransport, &gone, "").await.unwrap_err();
+        assert_eq!(e.code, "not_found");
+        assert!(e.message.contains("gone"), "{}", e.message);
         assert_eq!(
             list_dir(&LocalTransport, &r, "../").await.unwrap_err().code,
             "invalid"
         );
+    }
+
+    #[tokio::test]
+    async fn hidden_names_are_listed_and_names_with_a_newline_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        mk(root, &[".env", "a\nb", "ok", ".config/x"]);
+        let got = list_dir(&LocalTransport, &root.to_string_lossy(), "")
+            .await
+            .unwrap();
+        let names: Vec<&str> = got.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec![".config", ".env", "ok"]);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_folder_is_an_io_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let locked = tmp.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let res = list_dir(&LocalTransport, &tmp.path().to_string_lossy(), "locked").await;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // root can enter any folder; there is nothing to check then.
+        if let Err(e) = res {
+            assert_eq!(e.code, "io");
+            assert!(!e.message.is_empty());
+        }
+    }
+
+    #[test]
+    fn names_equal_ignoring_case_sort_by_exact_name() {
+        let got = parse_entries(b"f\tb\nf\tB\nf\ta\nd\tZ\nd\tbuild\nf\tA\n");
+        let names: Vec<&str> = got.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["Z", "A", "a", "B", "b"]);
     }
 }

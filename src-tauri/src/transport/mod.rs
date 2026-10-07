@@ -94,7 +94,7 @@ async fn run(t: &dyn Transport, argv: &[String], input: Option<&[u8]>) -> AppRes
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
-    let run = async {
+    let fut = async {
         if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
             // A command that exits early closes the pipe; its exit status tells why.
             if let Err(e) = stdin.write_all(bytes).await {
@@ -103,7 +103,7 @@ async fn run(t: &dyn Transport, argv: &[String], input: Option<&[u8]>) -> AppRes
         }
         child.wait_with_output().await
     };
-    match tokio::time::timeout(EXEC_TIMEOUT, run).await {
+    match tokio::time::timeout(EXEC_TIMEOUT, fut).await {
         Ok(out) => {
             let out = out?;
             Ok(ExecBytes {

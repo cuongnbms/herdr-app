@@ -1,7 +1,7 @@
 use serde::Serialize;
 
-use super::paths::{check_rel, is_image, script_argv};
-use super::{MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
+use super::paths::{check_rel, io_error, is_image, script_argv};
+use super::{BINARY_SNIFF_BYTES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
 use crate::error::{AppError, AppResult};
 use crate::transport::{exec, exec_bytes, Transport};
 
@@ -28,26 +28,28 @@ pub struct FileStat {
     pub mtime: u64,
 }
 
-/// `$1` root, `$2` file below it, `$3` is `img` when the content is not wanted.
+/// `$1` root, `$2` file below it, `$3` is `img` when the content is not wanted, `$4` the bytes
+/// sniffed for a NUL, `$5` the most bytes of text read.
 /// Prints `size mtime` (GNU stat first, BSD/macOS stat as the fallback), a `1`/`0`
-/// binary flag, then up to 2 MB of text. `od -c` writes a NUL byte as the two
+/// binary flag, then up to `$5` bytes of text. `od -c` writes a NUL byte as the two
 /// characters backslash-zero, which `grep -F` matches portably.
 const READ_SCRIPT: &str = r#"cd "$1" || exit 3
 f="./$2"
 [ -f "$f" ] || exit 3
 stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f" || exit 3
 [ "$3" = img ] && exit 0
-if head -c 8192 -- "$f" | od -An -c | grep -qF '\0'; then echo 1; exit 0; fi
+if head -c "$4" -- "$f" | od -An -c | grep -qF '\0'; then echo 1; exit 0; fi
 echo 0
-head -c 2097152 -- "$f""#;
+head -c "$5" -- "$f""#;
 
 /// `$1` root, `$2` file, `$3` size limit. Prints the stat line, exit 4 when over the limit,
-/// else the raw bytes.
+/// exit 5 when the size is not a number, else the raw bytes.
 const IMAGE_SCRIPT: &str = r#"cd "$1" || exit 3
 f="./$2"
 [ -f "$f" ] || exit 3
 s=$(stat -L -c '%s %Y' -- "$f" 2>/dev/null || stat -L -f '%z %m' -- "$f") || exit 3
 echo "$s"
+case "${s%% *}" in ''|*[!0-9]*) exit 5;; esac
 [ "${s%% *}" -le "$3" ] || exit 4
 cat -- "$f""#;
 
@@ -79,8 +81,30 @@ fn split_line(bytes: &[u8]) -> (&[u8], &[u8]) {
 fn script_error(status: i32, stderr: &str, what: &str) -> AppError {
     match status {
         3 => AppError::new("not_found", format!("no such file: {what:?}")),
-        _ => AppError::new("io", stderr.trim().to_string()),
+        _ => io_error(status, stderr),
     }
+}
+
+/// `bytes` without a UTF-8 sequence cut off at its end, so a truncated read decodes
+/// without a trailing U+FFFD.
+fn drop_partial_utf8(bytes: &[u8]) -> &[u8] {
+    // The last lead byte is at most 3 bytes from the end of a sequence cut short.
+    for back in 1..=bytes.len().min(4) {
+        let i = bytes.len() - back;
+        let b = bytes[i];
+        if b & 0xC0 == 0x80 {
+            continue; // a continuation byte
+        }
+        let want = match b {
+            0x00..=0x7F => 1,
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => return bytes,
+        };
+        return if back < want { &bytes[..i] } else { bytes };
+    }
+    bytes
 }
 
 fn bad_output() -> AppError {
@@ -91,7 +115,12 @@ pub async fn read_file(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Fi
     check_rel(rel)?;
     let image = is_image(rel);
     let flag = if image { "img" } else { "txt" };
-    let out = exec_bytes(t, &script_argv(READ_SCRIPT, &[root, rel, flag])).await?;
+    let (sniff, max) = (BINARY_SNIFF_BYTES.to_string(), MAX_TEXT_BYTES.to_string());
+    let out = exec_bytes(
+        t,
+        &script_argv(READ_SCRIPT, &[root, rel, flag, &sniff, &max]),
+    )
+    .await?;
     if out.status != 0 {
         return Err(script_error(out.status, &out.stderr, rel));
     }
@@ -109,13 +138,21 @@ pub async fn read_file(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Fi
         return Ok(content(ContentKind::Image, None, false));
     }
     let (binary, body) = split_line(rest);
-    if binary == b"1" {
-        return Ok(content(ContentKind::Binary, None, false));
+    match binary {
+        b"1" => return Ok(content(ContentKind::Binary, None, false)),
+        b"0" => {}
+        _ => return Err(bad_output()),
     }
+    let truncated = size > MAX_TEXT_BYTES as u64;
+    let body = if truncated {
+        drop_partial_utf8(body)
+    } else {
+        body
+    };
     Ok(content(
         ContentKind::Text,
         Some(String::from_utf8_lossy(body).into_owned()),
-        size > MAX_TEXT_BYTES as u64,
+        truncated,
     ))
 }
 
@@ -126,6 +163,7 @@ pub async fn read_image(t: &dyn Transport, root: &str, rel: &str) -> AppResult<V
     match out.status {
         0 => {}
         4 => return Err(AppError::new("invalid", "image larger than 5 MB")),
+        5 => return Err(bad_output()),
         s => return Err(script_error(s, &out.stderr, rel)),
     }
     Ok(split_line(&out.stdout).1.to_vec())
@@ -265,5 +303,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s[0].unwrap().size, (MAX_TEXT_BYTES + 10) as u64);
+    }
+
+    #[test]
+    fn a_cut_utf8_sequence_is_dropped() {
+        let s = "aé€😀".as_bytes(); // 1 + 2 + 3 + 4 bytes
+        assert_eq!(drop_partial_utf8(s), s);
+        for cut in [2usize, 4, 5, 7, 8, 9] {
+            let got = drop_partial_utf8(&s[..cut]);
+            assert!(std::str::from_utf8(got).is_ok(), "{cut}");
+        }
+        assert_eq!(drop_partial_utf8(&s[..2]), b"a");
+        assert_eq!(drop_partial_utf8(&s[..9]), "aé€".as_bytes());
+        assert_eq!(drop_partial_utf8(b""), b"");
+        // A stray continuation byte is left for from_utf8_lossy.
+        assert_eq!(drop_partial_utf8(&[b'a', 0x80, 0x80, 0x80, 0x80]).len(), 5);
+    }
+
+    #[tokio::test]
+    async fn truncated_text_ends_on_a_whole_character() {
+        let (_t, r) = root();
+        let mut big = vec![b'x'; MAX_TEXT_BYTES - 1];
+        big.extend("é and more".as_bytes());
+        std::fs::write(format!("{r}/u.txt"), &big).unwrap();
+        let c = read_file(&LocalTransport, &r, "u.txt").await.unwrap();
+        assert!(c.truncated);
+        let text = c.text.unwrap();
+        assert!(!text.ends_with('\u{FFFD}'));
+        assert_eq!(text.len(), MAX_TEXT_BYTES - 1);
+    }
+
+    #[tokio::test]
+    async fn odd_script_output_is_an_io_error() {
+        use crate::files::Canned;
+        let e = read_file(&Canned("printf '3 4\\nx\\nhello'"), "/r", "a.txt")
+            .await
+            .unwrap_err();
+        assert_eq!(e.message, bad_output().message);
+        let e = read_image(&Canned("printf 'x 4\\n'; exit 5"), "/r", "a.png")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (e.code.as_str(), e.message.as_str()),
+            ("io", bad_output().message.as_str())
+        );
+        let e = read_file(&Canned("exit 9"), "/r", "a.txt")
+            .await
+            .unwrap_err();
+        assert_eq!((e.code.as_str(), e.message.as_str()), ("io", "exit 9"));
     }
 }
