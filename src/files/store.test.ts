@@ -72,4 +72,26 @@ describe("files tabs", () => {
     expect(useFiles.getState().ws(filesKey(ref, "/b")).tabs).toEqual([]);
     expect(useFiles.getState().ws(filesKey(ref, "/a")).tabs).toEqual(["x.ts"]);
   });
+
+  it("a pinned open of the current preview pins it in place", () => {
+    const { open } = useFiles.getState();
+    open(K, "a.ts", { pin: true });
+    open(K, "b.ts", { pin: false });
+    open(K, "b.ts", { pin: true });
+    expect(s().tabs).toEqual(["a.ts", "b.ts"]);
+    expect(s().preview).toBeNull();
+    expect(s().active).toBe("b.ts");
+    open(K, "c.ts", { pin: false });
+    expect(s().tabs).toEqual(["a.ts", "b.ts", "c.ts"]);
+  });
+
+  it("closing the preview tab leaves no preview", () => {
+    const { open, close } = useFiles.getState();
+    open(K, "a.ts", { pin: true });
+    open(K, "b.ts", { pin: false });
+    close(K, "b.ts");
+    expect(s()).toMatchObject({ tabs: ["a.ts"], preview: null, active: "a.ts" });
+    open(K, "c.ts", { pin: false });
+    expect(s().tabs).toEqual(["a.ts", "c.ts"]);
+  });
 });

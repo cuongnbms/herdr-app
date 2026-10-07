@@ -6,7 +6,7 @@ vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "../ui/Toast";
-import { filesRead, filesStat, herdrCall } from "./ipc";
+import { filesChanged, filesImage, filesListAll, filesListDir, filesRead, filesStat, herdrCall } from "./ipc";
 
 describe("herdrCall", () => {
   it("toasts on timeout and rethrows", async () => {
@@ -30,5 +30,16 @@ describe("files ipc", () => {
     (invoke as any).mockResolvedValueOnce([null]);
     await filesStat("local", "/x", ["a"]);
     expect(invoke).toHaveBeenLastCalledWith("files_stat", { machineId: "local", root: "/x", rels: ["a"] });
+  });
+  it("passes camelCase args to the other files commands", async () => {
+    (invoke as any).mockResolvedValue(null);
+    await filesListDir("devtuf", "~/app", "src");
+    expect(invoke).toHaveBeenLastCalledWith("files_list_dir", { machineId: "devtuf", root: "~/app", rel: "src" });
+    await filesListAll("devtuf", "~/app");
+    expect(invoke).toHaveBeenLastCalledWith("files_list_all", { machineId: "devtuf", root: "~/app" });
+    await filesImage("local", "/x", "a.png");
+    expect(invoke).toHaveBeenLastCalledWith("files_image", { machineId: "local", root: "/x", rel: "a.png" });
+    await filesChanged("local", "/x");
+    expect(invoke).toHaveBeenLastCalledWith("files_changed", { machineId: "local", root: "/x" });
   });
 });

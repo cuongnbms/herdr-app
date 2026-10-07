@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { resolveRoot } from "./root";
+import { resolveRoot, workspaceOfSelection } from "./root";
 import { setFolder } from "../workspaces/folder";
 
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -17,5 +17,21 @@ describe("resolveRoot", () => {
   });
   it("is null with nothing to go on", () => {
     expect(resolveRoot(ref, undefined, null)).toBeNull();
+  });
+});
+
+describe("workspaceOfSelection", () => {
+  const machines = {
+    local: {
+      id: "local",
+      sessions: [{ name: "default", workspaces: [{ workspace_id: "w1", tabs: [{ panes: [{ pane_id: "p1", cwd: "/a" }] }] }] }],
+    },
+  } as never;
+  it("is the workspace holding the selected pane", () => {
+    expect(workspaceOfSelection({ machines, selected: { machine_id: "local", session: "default", pane_id: "p1" } as never })).toEqual(ref);
+  });
+  it("is null without a selection or when the pane is gone", () => {
+    expect(workspaceOfSelection({ machines, selected: null })).toBeNull();
+    expect(workspaceOfSelection({ machines, selected: { machine_id: "local", session: "default", pane_id: "gone" } as never })).toBeNull();
   });
 });

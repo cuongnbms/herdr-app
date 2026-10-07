@@ -95,4 +95,45 @@ describe("FileTree", () => {
     fireEvent.doubleClick(src);
     expect(src.getAttribute("aria-expanded")).toBe("true");
   });
+
+  it("has one tab stop: the first item, then the last focused one", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => [{ name: "a.md", kind: "file" }, { name: "b.md", kind: "file" }]);
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w7" onOpen={() => {}} reloadKey={0} />);
+    const a = (await screen.findByText("a.md")).closest("[role=treeitem]") as HTMLElement;
+    const b = screen.getByText("b.md").closest("[role=treeitem]") as HTMLElement;
+    expect([a.tabIndex, b.tabIndex]).toEqual([0, -1]);
+    fireEvent.focus(b);
+    expect([a.tabIndex, b.tabIndex]).toEqual([-1, 0]);
+  });
+
+  it("drops a collapsed folder's children on reload and lists it again when expanded", async () => {
+    vi.mocked(invoke).mockReset();
+    let gen = 0;
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: `x${gen}.ts`, kind: "file" }],
+    );
+    const { rerender } = render(<FileTree machineId="local" root="/r" filesKey="local/default/w8" onOpen={() => {}} reloadKey={0} />);
+    const src = await screen.findByText("src");
+    fireEvent.click(src);
+    await screen.findByText("x0.ts");
+    fireEvent.click(src, { detail: 1 });
+    expect(screen.queryByText("x0.ts")).toBeNull();
+    gen = 1;
+    rerender(<FileTree machineId="local" root="/r" filesKey="local/default/w8" onOpen={() => {}} reloadKey={1} />);
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.length).toBe(3));
+    fireEvent.click(screen.getByText("src"), { detail: 1 });
+    expect(await screen.findByText("x1.ts")).toBeTruthy();
+  });
+
+  it("shows nothing of the old root while the new one loads", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.root === "/r" ? [{ name: "old.md", kind: "file" }] : new Promise(() => {}),
+    );
+    const { rerender } = render(<FileTree machineId="local" root="/r" filesKey="local/default/w9" onOpen={() => {}} reloadKey={0} />);
+    await screen.findByText("old.md");
+    rerender(<FileTree machineId="local" root="/s" filesKey="local/default/w9" onOpen={() => {}} reloadKey={0} />);
+    expect(screen.queryByText("old.md")).toBeNull();
+  });
 });

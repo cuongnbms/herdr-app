@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /** File texts that files_read answers with, by rel ("x" otherwise). */
 const texts = vi.hoisted(() => ({}) as Record<string, string>);
 vi.mock("@tauri-apps/api/core", () => ({
@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
-import { HIGHLIGHT_LIMIT } from "./limits";
+import { HIGHLIGHT_LIMIT, POLL_MS } from "./limits";
 import { filesKey, useFiles } from "./store";
 
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -155,5 +155,117 @@ describe("FilesOverlay", () => {
     // Render stays one click away.
     fireEvent.click(screen.getByRole("button", { name: "Render" }));
     expect(screen.getByRole("heading", { name: "Big" })).toBeTruthy();
+  });
+
+  describe("keys", () => {
+    const key = filesKey(ref, "/r");
+    const press = (k: string, extra: Partial<KeyboardEventInit> = {}) =>
+      act(() => {
+        fireEvent.keyDown(window, { key: k, metaKey: true, ...extra });
+      });
+    const openTabs = async (...rels: string[]) => {
+      for (const r of rels) useFiles.getState().open(key, r, { pin: true });
+      render(<FilesOverlay />);
+      await waitFor(() => expect(screen.getByRole("tab", { selected: true }).textContent).toContain(rels[rels.length - 1]));
+    };
+
+    it("⌘W closes the active tab", async () => {
+      await openTabs("a.ts", "b.ts");
+      press("w");
+      expect(useFiles.getState().ws(key).tabs).toEqual(["a.ts"]);
+      expect(useFiles.getState().ws(key).active).toBe("a.ts");
+    });
+
+    it("⌘⇧] and ⌘⇧[ cycle the tabs", async () => {
+      await openTabs("a.ts", "b.ts", "c.ts");
+      press("}", { shiftKey: true, code: "BracketRight" });
+      expect(useFiles.getState().ws(key).active).toBe("a.ts");
+      press("{", { shiftKey: true, code: "BracketLeft" });
+      expect(useFiles.getState().ws(key).active).toBe("c.ts");
+    });
+
+    it("⌘F switches rendered markdown to Source and opens find; again refocuses it", async () => {
+      texts["doc.md"] = "# Doc\n\nfoo";
+      await openTabs("doc.md");
+      await screen.findByRole("heading", { name: "Doc" });
+      press("f");
+      expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true");
+      const input = screen.getByPlaceholderText("Find in file");
+      expect(document.activeElement).toBe(input);
+      input.blur();
+      press("f");
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("⌘R reloads the lists and the open file", async () => {
+      await openTabs("a.ts");
+      await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([c]) => c === "files_list_all")).toBe(true));
+      const count = (cmd: string) => vi.mocked(invoke).mock.calls.filter(([c]) => c === cmd).length;
+      const [lists, reads] = [count("files_list_all"), count("files_read")];
+      press("r");
+      await waitFor(() => expect(count("files_list_all")).toBe(lists + 1));
+      await waitFor(() => expect(count("files_read")).toBe(reads + 1));
+    });
+
+    it("does nothing while a dialog is open over the overlay", async () => {
+      await openTabs("a.ts", "b.ts");
+      const dialog = document.createElement("div");
+      dialog.className = "overlay";
+      document.body.appendChild(dialog);
+      press("w");
+      expect(useFiles.getState().ws(key).tabs).toEqual(["a.ts", "b.ts"]);
+      dialog.remove();
+    });
+  });
+
+  describe("read errors and polling", () => {
+    const key = filesKey(ref, "/r");
+    let prev: ReturnType<ReturnType<typeof vi.mocked<typeof invoke>>["getMockImplementation"]>;
+    beforeEach(() => {
+      prev = vi.mocked(invoke).getMockImplementation();
+    });
+    afterEach(() => {
+      vi.mocked(invoke).mockImplementation(prev!);
+      vi.useRealTimers();
+    });
+
+    it("shows a read error in place of the file", async () => {
+      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
+        if (cmd === "files_read") throw { code: "io", message: "permission denied" };
+        return prev!(cmd, args as never);
+      }) as never);
+      useFiles.getState().open(key, "a.ts", { pin: true });
+      render(<FilesOverlay />);
+      expect((await screen.findByRole("alert")).textContent).toBe("permission denied");
+    });
+
+    it("keeps the file shown and adds a banner when a reload fails", async () => {
+      useFiles.getState().open(key, "a.ts", { pin: true });
+      const { container } = render(<FilesOverlay />);
+      // The text view (jsdom lays out no rows of it).
+      const shown = () => container.querySelector(".files-text");
+      await waitFor(() => expect(shown()).toBeTruthy());
+      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
+        if (cmd === "files_read") throw { code: "io", message: "timed out" };
+        return prev!(cmd, args as never);
+      }) as never);
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+      expect((await screen.findByRole("alert")).textContent).toBe("Could not reload: timed out");
+      expect(shown()).toBeTruthy();
+    });
+
+    it("shows File removed when polling finds the open file gone", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
+        if (cmd === "files_stat") return [null];
+        return prev!(cmd, args as never);
+      }) as never);
+      useFiles.getState().open(key, "a.ts", { pin: true });
+      const { container } = render(<FilesOverlay />);
+      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
+      expect(screen.queryByText("File removed")).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(POLL_MS));
+      expect(screen.getByText("File removed")).toBeTruthy();
+    });
   });
 });

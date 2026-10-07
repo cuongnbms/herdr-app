@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 import { FileView } from "./FileView";
@@ -10,6 +10,23 @@ describe("FileView", () => {
   it("shows the binary notice", () => {
     render(<FileView {...base} rel="a.bin" mode="render" content={{ kind: "binary", text: null, truncated: false, size: 2048, mtime: 1 }} />);
     expect(screen.getByText("Binary file, not shown")).toBeTruthy();
+  });
+  it("shows a notice, not the binary one, for text without content", () => {
+    render(<FileView {...base} rel="a.ts" mode="render" content={{ kind: "text", text: null, truncated: false, size: 2, mtime: 1 }} />);
+    expect(screen.queryByText("Binary file, not shown")).toBeNull();
+    expect(screen.getByText("No content was returned for this file")).toBeTruthy();
+  });
+  it("rendered markdown saves its scroll position for its file when left", () => {
+    const save = vi.fn();
+    const content = { kind: "text" as const, text: "# Title\n\nbody", truncated: false, size: 9, mtime: 1 };
+    const { container, unmount } = render(<FileView {...base} rel="a.md" mode="render" content={content} initialScroll={30} saveScroll={save} />);
+    const el = container.querySelector(".files-markdown") as HTMLElement;
+    expect(el.scrollTop).toBe(30);
+    el.scrollTop = 75;
+    fireEvent.scroll(el);
+    expect(save).not.toHaveBeenCalled();
+    unmount();
+    expect(save).toHaveBeenCalledWith("a.md", 75);
   });
   it("shows the truncated banner", () => {
     render(<FileView {...base} rel="a.log" mode="render" content={{ kind: "text", text: "x", truncated: true, size: 3e6, mtime: 1 }} />);
@@ -41,5 +58,14 @@ describe("FileView markdown anchors", () => {
     const { container } = render(<FileView {...base} rel="a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />);
     expect(container.querySelectorAll("a").length).toBe(1);
     expect(container.querySelector("a a")).toBeNull();
+  });
+  it("opens a linked file with its decoded fragment", () => {
+    const onOpen = vi.fn();
+    const text = "[x](../src/x.ts#L3) [y](b.md#caf%C3%A9)";
+    render(<FileView {...base} onOpen={onOpen} rel="docs/a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />);
+    fireEvent.click(screen.getByText("x"));
+    expect(onOpen).toHaveBeenLastCalledWith("src/x.ts", "L3");
+    fireEvent.click(screen.getByText("y"));
+    expect(onOpen).toHaveBeenLastCalledWith("docs/b.md", "café");
   });
 });
