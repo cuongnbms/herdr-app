@@ -3,6 +3,13 @@ use crate::{
     attach::{attach_argv, AttachEvent, AttachKey, AttachManager, Sink},
     complete::{self, SlashCommand},
     error::AppError,
+    files::{
+        all::{self, FileList},
+        changed::{self, Changed},
+        list::{self, Entry},
+        paths::resolve_root,
+        read::{self, FileContent, FileStat},
+    },
     git::{self, GitStatus},
     herdr::rpc,
     layout::LayoutStore,
@@ -690,4 +697,82 @@ pub async fn layout_save(
     tokio::task::spawn_blocking(move || store.save(&layout))
         .await
         .map_err(|e| AppError::new("io", e.to_string()))?
+}
+
+/// Resolves `root` on a Machine; every `files_*` command goes through it.
+fn files_root(mgr: &MachineManager, machine_id: &str, root: &str) -> Result<String, AppError> {
+    resolve_root(&mgr.info(machine_id)?.home, root)
+}
+
+#[tauri::command]
+pub async fn files_list_dir(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+) -> Result<Vec<Entry>, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    list::list_dir(&*t, &root, &rel).await
+}
+
+#[tauri::command]
+pub async fn files_list_all(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+) -> Result<FileList, AppError> {
+    let home = mgr.info(&machine_id)?.home;
+    let root = resolve_root(&home, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    all::list_all(&*t, &home, &root).await
+}
+
+#[tauri::command]
+pub async fn files_read(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+) -> Result<FileContent, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    read::read_file(&*t, &root, &rel).await
+}
+
+#[tauri::command]
+pub async fn files_image(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+) -> Result<tauri::ipc::Response, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    read::read_image(&*t, &root, &rel)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
+pub async fn files_stat(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rels: Vec<String>,
+) -> Result<Vec<Option<FileStat>>, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    read::stat_files(&*t, &root, &rels).await
+}
+
+#[tauri::command]
+pub async fn files_changed(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+) -> Result<Changed, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    changed::changed(&*t, &root).await
 }

@@ -120,7 +120,7 @@ export interface GitStatus {
   untracked: number;
   /** How many files have any change; `changes` lists the first few. */
   changed: number;
-  changes: { code: string; path: string }[];
+  changes: GitChange[];
 }
 
 export interface Located {
@@ -155,3 +155,34 @@ export type QuotaOutcome =
   | { kind: "noSubscription" }
   | { kind: "rateLimited"; until: number }
   | { kind: "failed"; reason: string };
+
+export interface GitChange {
+  code: string;
+  path: string;
+}
+
+export interface FileEntry {
+  name: string;
+  kind: "file" | "dir" | "symlink";
+}
+export interface FileContent {
+  kind: "text" | "binary" | "image";
+  text: string | null;
+  truncated: boolean;
+  size: number;
+  mtime: number;
+}
+export interface FileStat {
+  size: number;
+  mtime: number;
+}
+export interface FileList {
+  paths: string[];
+  capped: boolean;
+  refused: boolean;
+}
+export interface Changed {
+  repo: boolean;
+  total: number;
+  changes: GitChange[];
+}
