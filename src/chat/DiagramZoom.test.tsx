@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), parse: vi.fn(), render: vi.fn() }));
@@ -42,9 +42,11 @@ describe("mermaid diagram zoom", () => {
     expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
   });
 
-  it("chat diagrams do not zoom", async () => {
-    const { container } = render(<ChatItemView item={{ kind: "assistant_text", markdown: md }} />);
-    await waitFor(() => expect(container.querySelector(".chat-mermaid-svg svg")).not.toBeNull());
-    expect(screen.queryByRole("button", { name: "Zoom diagram" })).toBeNull();
+  it("chat diagrams zoom too", async () => {
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: md }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Zoom diagram" }));
+    expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Diagram" })).toBeNull();
   });
 });

@@ -1233,10 +1233,9 @@ button.composer-model:disabled { cursor: default; }
   color: var(--fg-3); font: inherit; text-transform: none;
 }
 .chat-mermaid-toggle:hover { color: var(--fg); }
-.chat-mermaid-svg { padding: 12px 14px; overflow-x: auto; text-align: center; }
+.chat-mermaid-svg { padding: 12px 14px; overflow-x: auto; text-align: center; cursor: zoom-in; }
 .chat-mermaid-svg svg { max-width: 100%; height: auto; }
-.chat-mermaid-svg.zoomable { cursor: zoom-in; }
-.chat-mermaid-svg.zoomable:focus-visible { outline: none; box-shadow: var(--ring); }
+.chat-mermaid-svg:focus-visible { outline: none; box-shadow: var(--ring); }
 
 /* Full-window mermaid diagram: wheel or pinch zooms at the cursor, drag pans. */
 .overlay.diagram-zoom { display: block; padding: 0; background: var(--surface-0); backdrop-filter: none; }
