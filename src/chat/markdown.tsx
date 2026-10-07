@@ -40,7 +40,7 @@ export function ExternalLink({ href, children, className, title }: { href?: stri
 }
 
 /** True inside a markdown link, where an image must not become a second (nested) link. */
-const InLinkContext = createContext(false);
+export const InLinkContext = createContext(false);
 
 export const mdComponents: Components = {
   pre({ node, children }) {

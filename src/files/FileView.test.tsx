@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
@@ -24,11 +25,21 @@ describe("FileView", () => {
 });
 
 describe("FileView markdown anchors", () => {
-  it("gives headings slug ids that #links target", () => {
+  it("gives headings slug ids that #links target, under StrictMode", () => {
     const text = "[x](#my-title)\n\n# My Title\n\n# My Title";
-    const { container } = render(<FileView {...base} rel="a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />);
+    const { container } = render(
+      <StrictMode>
+        <FileView {...base} rel="a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />
+      </StrictMode>,
+    );
     expect(container.querySelector("h1#my-title")).toBeTruthy();
     expect(container.querySelector("h1#my-title-1")).toBeTruthy();
     expect(container.querySelector('a[href="#my-title"]')).toBeTruthy();
+  });
+  it("does not nest links for a linked http image", () => {
+    const text = "[![ci](https://img.shields.io/x.svg)](https://github.com/o/r)";
+    const { container } = render(<FileView {...base} rel="a.md" mode="render" content={{ kind: "text", text, truncated: false, size: 9, mtime: 1 }} />);
+    expect(container.querySelectorAll("a").length).toBe(1);
+    expect(container.querySelector("a a")).toBeNull();
   });
 });

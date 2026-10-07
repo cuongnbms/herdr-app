@@ -1,33 +1,47 @@
 import { useMemo, useRef } from "react";
 import Markdown, { type Components } from "react-markdown";
-import { ExternalLink, mdComponents, rehypePlugins, remarkPlugins } from "../chat/markdown";
+import { ExternalLink, InLinkContext, mdComponents, rehypePlugins, remarkPlugins } from "../chat/markdown";
 import { resolveLink } from "./links";
 import { makeSlugger } from "./slug";
 
-function hastText(node: unknown): string {
-  const n = node as { value?: unknown; children?: unknown[] } | undefined;
-  if (typeof n?.value === "string") return n.value;
-  return (n?.children ?? []).map(hastText).join("");
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
 }
 
-const HEADINGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+function hastText(node: HastNode): string {
+  if (typeof node.value === "string") return node.value;
+  return (node.children ?? []).map(hastText).join("");
+}
+
+/** Sets a GitHub-style slug `id` on h1-h6; one fresh slugger per run, so re-renders cannot shift ids. */
+function rehypeHeadingIds() {
+  return (tree: HastNode) => {
+    const slug = makeSlugger();
+    const walk = (n: HastNode) => {
+      if (n.tagName && /^h[1-6]$/.test(n.tagName)) n.properties = { ...n.properties, id: slug(hastText(n)) };
+      n.children?.forEach(walk);
+    };
+    walk(tree);
+  };
+}
+
+const viewRehypePlugins = [...(rehypePlugins as unknown as unknown[]), rehypeHeadingIds] as never;
 
 export function MarkdownView({ text, rel, onOpen }: { text: string; rel: string; onOpen(rel: string): void }) {
   const root = useRef<HTMLDivElement>(null);
-  // Fresh per render pass so repeated headings get -1, -2 within this document only.
-  const slug = useRef(makeSlugger());
-  slug.current = makeSlugger();
   const components = useMemo<Components>(
     () => ({
       ...mdComponents,
-      ...Object.fromEntries(
-        HEADINGS.map((Tag) => [Tag, ({ node, children }: { node?: unknown; children?: React.ReactNode }) => <Tag id={slug.current(hastText(node))}>{children}</Tag>]),
-      ),
       a({ href, children }) {
         const link = href ? resolveLink(rel, href) : null;
-        if (link?.kind === "external") return <ExternalLink href={link.url}>{children}</ExternalLink>;
-        if (link?.kind === "file") {
-          return (
+        let inner;
+        if (link?.kind === "external") inner = <ExternalLink href={link.url}>{children}</ExternalLink>;
+        else if (link?.kind === "file") {
+          inner = (
             <a
               href={href}
               onClick={(e) => {
@@ -38,9 +52,8 @@ export function MarkdownView({ text, rel, onOpen }: { text: string; rel: string;
               {children}
             </a>
           );
-        }
-        if (link?.kind === "anchor") {
-          return (
+        } else if (link?.kind === "anchor") {
+          inner = (
             <a
               href={href}
               onClick={(e) => {
@@ -51,15 +64,15 @@ export function MarkdownView({ text, rel, onOpen }: { text: string; rel: string;
               {children}
             </a>
           );
-        }
-        return <span>{children}</span>;
+        } else inner = <span>{children}</span>;
+        return <InLinkContext.Provider value={true}>{inner}</InLinkContext.Provider>;
       },
     }),
     [rel, onOpen],
   );
   return (
     <div className="files-markdown chat-assistant" ref={root}>
-      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>{text}</Markdown>
+      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
     </div>
   );
 }
