@@ -448,6 +448,8 @@ mod tests {
         first_probe_fails: bool,
         /// Every n-th inotify session (1-based) delivers an event before ending.
         event_every: Option<usize>,
+        /// Inotify sessions stay up instead of failing, so the run never moves on.
+        hold_inotify: bool,
     }
 
     #[async_trait::async_trait]
@@ -462,7 +464,9 @@ mod tests {
                 }
             } else if argv[2].contains("inotifywait") {
                 let n = self.inotify.fetch_add(1, SeqCst) + 1;
-                if self.event_every.is_some_and(|k| n % k == 0) {
+                if self.hold_inotify {
+                    "sleep 30"
+                } else if self.event_every.is_some_and(|k| n % k == 0) {
                     "echo 'CLOSE_WRITE,CLOSE|/r/a.md'; echo 'no space' >&2; exit 1"
                 } else {
                     "echo 'no space' >&2; exit 1"
@@ -538,6 +542,7 @@ mod tests {
         use std::sync::atomic::Ordering::SeqCst;
         let fake = Arc::new(Fake {
             first_probe_fails: true,
+            hold_inotify: true,
             ..Default::default()
         });
         let seen = run_until(fake.clone(), |f| f.inotify.load(SeqCst) >= 1).await;
