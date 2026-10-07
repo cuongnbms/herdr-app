@@ -8,7 +8,7 @@ Status: draft
 Let the user browse and read the files of a Workspace without leaving the app: open the
 Workspace folder, see which files the Agents changed, jump to any file by name, and read it
 with highlighting, rendered markdown or as an image. Reading is the whole job; the overlay
-never writes.
+never writes. (Later amended: Upload and Download, see ADR-0005.)
 
 Reference: remora (`/Users/cuongnb/Workspace/utils/remora`), a read-only project viewer for
 local and ssh hosts. This design borrows its tree, Go to file, preview tabs, limits and
@@ -31,7 +31,8 @@ Out (phase 2 or later):
 
 - Git diff view, blame.
 - A file watcher (inotify/FSEvents).
-- Any write: edit, rename, delete, upload, download.
+- Any write: edit, rename, delete. Upload and Download came later, see
+  [Upload and Download](2026-10-07-files-upload-download-design.md) and ADR-0005.
 - Opening a file in an external editor.
 - Persisting overlay state across app restarts.
 
