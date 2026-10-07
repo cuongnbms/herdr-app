@@ -211,4 +211,46 @@ describe("FileTree", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1);
   });
+
+  it("lists a removed then re-created expanded folder afresh", async () => {
+    vi.mocked(invoke).mockReset();
+    let state: "up" | "down" = "up";
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) => {
+      if (args.rel === "") return state === "up" ? [{ name: "build", kind: "dir" }] : [];
+      if (state === "down") throw { code: "io", message: "gone" };
+      return [{ name: "out.js", kind: "file" }];
+    });
+    const props = { machineId: "local", root: "/r", filesKey: "local/default/w10", onOpen: () => {}, reloadKey: 0 };
+    const { rerender } = render(<FileTree {...props} changes={null} />);
+    fireEvent.click(await screen.findByText("build"));
+    await screen.findByText("out.js");
+    state = "down";
+    rerender(<FileTree {...props} changes={{ seq: 1, changes: [{ path: "build", isDir: true, removed: true }] }} />);
+    await waitFor(() => expect(screen.queryByText("build")).toBeNull());
+    expect(screen.queryByText("out.js")).toBeNull();
+    state = "up";
+    rerender(<FileTree {...props} changes={{ seq: 2, changes: [{ path: "build", isDir: true, removed: false }] }} />);
+    expect(await screen.findByText("out.js")).toBeTruthy();
+    expect(screen.queryByText(/Could not list/)).toBeNull();
+  });
+
+  it("drops a removed folder's subtree", async () => {
+    vi.mocked(invoke).mockReset();
+    let rootList = [{ name: "a", kind: "dir" }];
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) => {
+      if (args.rel === "") return rootList;
+      if (args.rel === "a") return [{ name: "b", kind: "dir" }];
+      return [{ name: "deep.ts", kind: "file" }];
+    });
+    const props = { machineId: "local", root: "/r", filesKey: "local/default/w11", onOpen: () => {}, reloadKey: 0 };
+    const { rerender } = render(<FileTree {...props} changes={null} />);
+    fireEvent.click(await screen.findByText("a"));
+    fireEvent.click(await screen.findByText("b"));
+    await screen.findByText("deep.ts");
+    rootList = [];
+    rerender(<FileTree {...props} changes={{ seq: 1, changes: [{ path: "a", isDir: true, removed: true }] }} />);
+    await waitFor(() => expect(screen.queryByText("a")).toBeNull());
+    expect(screen.queryByText("b")).toBeNull();
+    expect(screen.queryByText("deep.ts")).toBeNull();
+  });
 });

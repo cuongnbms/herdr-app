@@ -52,6 +52,9 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   }
   const gen = useRef(0);
   const inflight = useRef(new Set<string>());
+  /** The latest load started per folder; a load that is no longer it never writes back. */
+  const tokens = useRef(new Map<string, number>());
+  const lastToken = useRef(0);
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const treeRef = useRef<HTMLDivElement>(null);
@@ -62,16 +65,18 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   const load = useCallback(
     (rel: string) => {
       const g = gen.current;
+      const token = ++lastToken.current;
+      tokens.current.set(rel, token);
       inflight.current.add(rel);
       filesListDir(machineId, root, rel, showHeavy).then(
         (list) => {
-          if (g !== gen.current) return;
+          if (g !== gen.current || tokens.current.get(rel) !== token) return;
           inflight.current.delete(rel);
           setEntries((m) => ({ ...m, [rel]: list }));
           setErrors(({ [rel]: _drop, ...rest }) => rest);
         },
         (e) => {
-          if (g !== gen.current) return;
+          if (g !== gen.current || tokens.current.get(rel) !== token) return;
           inflight.current.delete(rel);
           setErrors((m) => ({ ...m, [rel]: errMessage(e) }));
         },
@@ -101,6 +106,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
 
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+  const errorsRef = useRef(errors);
+  errorsRef.current = errors;
   const handledSeq = useRef<number | null>(null);
   // A change batch relists the folders it touched that are loaded, and forgets removed folders.
   useEffect(() => {
@@ -109,13 +116,17 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
     const removed = changes.changes.filter((c) => c.isDir && c.removed).map((c) => c.path);
     const gone = (key: string) => removed.some((p) => key === p || key.startsWith(p + "/"));
     if (removed.length) {
-      for (const key of inflight.current) if (gone(key)) inflight.current.delete(key);
+      for (const key of [...inflight.current, ...tokens.current.keys()]) {
+        if (!gone(key)) continue;
+        inflight.current.delete(key);
+        tokens.current.delete(key);
+      }
       const keepLive = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([k]) => !gone(k)));
       setEntries(keepLive);
       setErrors(keepLive);
     }
     for (const dir of dirsToRelist(changes.changes)) {
-      if (dir in entriesRef.current && !gone(dir)) load(dir);
+      if ((dir in entriesRef.current || dir in errorsRef.current) && !gone(dir)) load(dir);
     }
   }, [changes, load]);
 
