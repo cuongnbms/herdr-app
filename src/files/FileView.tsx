@@ -35,7 +35,7 @@ export function FileView({
   initialScroll: number;
   saveScroll(top: number): void;
 }) {
-  if (content.kind === "image") return <ImageView machineId={machineId} root={root} rel={rel} />;
+  if (content.kind === "image") return <ImageView machineId={machineId} root={root} rel={rel} mtime={content.mtime} />;
   if (content.kind === "binary" || content.text === null) {
     return (
       <div className="files-notice">

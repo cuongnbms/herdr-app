@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { filesImage } from "../lib/ipc";
 import { latestOnly, STALE } from "./latest";
 
-export function ImageView({ machineId, root, rel }: { machineId: string; root: string; rel: string }) {
+/** `mtime` changing (a poll found the image changed) fetches it again. */
+export function ImageView({ machineId, root, rel, mtime }: { machineId: string; root: string; rel: string; mtime: number }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actual, setActual] = useState(false);
@@ -29,7 +30,7 @@ export function ImageView({ machineId, root, rel }: { machineId: string; root: s
       gone = true;
       if (made) URL.revokeObjectURL(made);
     };
-  }, [machineId, root, rel]);
+  }, [machineId, root, rel, mtime]);
 
   if (error) return <div className="files-notice">{error}</div>;
   if (!url) return null;
