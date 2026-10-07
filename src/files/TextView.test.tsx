@@ -15,8 +15,8 @@ describe("TextView", () => {
     const saveB = vi.fn();
     rerender(<TextView text={"x"} path="b.ts" initialScroll={0} saveScroll={saveB} find={null} />);
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith(120);
+    expect(save).toHaveBeenCalledWith("a.ts", 120);
     unmount();
-    expect(saveB).toHaveBeenCalledWith(0);
+    expect(saveB).toHaveBeenCalledWith("b.ts", 0);
   });
 });

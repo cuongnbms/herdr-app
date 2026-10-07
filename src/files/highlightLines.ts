@@ -14,10 +14,11 @@ type HNode = {
 };
 
 function plainLines(text: string): Seg[][] {
-  return splitPlain(text).map((l) => [{ text: l, cls: "" }]);
+  return splitLines(text).map((l) => [{ text: l, cls: "" }]);
 }
 
-function splitPlain(text: string): string[] {
+/** `text` cut into lines as the viewer shows them: a trailing newline ends the last line. */
+export function splitLines(text: string): string[] {
   const lines = text.split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;

@@ -16,7 +16,7 @@ function codeLanguage(node: unknown): string | null {
 }
 
 /** The raw text of a hast node: the fence's source, with rehype-highlight's spans flattened. */
-function nodeText(node: unknown): string {
+export function nodeText(node: unknown): string {
   const n = node as { value?: unknown; children?: unknown[] } | undefined;
   if (typeof n?.value === "string") return n.value;
   return (n?.children ?? []).map(nodeText).join("");

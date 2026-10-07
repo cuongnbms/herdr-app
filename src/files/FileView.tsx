@@ -1,5 +1,6 @@
 import type { FileContent } from "../lib/types";
 import { ImageView } from "./ImageView";
+import { lineOfHash } from "./links";
 import { MarkdownView } from "./MarkdownView";
 import { TextView } from "./TextView";
 
@@ -22,6 +23,7 @@ export function FileView({
   onOpen,
   find,
   initialScroll,
+  hash = null,
   saveScroll,
 }: {
   machineId: string;
@@ -30,12 +32,17 @@ export function FileView({
   content: FileContent;
   mode: FileMode;
   onMode(mode: FileMode): void;
-  onOpen(rel: string): void;
+  onOpen(rel: string, hash: string | null): void;
   find: { query: string; index: number } | null;
   initialScroll: number;
-  saveScroll(top: number): void;
+  /** The `#fragment` this file was opened with by a link: `L12` shows line 12, else a heading. */
+  hash?: string | null;
+  saveScroll(path: string, top: number): void;
 }) {
   if (content.kind === "image") return <ImageView machineId={machineId} root={root} rel={rel} mtime={content.mtime} />;
+  if (content.kind === "text" && content.text === null) {
+    return <div className="files-notice">No content was returned for this file</div>;
+  }
   if (content.kind === "binary" || content.text === null) {
     return (
       <div className="files-notice">
@@ -48,9 +55,16 @@ export function FileView({
     <>
       {content.truncated && <div className="files-banner">Showing the first 2 MB</div>}
       {isMarkdown(rel) && mode === "render" ? (
-        <MarkdownView text={content.text} rel={rel} onOpen={onOpen} />
+        <MarkdownView text={content.text} rel={rel} onOpen={onOpen} initialScroll={initialScroll} initialHash={hash} saveScroll={saveScroll} />
       ) : (
-        <TextView text={content.text} path={rel} initialScroll={initialScroll} saveScroll={saveScroll} find={find} />
+        <TextView
+          text={content.text}
+          path={rel}
+          initialScroll={initialScroll}
+          initialLine={lineOfHash(hash)}
+          saveScroll={saveScroll}
+          find={find}
+        />
       )}
     </>
   );

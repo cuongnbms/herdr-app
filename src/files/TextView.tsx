@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { findMatches, type Match } from "./find";
-import { highlightLines, type Seg } from "./highlightLines";
+import { highlightLines, splitLines, type Seg } from "./highlightLines";
 
 const DEFAULT_LINE_H = 20;
 
@@ -45,23 +45,48 @@ function renderLine(segs: Seg[], matches: Match[], currentStart: number | null):
   return out;
 }
 
-export function TextView({
-  text,
-  path,
-  initialScroll,
-  saveScroll,
-  find,
-}: {
+/**
+ * Remembers where a scrolled view of `path` was: `onScroll` only writes a ref (scrolling
+ * re-renders nothing), and the position is saved once, for the path it belongs to, when the
+ * view unmounts. Mount one view per path (a `key`).
+ */
+export function useScrollMemory(path: string, initialScroll: number, saveScroll: (path: string, top: number) => void) {
+  const last = useRef({ path, top: initialScroll });
+  const save = useRef(saveScroll);
+  save.current = saveScroll;
+  useLayoutEffect(
+    () => () => {
+      const { path, top } = last.current;
+      save.current(path, top);
+    },
+    [],
+  );
+  return (e: { currentTarget: HTMLElement }) => {
+    last.current = { path, top: e.currentTarget.scrollTop };
+  };
+}
+
+interface Props {
   text: string;
   path: string;
   initialScroll: number;
-  /** Called with the last scroll position when this file is left (another path, or unmount). */
-  saveScroll(top: number): void;
+  /** A 1-based line to show instead of the remembered position (a `#L12` link). */
+  initialLine?: number | null;
+  /** Called once with the path and its last scroll position when the file is left. */
+  saveScroll(path: string, top: number): void;
+  /** `index` is the number of steps taken; it wraps around the matches here. */
   find: { query: string; index: number } | null;
-}) {
+}
+
+/** One mount per file, so the virtualizer starts at the file's own offset. */
+export function TextView(props: Props) {
+  return <FileText key={props.path} {...props} />;
+}
+
+function FileText({ text, path, initialScroll, initialLine, saveScroll, find }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lines = useMemo(() => highlightLines(text, path), [text, path]);
-  const plain = useMemo(() => lines.map((l) => l.map((s) => s.text).join("")), [lines]);
+  const plain = useMemo(() => splitLines(text), [text]);
   const query = find?.query ?? null;
   const matches = useMemo(() => (query ? findMatches(plain, query) : []), [plain, query]);
   const byLine = useMemo(() => {
@@ -83,28 +108,32 @@ export function TextView({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowH,
     overscan: 20,
+    // The first render already lays out the rows at the remembered position.
+    initialOffset: initialScroll,
   });
 
   // estimateSize is not part of the virtualizer's measurement cache key, so re-measure on change.
   useLayoutEffect(() => virt.measure(), [rowH]);
 
-  // Restore the remembered scroll position when this file is shown; save it when it is left.
-  // Scrolling itself only updates a ref, so it re-renders nothing.
-  const lastTop = useRef(initialScroll);
+  const onScroll = useScrollMemory(path, initialScroll, saveScroll);
+  // The element itself starts at the top; move it to where the virtualizer already is.
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = initialScroll;
-    lastTop.current = initialScroll;
-    return () => saveScroll(lastTop.current);
-  }, [path]);
+  }, []);
+  useEffect(() => {
+    if (initialLine && initialLine > 0) virt.scrollToIndex(Math.min(initialLine, lines.length) - 1, { align: "start" });
+  }, [rowH]);
 
+  // `find.index` counts steps (it is not wrapped), so stepping onto the same match, as with
+  // a single match, scrolls back to it.
   useEffect(() => {
     if (current) virt.scrollToIndex(current.line, { align: "center" });
-  }, [current?.line, current?.start]);
+  }, [current?.line, current?.start, find?.index]);
 
   const gutter = `${String(lines.length).length + 1}ch`;
 
   return (
-    <div ref={scrollRef} className="files-text" onScroll={(e) => (lastTop.current = e.currentTarget.scrollTop)}>
+    <div ref={scrollRef} className="files-text" onScroll={onScroll}>
       <div className="files-text-body" style={{ height: virt.getTotalSize(), position: "relative" }}>
         {virt.getVirtualItems().map((row) => (
           <div

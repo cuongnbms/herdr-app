@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveLink } from "./links";
+import { lineOfHash, resolveLink } from "./links";
 
 describe("resolveLink", () => {
   it("resolves relative and root-relative files", () => {
@@ -12,5 +12,16 @@ describe("resolveLink", () => {
     expect(resolveLink("a.md", "https://x.y")).toEqual({ kind: "external", url: "https://x.y" });
     expect(resolveLink("a.md", "#intro")).toEqual({ kind: "anchor", hash: "intro" });
     expect(resolveLink("a.md", "../../etc/passwd")).toBeNull();
+  });
+  it("percent-decodes fragments, keeping a malformed one as written", () => {
+    expect(resolveLink("a.md", "#vi%E1%BB%87t")).toEqual({ kind: "anchor", hash: "việt" });
+    expect(resolveLink("a.md", "#100%")).toEqual({ kind: "anchor", hash: "100%" });
+    expect(resolveLink("a.md", "b.md#a%20b")).toEqual({ kind: "file", rel: "b.md", hash: "a b" });
+  });
+  it("reads the line of an L fragment", () => {
+    expect(lineOfHash("L3")).toBe(3);
+    expect(lineOfHash("L3-L9")).toBe(3);
+    expect(lineOfHash("intro")).toBeNull();
+    expect(lineOfHash(null)).toBeNull();
   });
 });
