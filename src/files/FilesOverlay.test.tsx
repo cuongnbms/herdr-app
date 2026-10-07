@@ -3,18 +3,31 @@ import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /** File texts that files_read answers with, by rel ("x" otherwise). */
 const texts = vi.hoisted(() => ({}) as Record<string, string>);
+/** Rels that files_read reports as cut at the read limit. */
+const truncated = vi.hoisted(() => new Set<string>());
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args?: { rel?: string }) => {
     if (cmd === "files_list_all") return { paths: [], capped: false, refused: false };
     if (cmd === "files_changed") return { repo: false, total: 0, changes: [] };
     if (cmd === "files_read") {
       const text = texts[args?.rel ?? ""] ?? "x";
-      return { kind: "text", text, truncated: false, size: text.length, mtime: 1 };
+      return { kind: "text", text, truncated: truncated.has(args?.rel ?? ""), size: text.length, mtime: 1 };
     }
     return [];
   }),
   Channel: class {},
 }));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: vi.fn(async () => ({ diagramType: "flowchart" })),
+    render: vi.fn(async () => ({ svg: '<svg viewBox="0 0 10 10"></svg>' })),
+  },
+}));
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { showToast } from "../ui/Toast";
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
@@ -206,6 +219,55 @@ describe("FilesOverlay", () => {
       input.blur();
       press("f");
       expect(document.activeElement).toBe(input);
+    });
+
+    it("Match case narrows the matches; ⌘G and ⇧⌘G step through them", async () => {
+      texts["a.ts"] = "Foo foo\nfoo";
+      await openTabs("a.ts");
+      await waitFor(() => expect(document.querySelector(".files-text")).not.toBeNull());
+      press("f");
+      fireEvent.change(screen.getByPlaceholderText("Find in file"), { target: { value: "foo" } });
+      const count = () => document.querySelector(".files-find-count")!.textContent;
+      expect(count()).toBe("1 / 3");
+      press("g");
+      expect(count()).toBe("2 / 3");
+      press("g");
+      expect(count()).toBe("3 / 3");
+      press("g", { shiftKey: true });
+      expect(count()).toBe("2 / 3");
+      fireEvent.click(screen.getByRole("button", { name: "Match case" }));
+      expect(count()).toBe("1 / 2");
+    });
+
+    it("Copy contents copies the file's text", async () => {
+      texts["a.ts"] = "one\ntwo";
+      await openTabs("a.ts");
+      fireEvent.click(await screen.findByRole("button", { name: "Copy contents" }));
+      expect(writeText).toHaveBeenCalledWith("one\ntwo");
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied"));
+    });
+
+    it("Copy contents of a cut file says only the first 2 MB was copied", async () => {
+      texts["big.ts"] = "head";
+      truncated.add("big.ts");
+      await openTabs("big.ts");
+      const btn = await screen.findByRole("button", { name: "Copy contents" });
+      expect(btn.getAttribute("title")).toBe("Copy contents (first 2 MB only)");
+      fireEvent.click(btn);
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied (first 2 MB only)"));
+      truncated.delete("big.ts");
+    });
+
+    it("Esc closes a zoomed diagram, not the overlay", async () => {
+      texts["d.md"] = "```mermaid\ngraph TD; A-->B\n```\n";
+      await openTabs("d.md");
+      fireEvent.click(await screen.findByRole("button", { name: "Zoom diagram" }));
+      expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
+      act(() => {
+        fireEvent.keyDown(window, { key: "Escape" });
+      });
+      expect(screen.queryByRole("dialog", { name: "Diagram" })).toBeNull();
+      expect(useApp.getState().filesOverlay).not.toBeNull();
     });
 
     it("⌘R reloads the lists and the open file", async () => {

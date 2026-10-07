@@ -4,7 +4,7 @@ import { filesChanged, filesListAll, filesRead } from "../lib/ipc";
 import type { Changed, FileContent, FileList } from "../lib/types";
 import { useApp } from "../store/app";
 import { ActionsProvider, useActions } from "../sidebar/actions";
-import { CloseIcon, CopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
+import { CloseIcon, CopyIcon, FileCopyIcon, OutlineIcon, RefreshIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -138,7 +138,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const preview = useFiles((s) => s.ws(key).preview);
   const active = useFiles((s) => s.ws(key).active);
   const recent = useFiles((s) => s.ws(key).recent);
-  const { open, pin, close, cycle, setScroll } = useFiles.getState();
+  const { open, pin, close, closeTabs, cycle, setScroll } = useFiles.getState();
 
   const [side, setSide] = useState(SIDE_DEFAULT);
   const [list, setList] = useState<FileList | null>(null);
@@ -153,6 +153,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   /** The `#fragment` of the link that opened `rel`, used once when it is shown. */
   const [jump, setJump] = useState<{ rel: string; hash: string } | null>(null);
   const [query, setQuery] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
   const outline = useOutline((s) => s.shown);
   const toggleOutline = useOutline((s) => s.toggle);
   const [hasOutline, setHasOutline] = useState(false);
@@ -236,8 +237,8 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   const searchable =
     shown !== null && shown.kind === "text" && shown.text !== null && !(md && mode === "render");
   const count = useMemo(
-    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query).length : 0),
-    [searchable, shown, query],
+    () => (searchable && shown?.text != null && query ? findMatches(splitLines(shown.text), query, matchCase).length : 0),
+    [searchable, shown, query, matchCase],
   );
 
   const keys = (e: KeyboardEvent) => {
@@ -261,6 +262,10 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       if (md && mode === "render") setMode(active, "source");
       setFindOpen(true);
       setFindFocus((n) => n + 1);
+    } else if (k === "g") {
+      e.preventDefault();
+      // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
+      if (findOpen && searchable && count > 0) setIndex((i) => i + (e.shiftKey ? -1 : 1));
     } else if (!e.shiftKey && k === "r") {
       e.preventDefault();
       reload();
@@ -295,6 +300,14 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       (e) => console.error("copy failed", e),
     );
   };
+  const cut = shown?.truncated ? " (first 2 MB only)" : "";
+  const copyContents = () => {
+    if (shown?.text == null) return;
+    writeText(shown.text).then(
+      () => showToast(`Contents copied${cut}`),
+      (e) => console.error("copy failed", e),
+    );
+  };
 
   return (
     <div className="files-body" style={{ ["--files-side" as string]: `${side}px` }}>
@@ -314,6 +327,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
           onSelect={(rel) => open(key, rel, { pin: false })}
           onPin={(rel) => pin(key, rel)}
           onClose={(rel) => close(key, rel)}
+          onCloseTabs={(scope, rel) => closeTabs(key, scope, rel)}
         />
         {active ? (
           <>
@@ -324,6 +338,11 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
               <button type="button" className="icon-btn" aria-label="Copy path" title="Copy path" onClick={copyPath}>
                 <CopyIcon />
               </button>
+              {shown?.kind === "text" && shown.text !== null && (
+                <button type="button" className="icon-btn" aria-label="Copy contents" title={`Copy contents${cut}`} onClick={copyContents}>
+                  <FileCopyIcon />
+                </button>
+              )}
               {md && mode === "render" && hasOutline && (
                 <button
                   type="button"
@@ -358,8 +377,13 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                 index={count > 0 ? ((index % count) + count) % count : 0}
                 focusKey={findFocus}
                 query={query}
+                matchCase={matchCase}
                 onQuery={(q) => {
                   setQuery(q);
+                  setIndex(0);
+                }}
+                onMatchCase={(on) => {
+                  setMatchCase(on);
                   setIndex(0);
                 }}
                 // Not wrapped here: TextView wraps it, and each step re-scrolls even onto the same match.
@@ -377,7 +401,7 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
                   mode={mode}
                   onMode={(m) => setMode(active, m)}
                   onOpen={onLink}
-                  find={findOpen && searchable && query ? { query, index } : null}
+                  find={findOpen && searchable && query ? { query, index, matchCase } : null}
                   initialScroll={useFiles.getState().ws(key).scroll[active] ?? 0}
                   hash={jump && jump.rel === active ? jump.hash : null}
                   saveScroll={(rel, top) => setScroll(key, rel, top)}

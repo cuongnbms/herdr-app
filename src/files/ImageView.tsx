@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { filesImage } from "../lib/ipc";
 
+/** An object URL for image bytes read from `rel`; SVG needs its type to render. */
+export function imageUrl(buf: ArrayBuffer, rel: string): string {
+  const type = rel.toLowerCase().endsWith(".svg") ? "image/svg+xml" : undefined;
+  return URL.createObjectURL(new Blob([buf], type ? { type } : undefined));
+}
+
 /** `mtime` changing (a poll found the image changed) fetches it again. */
 export function ImageView({ machineId, root, rel, mtime }: { machineId: string; root: string; rel: string; mtime: number }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -17,8 +23,7 @@ export function ImageView({ machineId, root, rel, mtime }: { machineId: string; 
     filesImage(machineId, root, rel).then(
       (buf) => {
         if (gone) return;
-        const type = rel.toLowerCase().endsWith(".svg") ? "image/svg+xml" : undefined;
-        made = URL.createObjectURL(new Blob([buf], type ? { type } : undefined));
+        made = imageUrl(buf, rel);
         setUrl(made);
       },
       (e) => {

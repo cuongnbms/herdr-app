@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
+import { MermaidZoomContext } from "../chat/MermaidBlock";
 import { resolveLink } from "./links";
+import { MarkdownImage } from "./MarkdownImage";
 import { Outline, type Heading } from "./Outline";
 import { makeSlugger } from "./slug";
 import { useScrollMemory } from "./TextView";
@@ -31,6 +33,9 @@ const viewRehypePlugins = [...(rehypePlugins as unknown as unknown[]), rehypeHea
 const byId = (root: HTMLElement | null, id: string) => root?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
 
 interface Props {
+  /** Machine and root that relative images are read from. */
+  machineId: string;
+  root: string;
   text: string;
   rel: string;
   /** Opens a linked file; `hash` is its decoded `#fragment`, if any. */
@@ -69,7 +74,7 @@ export function MarkdownView(props: Props) {
   return <RenderedMarkdown key={props.rel} {...props} />;
 }
 
-function RenderedMarkdown({ text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline }: Props) {
+function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initialScroll, initialHash, saveScroll, outline = false, onOutline }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const saveOnScroll = useScrollMemory(rel, initialScroll, saveScroll);
   const [headings, setHeadings] = useState<Heading[]>([]);
@@ -133,13 +138,22 @@ function RenderedMarkdown({ text, rel, onOpen, initialScroll, initialHash, saveS
         } else inner = <span>{children}</span>;
         return <InLinkContext.Provider value={true}>{inner}</InLinkContext.Provider>;
       },
+      // An image inside the root loads from the Machine; any other keeps the chat's rule (never loaded).
+      img(props) {
+        const link = typeof props.src === "string" ? resolveLink(rel, props.src) : null;
+        if (link?.kind === "file") return <MarkdownImage machineId={machineId} root={fileRoot} rel={link.rel} alt={props.alt ?? ""} title={props.title} />;
+        const Img = mdComponents.img as (p: typeof props) => React.ReactNode;
+        return <Img {...props} />;
+      },
     }),
-    [rel, onOpen],
+    [rel, onOpen, machineId, fileRoot],
   );
   return (
     <div className="files-markdown-wrap">
       <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
-        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        <MermaidZoomContext.Provider value={true}>
+          <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        </MermaidZoomContext.Provider>
       </div>
       {outline && has && (
         <Outline

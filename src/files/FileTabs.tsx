@@ -1,4 +1,8 @@
+import { useState } from "react";
+import { createPortal } from "react-dom";
+import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { CloseIcon } from "../ui/icons";
+import type { CloseScope } from "./store";
 
 interface Props {
   tabs: string[];
@@ -7,12 +11,25 @@ interface Props {
   onSelect(rel: string): void;
   onPin(rel: string): void;
   onClose(rel: string): void;
+  onCloseTabs(scope: CloseScope, rel: string): void;
 }
 
 const basename = (rel: string) => rel.slice(rel.lastIndexOf("/") + 1);
 
-export function FileTabs({ tabs, preview, active, onSelect, onPin, onClose }: Props) {
+export function FileTabs({ tabs, preview, active, onSelect, onPin, onClose, onCloseTabs }: Props) {
+  const [menu, setMenu] = useState<{ x: number; y: number; rel: string } | null>(null);
   if (tabs.length === 0) return null;
+
+  // Commands that would close nothing are left out.
+  const menuItems = (rel: string): MenuItem[] => {
+    const at = tabs.indexOf(rel);
+    const items: MenuItem[] = [{ label: "Close", icon: CloseIcon, onSelect: () => onClose(rel) }];
+    if (tabs.length > 1) items.push({ label: "Close Others", icon: CloseIcon, onSelect: () => onCloseTabs("others", rel) });
+    if (at < tabs.length - 1) items.push({ label: "Close to the Right", icon: CloseIcon, onSelect: () => onCloseTabs("right", rel) });
+    items.push({ label: "Close All", icon: CloseIcon, onSelect: () => onCloseTabs("all", rel) });
+    return items;
+  };
+
   return (
     <div className="files-tabs" role="tablist" aria-label="Open files">
       {tabs.map((rel) => {
@@ -27,6 +44,10 @@ export function FileTabs({ tabs, preview, active, onSelect, onPin, onClose }: Pr
             className={`files-tab-item${state}`}
             onClick={() => onSelect(rel)}
             onDoubleClick={() => onPin(rel)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, rel });
+            }}
             onAuxClick={(e) => {
               if (e.button === 1) {
                 e.preventDefault();
@@ -62,6 +83,8 @@ export function FileTabs({ tabs, preview, active, onSelect, onPin, onClose }: Pr
           </div>
         );
       })}
+      {/* Out of the tablist, and fixed to the window rather than to an animating ancestor. */}
+      {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.rel)} onClose={() => setMenu(null)} />, document.body)}
     </div>
   );
 }

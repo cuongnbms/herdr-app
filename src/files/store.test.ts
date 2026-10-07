@@ -7,6 +7,45 @@ const s = () => useFiles.getState().ws(K);
 describe("files tabs", () => {
   beforeEach(() => useFiles.setState(useFiles.getInitialState(), true));
 
+  describe("closeTabs", () => {
+    const four = (active: string) => {
+      const { open } = useFiles.getState();
+      for (const r of ["a", "b", "c", "d"]) open(K, r, { pin: true });
+      open(K, "e", { pin: false });
+      open(K, active, { pin: false });
+    };
+
+    it("others keeps only the tab it was invoked on, which becomes active", () => {
+      four("d");
+      useFiles.getState().closeTabs(K, "others", "b");
+      expect(s().tabs).toEqual(["b"]);
+      expect(s().active).toBe("b");
+      expect(s().preview).toBeNull();
+    });
+
+    it("right closes the tabs after it and keeps an active tab that stays", () => {
+      four("a");
+      useFiles.getState().closeTabs(K, "right", "b");
+      expect(s().tabs).toEqual(["a", "b"]);
+      expect(s().active).toBe("a");
+      four("e");
+      useFiles.getState().closeTabs(K, "right", "c");
+      expect(s().tabs).toEqual(["a", "b", "c"]);
+      expect(s().active).toBe("c");
+      expect(s().preview).toBeNull();
+    });
+
+    it("all closes every tab; an unknown tab does nothing", () => {
+      four("e");
+      useFiles.getState().closeTabs(K, "right", "zz");
+      expect(s().tabs).toEqual(["a", "b", "c", "d", "e"]);
+      useFiles.getState().closeTabs(K, "all", "c");
+      expect(s().tabs).toEqual([]);
+      expect(s().active).toBeNull();
+      expect(s().preview).toBeNull();
+    });
+  });
+
   it("previews replace each other; pinned stay", () => {
     const { open } = useFiles.getState();
     open(K, "a.ts", { pin: false });
