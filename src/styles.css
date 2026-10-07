@@ -1064,6 +1064,8 @@ button.composer-model:disabled { cursor: default; }
   font-size: 12.5px; line-height: 1.45; animation: slide-in var(--t) var(--ease);
 }
 .toast .icon { color: var(--err); margin-top: 1px; }
+.toast-action { margin-left: 8px; padding: 0; background: none; border: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.toast-action:hover { text-decoration: underline; }
 
 /* Messages people may want to copy. */
 .toast, .error, .chat-notice, .dialog p { user-select: text; -webkit-user-select: text; }
