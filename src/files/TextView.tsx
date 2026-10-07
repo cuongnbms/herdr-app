@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { findMatches, type Match } from "./find";
 import { highlightLines, type Seg } from "./highlightLines";
 
@@ -73,7 +73,9 @@ export function TextView({
   }, [matches]);
   const current = find && matches.length > 0 ? matches[((find.index % matches.length) + matches.length) % matches.length] : null;
 
-  const rowH = useMemo(() => lineHeight(scrollRef.current), []);
+  const [rowH, setRowH] = useState(DEFAULT_LINE_H);
+  // The ref is only attached after the first render, so the CSS var is read here.
+  useLayoutEffect(() => setRowH(lineHeight(scrollRef.current)), []);
   const virt = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scrollRef.current,
@@ -81,15 +83,16 @@ export function TextView({
     overscan: 20,
   });
 
+  // estimateSize is not part of the virtualizer's measurement cache key, so re-measure on change.
+  useLayoutEffect(() => virt.measure(), [rowH]);
+
   // Restore the remembered scroll position when this file is shown.
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = initialScroll;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   useEffect(() => {
     if (current) virt.scrollToIndex(current.line, { align: "center" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.line, current?.start]);
 
   const gutter = `${String(lines.length).length + 1}ch`;
