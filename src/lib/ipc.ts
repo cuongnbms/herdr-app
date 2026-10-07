@@ -126,3 +126,7 @@ export const filesImage = (machineId: string, root: string, rel: string) =>
 export const filesStat = (machineId: string, root: string, rels: string[]) =>
   invoke<(FileStat | null)[]>("files_stat", { machineId, root, rels });
 export const filesChanged = (machineId: string, root: string) => invoke<Changed>("files_changed", { machineId, root });
+export const filesUpload = (machineId: string, root: string, destRel: string, sources: string[]) =>
+  invoke<string[]>("files_upload", { machineId, root, destRel, sources });
+export const filesDownload = (machineId: string, root: string, rel: string) =>
+  invoke<string>("files_download", { machineId, root, rel });
