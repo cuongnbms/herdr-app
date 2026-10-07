@@ -21,7 +21,6 @@ import { useOutline } from "./outlineStore";
 import { absPath, resolveRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { useWatch } from "./useWatch";
-import { parentDir } from "./watchDirs";
 
 const SIDE_MIN = 200;
 const SIDE_MAX = 600;
@@ -201,13 +200,20 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
   }, [machineId, root, reloadKey]);
 
   const shown = doc && doc.rel === active ? doc.content : null;
+  // The mount just listed everything, so the first Resync of a watch that started with it is
+  // skipped; a watch started later (back online) or restarted after an error reloads.
+  const skipResync = useRef(online);
+  useEffect(() => {
+    if (!online) skipResync.current = false;
+  }, [online]);
   useWatch({
     enabled: online,
     machineId,
     root,
     onResync: () => {
       setWatchError(null);
-      reload();
+      if (skipResync.current) skipResync.current = false;
+      else reload();
     },
     onChanges: (changes) => {
       setWatchError(null);
@@ -217,10 +223,12 @@ function FilesBrowser({ wsRef, root, online, reloadKey, reload, onMissing }: { o
       }
       if (active) {
         const own = changes.find((c) => c.path === active);
+        // A folder above it changed (e.g. removed or renamed): reading it again finds out.
+        const above = (c: FileChange) => c.isDir && (c.path === "" || active.startsWith(c.path + "/"));
         if (own) {
           if (own.removed) setRemoved(active);
           else load(active);
-        } else if (changes.some((c) => c.isDir && c.path === parentDir(active))) load(active);
+        } else if (changes.some(above)) load(active);
       }
       setBatch((prev) => ({ seq: (prev?.seq ?? 0) + 1, changes }));
     },

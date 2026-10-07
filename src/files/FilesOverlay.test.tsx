@@ -384,10 +384,57 @@ describe("FilesOverlay", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     });
 
-    it("a resync reloads the lists and the open file", async () => {
+    it("shows the folder missing when the watch reports the root removed", async () => {
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "", isDir: true, removed: true }] }));
+      expect(await screen.findByText("This folder no longer exists.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Change folder…" })).toBeTruthy();
+    });
+
+    it("re-reads the open file when a folder above its parent changes", async () => {
+      useFiles.getState().open(key, "src/deep/a.ts", { pin: true });
+      const { container } = render(<FilesOverlay />);
+      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
+      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
+        if (cmd === "files_read") throw { code: "not_found", message: "no such file" };
+        return prev!(cmd, args as never);
+      }) as never);
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "src", isDir: true, removed: true }] }));
+      expect(await screen.findByText("File removed")).toBeTruthy();
+    });
+
+    const listAlls = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_list_all").length;
+
+    it("the first resync after opening does not list everything again", async () => {
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      await waitFor(() => expect(listAlls()).toBe(1));
+      act(() => watch().onmessage!({ type: "resync" }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(listAlls()).toBe(1);
+    });
+
+    it("the first resync after coming back online reloads", async () => {
+      render(<FilesOverlay />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      act(() => watch().onmessage!({ type: "resync" }));
+      const setState = (state: string) =>
+        act(() => useApp.setState((s) => ({ machines: { local: { ...s.machines.local, state } } as never })));
+      setState("disconnected");
+      const before = channels.length;
+      setState("connected");
+      await waitFor(() => expect(channels.length).toBe(before + 1));
+      vi.mocked(invoke).mockClear();
+      act(() => watch().onmessage!({ type: "resync" }));
+      await waitFor(() => expect(listAlls()).toBe(1));
+    });
+
+    it("a later resync reloads the lists and the open file", async () => {
       useFiles.getState().open(key, "a.ts", { pin: true });
       render(<FilesOverlay />);
       await waitFor(() => expect(watch()).toBeTruthy());
+      act(() => watch().onmessage!({ type: "resync" }));
       vi.mocked(invoke).mockClear();
       act(() => watch().onmessage!({ type: "resync" }));
       await waitFor(() => {
