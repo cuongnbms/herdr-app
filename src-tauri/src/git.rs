@@ -55,12 +55,13 @@ pub async fn git_status(t: &dyn Transport, cwd: &str) -> AppResult<GitStatus> {
     Ok(GitStatus {
         folder: folder_name(cwd),
         path: cwd.to_string(),
-        ..parse_porcelain_v2(&o.stdout)
+        ..parse_porcelain_v2(&o.stdout, MAX_CHANGES)
     })
 }
 
-/// Parse `git status --porcelain=v2 --branch -z`; empty output (no repository) has no branch.
-fn parse_porcelain_v2(out: &str) -> GitStatus {
+/// Parse `git status --porcelain=v2 [--branch] -z`, listing the first `limit` changes; empty output
+/// (no repository) has no branch.
+pub(crate) fn parse_porcelain_v2(out: &str, limit: usize) -> GitStatus {
     let mut s = GitStatus::default();
     let (mut head, mut oid) = (None, None);
     let mut records = out.split('\0');
@@ -112,7 +113,7 @@ fn parse_porcelain_v2(out: &str) -> GitStatus {
             }
         }
         s.changed += 1;
-        if s.changes.len() < MAX_CHANGES {
+        if s.changes.len() < limit {
             if let Some(path) = path {
                 let code = if xy == "??" {
                     "??".to_string()
@@ -313,7 +314,7 @@ mod tests {
         for i in 0..20 {
             out += &format!("? u{i}\0");
         }
-        let s = parse_porcelain_v2(&out);
+        let s = parse_porcelain_v2(&out, MAX_CHANGES);
         assert_eq!(
             (s.staged, s.modified, s.untracked, s.changed),
             (1, 1, 20, 22)
@@ -335,6 +336,15 @@ mod tests {
         );
         assert_eq!(s.changes[2].path, "u0");
         assert_eq!(s.upstream, None);
+    }
+
+    #[test]
+    fn parses_without_branch_headers_and_skips_rename_origins() {
+        let out = "2 R. N... 100644 100644 100644 h1 h2 R100 new.rs\0old.rs\0? u0\0? u1\0";
+        let s = parse_porcelain_v2(out, usize::MAX);
+        assert_eq!((s.changed, s.branch), (3, None));
+        let paths: Vec<&str> = s.changes.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["new.rs", "u0", "u1"]);
     }
 
     #[test]
