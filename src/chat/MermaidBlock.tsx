@@ -1,6 +1,10 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTheme } from "../settings/theme";
 import { CopyButton } from "./CopyButton";
+import { DiagramZoom } from "./DiagramZoom";
+
+/** True where a click on a diagram opens it full-window (the Files view; chat leaves it off). */
+export const MermaidZoomContext = createContext(false);
 
 /** Wait this long after the last change before rendering, so a streaming reply does not re-render per token. */
 const RENDER_DELAY_MS = 150;
@@ -55,6 +59,10 @@ export function MermaidBlock({ source, children }: { source: string; children: R
   const id = "mmd" + useId().replace(/[^a-zA-Z0-9]/g, "");
   const [svg, setSvg] = useState<string | null>(() => cacheGet(cacheKey(theme, source)) ?? null);
   const [showSource, setShowSource] = useState(false);
+  const zoomable = useContext(MermaidZoomContext);
+  const [zoomed, setZoomed] = useState<SVGSVGElement | null>(null);
+  // A redrawn diagram (theme, source) makes the zoomed copy stale.
+  useEffect(() => setZoomed(null), [svg]);
 
   useEffect(() => {
     const key = cacheKey(theme, source);
@@ -100,7 +108,31 @@ export function MermaidBlock({ source, children }: { source: string; children: R
           <CopyButton text={source} label="Copy code" />
         </span>
       </div>
-      {diagram ? <div className="chat-mermaid-svg" dangerouslySetInnerHTML={{ __html: svg }} /> : <pre>{children}</pre>}
+      {diagram && zoomable ? (
+        <div
+          className="chat-mermaid-svg zoomable"
+          role="button"
+          tabIndex={0}
+          aria-label="Zoom diagram"
+          title="Click to zoom"
+          onClick={(e) => {
+            // A drag that selected label text is not a click on the diagram.
+            if (window.getSelection()?.isCollapsed === false) return;
+            setZoomed(e.currentTarget.querySelector("svg"));
+          }}
+          onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            setZoomed(e.currentTarget.querySelector("svg"));
+          }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      ) : diagram ? (
+        <div className="chat-mermaid-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <pre>{children}</pre>
+      )}
+      {zoomed && <DiagramZoom svg={zoomed} onClose={() => setZoomed(null)} />}
     </div>
   );
 }

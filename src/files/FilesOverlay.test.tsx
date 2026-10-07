@@ -19,6 +19,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
 vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: vi.fn(async () => ({ diagramType: "flowchart" })),
+    render: vi.fn(async () => ({ svg: '<svg viewBox="0 0 10 10"></svg>' })),
+  },
+}));
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { showToast } from "../ui/Toast";
 import { useApp } from "../store/app";
@@ -249,6 +256,18 @@ describe("FilesOverlay", () => {
       fireEvent.click(btn);
       await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied (first 2 MB only)"));
       truncated.delete("big.ts");
+    });
+
+    it("Esc closes a zoomed diagram, not the overlay", async () => {
+      texts["d.md"] = "```mermaid\ngraph TD; A-->B\n```\n";
+      await openTabs("d.md");
+      fireEvent.click(await screen.findByRole("button", { name: "Zoom diagram" }));
+      expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
+      act(() => {
+        fireEvent.keyDown(window, { key: "Escape" });
+      });
+      expect(screen.queryByRole("dialog", { name: "Diagram" })).toBeNull();
+      expect(useApp.getState().filesOverlay).not.toBeNull();
     });
 
     it("⌘R reloads the lists and the open file", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import { ExternalLink, InLinkContext, mdComponents, nodeText, rehypePlugins, remarkPlugins } from "../chat/markdown";
+import { MermaidZoomContext } from "../chat/MermaidBlock";
 import { resolveLink } from "./links";
 import { MarkdownImage } from "./MarkdownImage";
 import { Outline, type Heading } from "./Outline";
@@ -150,7 +151,9 @@ function RenderedMarkdown({ machineId, root: fileRoot, text, rel, onOpen, initia
   return (
     <div className="files-markdown-wrap">
       <div className="files-markdown chat-assistant" ref={root} onScroll={onScroll}>
-        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        <MermaidZoomContext.Provider value={true}>
+          <Markdown remarkPlugins={remarkPlugins} rehypePlugins={viewRehypePlugins} components={components}>{text}</Markdown>
+        </MermaidZoomContext.Provider>
       </div>
       {outline && has && (
         <Outline

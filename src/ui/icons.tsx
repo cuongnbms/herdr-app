@@ -22,6 +22,8 @@ function Icon({ children, ...props }: SVGProps<SVGSVGElement> & { children: Reac
 }
 
 export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M9 6l6 6-6 6" /></Icon>;
+export const MinusIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M5 12h14" /></Icon>;
+export const FitIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></Icon>;
 export const PlusIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>;
 export const GearIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>

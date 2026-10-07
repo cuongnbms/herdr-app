@@ -1235,6 +1235,20 @@ button.composer-model:disabled { cursor: default; }
 .chat-mermaid-toggle:hover { color: var(--fg); }
 .chat-mermaid-svg { padding: 12px 14px; overflow-x: auto; text-align: center; }
 .chat-mermaid-svg svg { max-width: 100%; height: auto; }
+.chat-mermaid-svg.zoomable { cursor: zoom-in; }
+.chat-mermaid-svg.zoomable:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* Full-window mermaid diagram: wheel or pinch zooms at the cursor, drag pans. */
+.overlay.diagram-zoom { display: block; padding: 0; background: var(--surface-0); backdrop-filter: none; }
+.diagram-zoom-stage { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+.diagram-zoom-stage:active { cursor: grabbing; }
+.diagram-zoom-content { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.diagram-zoom-content svg { display: block; max-width: none; }
+.diagram-zoom-toolbar {
+  position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 2px 4px;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-pop);
+}
+.diagram-zoom-level { min-width: 44px; text-align: center; font-size: 12px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
 
 /* Files overlay */
 .files-overlay {
