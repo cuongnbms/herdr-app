@@ -1360,7 +1360,9 @@ button.composer-model:disabled { cursor: default; }
 .files-text { flex: 1; min-height: 0; overflow: auto; background: var(--surface-code); color: var(--hl-fg); font: 12.5px/var(--files-line-h) var(--mono); }
 .files-text-body { min-width: max-content; }
 .files-line { display: flex; width: 100%; height: var(--files-line-h); line-height: var(--files-line-h); white-space: pre; }
-.files-gutter { flex: none; padding: 0 12px 0 14px; box-sizing: content-box; color: var(--fg-3); text-align: right; user-select: none; }
+.files-gutter { flex: none; padding: 0 12px 0 14px; box-sizing: content-box; color: var(--fg-3); text-align: right; user-select: none; -webkit-user-select: none; }
+/* Drawn as generated content: WebKit still paints the selection over user-select:none text. */
+.files-gutter::before { content: attr(data-line); }
 .files-code { padding-right: 24px; }
 .files-match { border-radius: 2px; background: var(--accent-soft); color: inherit; }
 .files-match.current { outline: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 30%, transparent); }

@@ -142,7 +142,7 @@ function FileText({ text, path, initialScroll, initialLine, saveScroll, find }: 
             className="files-line"
             style={{ position: "absolute", top: 0, left: 0, height: rowH, transform: `translateY(${row.start}px)` }}
           >
-            <span className="files-gutter" style={{ minWidth: gutter }}>{row.index + 1}</span>
+            <span className="files-gutter" style={{ minWidth: gutter }} data-line={row.index + 1} />
             <span className="files-code">
               {renderLine(lines[row.index], byLine.get(row.index) ?? [], current && current.line === row.index ? current.start : null)}
             </span>
