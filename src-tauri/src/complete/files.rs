@@ -17,11 +17,17 @@ pub const SKIP_DIRS: &[&str] = &[
 const MAX_DEPTH: usize = 6;
 const MAX_FILES: usize = 5000;
 
+/// Whether `dir` is the home folder (trailing `/` ignored). Scanning it would walk
+/// `~/Library` and trigger macOS privacy prompts, so callers refuse it.
+pub fn is_home(home: &str, dir: &str) -> bool {
+    dir.trim_end_matches('/') == home.trim_end_matches('/')
+}
+
 /// Paths relative to `cwd`, `/`-separated and sorted; empty when `cwd` is missing or
 /// is the home folder, which would scan `~/Library` and trigger macOS privacy prompts.
 pub async fn list_files(t: &dyn Transport, home: &str, cwd: &str) -> AppResult<Vec<String>> {
     // The home folder holds no project files, so skip it before running anything.
-    if cwd.trim_end_matches('/') == home.trim_end_matches('/') {
+    if is_home(home, cwd) {
         return Ok(Vec::new());
     }
     let skip = SKIP_DIRS

@@ -1,5 +1,6 @@
 //! Read-only file browsing on a Machine: scripts run over the transport, never writing.
 
+pub mod all;
 pub mod list;
 pub mod paths;
 pub mod read;
