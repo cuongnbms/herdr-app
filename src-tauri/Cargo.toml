@@ -1,6 +1,6 @@
 [package]
 name = "herdr-app"
-version = "0.1.1"
+version = "1.0.0"
 description = "Herdr desktop app"
 authors = ["Cuong Nguyen"]
 edition = "2021"
