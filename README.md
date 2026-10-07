@@ -1,12 +1,16 @@
 # Herdr
 
-A macOS desktop client for the [herdr](https://herdr.dev) terminal multiplexer. It shows the local machine and any number of SSH machines in one sidebar (machines, sessions, workspaces, tabs, panes with agent status), and opens a pane as a real terminal or as a Chat lens for coding agents. Built with Tauri v2, React 19 and zustand 5.
+A macOS desktop client for the [herdr](https://herdr.dev) terminal multiplexer. It shows the local machine and any number of SSH machines in one sidebar (machines, sessions, workspaces, tabs, panes with agent status), and opens a pane as a real terminal or as a Chat lens for coding agents, and browses a workspace's files in the Workspace Files overlay. Built with Tauri v2, React 19 and zustand 5.
 
 ![Chat lens](docs/screenshots/chat.png)
 
 | Agent Dashboard | Terminal lens |
 |---|---|
 | ![Agent Dashboard](docs/screenshots/dashboard.png) | ![Terminal lens](docs/screenshots/terminal.png) |
+
+| Workspace Files: rendered markdown | Workspace Files: Go to file and find |
+|---|---|
+| ![Workspace Files showing rendered markdown with an outline](docs/screenshots/files-markdown.png) | ![Workspace Files with Go to file and find in a source file](docs/screenshots/files-code.png) |
 
 ## Install
 
