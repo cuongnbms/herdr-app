@@ -56,7 +56,7 @@ pub fn inotify_cmd(abs: &str) -> String {
         .join(" -o ");
     // The root stays on the command line (not in the list) so `ps` shows what is watched.
     format!(
-        "exec 3<&0; (cat; kill $$) <&3 >/dev/null 2>&1 & exec inotifywait -m -r -q -e close_write,create,delete,moved_to,moved_from --format '%e|%w%f' --exclude {} --fromfile - {q} 3<&- <<HERDR_WATCH\n$(find {q} -mindepth 1 \\( {find_names} \\) -prune -printf '@%p\\n' 2>/dev/null)\nHERDR_WATCH\n",
+        "exec 3<&0; (cat; kill $$) <&3 >/dev/null 2>&1 & exec inotifywait -m -r -q -e close_write,create,delete,moved_to,moved_from --format '%e|%w%f' --exclude {} --fromfile - {q} 3<&- <<HERDR_WATCH\n$(find -H {q} -mindepth 1 \\( {find_names} \\) -prune -printf '@%p\\n' 2>/dev/null)\nHERDR_WATCH\n",
         sh_quote(&filter)
     )
 }
@@ -77,7 +77,7 @@ trap 'exit 0' TERM HUP INT\n\
 touch \"$d/prev\"\n\
 while :; do\n\
   sleep {POLL_SECS}; touch \"$d/next\"\n\
-  find {q} {prune} -o -newer \"$d/prev\" \\( -type d -exec printf 'd\\t%s\\0' {{}} + -o -exec printf 'f\\t%s\\0' {{}} + \\) 3<&- 2>/dev/null\n\
+  find -H {q} {prune} -o -newer \"$d/prev\" \\( -type d -exec printf 'd\\t%s\\0' {{}} + -o -exec printf 'f\\t%s\\0' {{}} + \\) 3<&- 2>/dev/null\n\
   printf 'e\\t\\0'\n\
   mv \"$d/next\" \"$d/prev\"\n\
 done\n"
@@ -210,7 +210,7 @@ mod tests {
         // Events inside a heavy folder are dropped, the folder's own creation is not.
         assert!(cmd.contains(r"--exclude '(^|/)(\.git|node_modules|\.venv|venv|__pycache__|target|dist|build|\.next|\.worktrees)/'"), "{cmd}");
         // Heavy folders present now get no watches at all.
-        assert!(cmd.contains(" --fromfile - '/r/p q' 3<&- <<HERDR_WATCH\n$(find '/r/p q' -mindepth 1 \\( -name '.git' -o -name 'node_modules' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.next' -o -name '.worktrees' \\) -prune -printf '@%p\\n' 2>/dev/null)\nHERDR_WATCH\n"), "{cmd}");
+        assert!(cmd.contains(" --fromfile - '/r/p q' 3<&- <<HERDR_WATCH\n$(find -H '/r/p q' -mindepth 1 \\( -name '.git' -o -name 'node_modules' -o -name '.venv' -o -name 'venv' -o -name '__pycache__' -o -name 'target' -o -name 'dist' -o -name 'build' -o -name '.next' -o -name '.worktrees' \\) -prune -printf '@%p\\n' 2>/dev/null)\nHERDR_WATCH\n"), "{cmd}");
         assert!(inotify_cmd("/it's").contains(r"'/it'\''s'"));
     }
 
@@ -225,7 +225,7 @@ mod tests {
         assert!(cmd.contains("sleep 2;"), "{cmd}");
         assert!(
             cmd.contains(&format!(
-                "find '/r/p q' {} -o -newer \"$d/prev\"",
+                "find -H '/r/p q' {} -o -newer \"$d/prev\"",
                 crate::complete::files::find_prune()
             )),
             "{cmd}"
@@ -324,6 +324,12 @@ mod tests {
         assert_eq!(secs, [1, 2, 5, 10, 10, 10]);
         b.reset();
         assert_eq!(b.next_delay().as_secs(), 1);
+    }
+
+    #[test]
+    fn both_scripts_follow_a_symlinked_root() {
+        assert!(poll_cmd("/r").contains("find -H '/r' "));
+        assert!(inotify_cmd("/r").contains("$(find -H '/r' -mindepth 1"));
     }
 
     #[test]
