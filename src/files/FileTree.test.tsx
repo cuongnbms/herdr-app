@@ -136,4 +136,19 @@ describe("FileTree", () => {
     rerender(<FileTree machineId="local" root="/s" filesKey="local/default/w9" onOpen={() => {}} reloadKey={0} />);
     expect(screen.queryByText("old.md")).toBeNull();
   });
+  it("shows a chevron and folder icon on folders, a file icon on files", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [],
+    );
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w10" onOpen={() => {}} reloadKey={0} />);
+    const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
+    const a = screen.getByText("a.md").closest("[role=treeitem]") as HTMLElement;
+    const icons = (el: HTMLElement) => [...el.querySelectorAll("svg")].map((s) => s.dataset.icon);
+    expect(icons(src)).toEqual(["chevron", "folder"]);
+    expect(icons(a)).toEqual(["file"]);
+    fireEvent.click(src);
+    await waitFor(() => expect(icons(src)).toEqual(["chevron", "folder-open"]));
+    expect(src.classList.contains("open")).toBe(true);
+  });
 });

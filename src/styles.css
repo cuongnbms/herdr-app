@@ -1315,7 +1315,10 @@ button.composer-model:disabled { cursor: default; }
 .files-tree-row:focus-visible { background: var(--active); color: var(--fg); outline: none; box-shadow: inset 2px 0 0 var(--accent); }
 .files-tree-dir { color: var(--fg); }
 .files-tree-symlink .files-tree-name { font-style: italic; }
-.files-tree-caret { flex: none; width: 12px; color: var(--fg-3); font-size: 10px; text-align: center; }
+.files-tree-caret { flex: none; display: flex; width: 12px; color: var(--fg-3); }
+.files-tree-caret .icon { width: 12px; height: 12px; transition: transform 0.1s; }
+.files-tree-row.open .files-tree-caret .icon { transform: rotate(90deg); }
+.files-tree-row .files-tree-icon { width: 14px; height: 14px; color: var(--fg-3); }
 .files-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .files-tree-error { display: flex; align-items: center; gap: 8px; padding-top: 3px; padding-bottom: 3px; color: var(--err); font-size: 12px; }
 .files-tree-error button { border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }

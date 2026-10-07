@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { filesListDir } from "../lib/ipc";
 import type { FileEntry } from "../lib/types";
+import { ChevronIcon, FileIcon, FolderIcon, FolderOpenIcon } from "../ui/icons";
 import { useFiles } from "./store";
 
 interface Props {
@@ -178,7 +179,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
             aria-expanded={isDir ? open : undefined}
             data-rel={rel}
             data-kind={ent.kind}
-            className={`files-tree-row ${kindClass(ent.kind)}`}
+            className={`files-tree-row ${kindClass(ent.kind)}${open ? " open" : ""}`}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={(e) => {
               // The second click of a double click would collapse what the first expanded.
@@ -190,7 +191,17 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey }: Props
               if (!isDir) onOpen(rel, true);
             }}
           >
-            <span className="files-tree-caret">{isDir ? (open ? "▾" : "▸") : ""}</span>
+            {/* Files keep the chevron's width, so names line up across a level. */}
+            <span className="files-tree-caret">{isDir && <ChevronIcon data-icon="chevron" />}</span>
+            {isDir ? (
+              open ? (
+                <FolderOpenIcon className="icon files-tree-icon" data-icon="folder-open" />
+              ) : (
+                <FolderIcon className="icon files-tree-icon" data-icon="folder" />
+              )
+            ) : (
+              <FileIcon className="icon files-tree-icon" data-icon="file" />
+            )}
             <span className="files-tree-name">{ent.name}</span>
           </div>
           {open && renderDir(rel, depth + 1)}
