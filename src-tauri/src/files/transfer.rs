@@ -351,12 +351,46 @@ fn place(staged: &Path, dir: &Path, name: &str, is_dir: bool) -> AppResult<Strin
     ))
 }
 
+/// Best-effort: add owner-write to every directory under `root` (symlinks are not followed), so a
+/// tree unpacked with read-only folders can be removed.
+fn make_tree_writable(root: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(meta) = fs::symlink_metadata(root) else {
+        return;
+    };
+    if !meta.is_dir() {
+        return;
+    }
+    let mode = meta.permissions().mode();
+    if mode & 0o700 != 0o700 {
+        let _ = fs::set_permissions(root, fs::Permissions::from_mode(mode | 0o700));
+    }
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            make_tree_writable(&entry.path());
+        }
+    }
+}
+
 /// Move the downloaded `staging/name` into `downloads` under a free name; returns the saved path.
+/// A read-only folder cannot be renamed into another parent, so it is made owner-writable for the
+/// move and gets its mode back afterwards.
 pub fn finish_download(staging: &Path, name: &str, downloads: &Path) -> AppResult<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
     let staged = staging.join(name);
     let meta = fs::symlink_metadata(&staged)
         .map_err(|_| AppError::new("io", format!("{name}: nothing was downloaded")))?;
-    Ok(downloads.join(place(&staged, downloads, name, meta.is_dir())?))
+    let orig_mode = meta.permissions().mode();
+    let widen = meta.is_dir() && orig_mode & 0o700 != 0o700;
+    if widen {
+        fs::set_permissions(&staged, fs::Permissions::from_mode(orig_mode | 0o700))
+            .map_err(|e| AppError::new("io", format!("{}: {e}", staged.display())))?;
+    }
+    let saved = downloads.join(place(&staged, downloads, name, meta.is_dir())?);
+    if widen {
+        let _ = fs::set_permissions(&saved, fs::Permissions::from_mode(orig_mode));
+    }
+    Ok(saved)
 }
 
 /// Copy `name` from the folder `parent_abs` on the Machine into `downloads` under a free name.
@@ -382,11 +416,16 @@ pub fn download(
             .unpack(&dest)
             .map_err(|e| AppError::new("io", format!("download stream: {e}")))
     })?;
-    if exit.code != 0 {
-        return Err(io_error(exit.code, &exit.stderr));
+    let saved = if exit.code != 0 {
+        Err(io_error(exit.code, &exit.stderr))
+    } else {
+        io.and_then(|()| finish_download(staging.path(), name, downloads))
+    };
+    if saved.is_err() {
+        // Read-only folders would stop the TempDir drop from removing the staging tree.
+        make_tree_writable(staging.path());
     }
-    io?;
-    finish_download(staging.path(), name, downloads)
+    saved
 }
 
 #[cfg(test)]
@@ -718,5 +757,48 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, "io");
         assert!(ls(dl.path()).is_empty());
+    }
+
+    #[test]
+    fn download_of_a_read_only_folder_saves_it_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let ws = tempfile::tempdir().unwrap();
+        let ro = ws.path().join("ro");
+        fs::create_dir(&ro).unwrap();
+        fs::write(ro.join("x.md"), "x").unwrap();
+        fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+        let dl = tempfile::tempdir().unwrap();
+        let res = download(
+            &LocalTransport,
+            ws.path().to_str().unwrap(),
+            "ro",
+            dl.path(),
+        );
+        let saved_dir = dl.path().join("ro");
+        let mode = fs::metadata(&saved_dir).map(|m| m.permissions().mode() & 0o777);
+        let listing = ls(dl.path());
+        // Restore permissions so the tempdirs can be removed.
+        make_tree_writable(&ro);
+        make_tree_writable(&saved_dir);
+        assert_eq!(res.unwrap(), saved_dir);
+        assert_eq!(mode.unwrap(), 0o555);
+        assert_eq!(listing, ["ro"]);
+        assert_eq!(fs::read_to_string(saved_dir.join("x.md")).unwrap(), "x");
+    }
+
+    #[test]
+    fn make_tree_writable_lets_a_read_only_tree_be_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let top = d.path().join("top");
+        fs::create_dir_all(top.join("sub")).unwrap();
+        fs::write(top.join("sub/x"), "x").unwrap();
+        symlink(d.path(), top.join("loop")).unwrap();
+        for p in [top.join("sub"), top.clone()] {
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o555)).unwrap();
+        }
+        make_tree_writable(&top);
+        fs::remove_dir_all(&top).unwrap();
+        assert!(!top.exists());
     }
 }
