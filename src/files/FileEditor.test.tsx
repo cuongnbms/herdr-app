@@ -1,3 +1,4 @@
+import { undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -33,6 +34,10 @@ describe("FileEditor", () => {
     first.unmount();
     const { container } = render(<FileEditor draftKey={key} />);
     expect(viewOf(container).state.sliceDoc()).toBe("yx\n");
+    act(() => {
+      undo(viewOf(container));
+    });
+    expect(viewOf(container).state.sliceDoc()).toBe("x\n");
     act(() => open("from disk\n"));
     expect(viewOf(container).state.sliceDoc()).toBe("from disk\n");
   });

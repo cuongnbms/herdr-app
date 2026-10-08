@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
   bracketMatching,
-  defaultHighlightStyle,
+  HighlightStyle,
   LanguageDescription,
   type LanguageSupport,
   syntaxHighlighting,
@@ -9,11 +9,27 @@ import {
 import { languages } from "@codemirror/language-data";
 import { search, searchKeymap } from "@codemirror/search";
 import { ChangeSet, Compartment, EditorSelection, EditorState, type Extension, type Transaction } from "@codemirror/state";
+import { tags as t } from "@lezer/highlight";
 import { highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
 import type { FileContent } from "../lib/types";
 
 /** FileEditor fills this once the file's language has loaded. */
 export const languageSlot = new Compartment();
+
+/** Token colours come from the app's --hl-* variables, as the viewer's highlight.js classes do. */
+const appHighlight = HighlightStyle.define([
+  { tag: [t.comment, t.docComment], color: "var(--hl-comment)", fontStyle: "italic" },
+  { tag: [t.keyword, t.controlKeyword, t.operatorKeyword, t.definitionKeyword, t.moduleKeyword, t.modifier, t.null, t.bool, t.atom, t.self], color: "var(--hl-keyword)" },
+  { tag: [t.string, t.special(t.string), t.regexp, t.inserted], color: "var(--hl-string)" },
+  { tag: [t.number, t.integer, t.float, t.character, t.escape], color: "var(--hl-number)" },
+  { tag: [t.heading, t.function(t.variableName), t.function(t.propertyName), t.definition(t.variableName), t.labelName, t.tagName], color: "var(--hl-title)" },
+  { tag: [t.typeName, t.className, t.namespace, t.standard(t.variableName)], color: "var(--hl-type)" },
+  { tag: [t.propertyName, t.attributeName, t.variableName, t.special(t.variableName), t.macroName], color: "var(--hl-attr)" },
+  { tag: [t.meta, t.processingInstruction, t.annotation], color: "var(--hl-meta)" },
+  { tag: t.strong, fontWeight: "bold" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.link, textDecoration: "underline" },
+]);
 
 /** The view-side extensions; they are facets, so they work on a state without a view. */
 export function editorExtensions(): Extension {
@@ -23,7 +39,7 @@ export function editorExtensions(): Extension {
     highlightActiveLine(),
     search({ top: true }),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    syntaxHighlighting(appHighlight, { fallback: true }),
   ];
 }
 

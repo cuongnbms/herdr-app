@@ -1415,15 +1415,14 @@ button.composer-model:disabled { cursor: default; }
 
 /* File editor */
 .files-editor { flex: 1; min-height: 0; display: flex; }
-.files-editor .cm-editor { flex: 1; min-width: 0; height: 100%; background: var(--surface-code); color: var(--fg); font-family: "JetBrains Mono", monospace; font-size: inherit; }
+.files-editor .cm-editor { flex: 1; min-width: 0; height: 100%; background: var(--surface-code); color: var(--hl-fg); font: 12.5px/var(--files-line-h) var(--mono); }
 .files-editor .cm-editor.cm-focused { outline: none; }
 .files-editor .cm-scroller { font-family: inherit; line-height: var(--files-line-h); }
+.files-editor .cm-content { caret-color: var(--hl-fg); cursor: text; }
 .files-editor .cm-gutters { background: var(--surface-code); border: 0; color: var(--fg-3); user-select: none; -webkit-user-select: none; }
 .files-editor .cm-lineNumbers .cm-gutterElement { padding: 0 12px 0 14px; }
 .files-editor .cm-activeLine { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
 .files-editor .cm-activeLineGutter { background: transparent; color: var(--fg-2); }
-.files-editor .cm-cursor { border-left-color: var(--fg); }
-.files-editor .cm-selectionBackground, .files-editor .cm-editor.cm-focused .cm-selectionBackground { background: var(--accent-soft); }
 .files-editor .cm-searchMatch { border-radius: 2px; background: color-mix(in srgb, var(--amber) 32%, transparent); }
 .files-editor .cm-searchMatch.cm-searchMatch-selected { background: var(--amber); color: #1a1206; }
 .files-editor .cm-panels { background: var(--surface-1); color: var(--fg); border-color: var(--line); }
