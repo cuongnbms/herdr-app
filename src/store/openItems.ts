@@ -1,0 +1,99 @@
+import { paneKey, type MachineView, type PaneRef } from "../lib/types";
+import { filesKey } from "../files/store";
+import type { WorkspaceRef } from "../workspaces/folder";
+
+export type CloseScope = "others" | "right" | "all";
+
+/** An agent pane or a file the user has opened. */
+export type OpenItem = { kind: "agent"; ref: PaneRef } | { kind: "file"; ws: WorkspaceRef; root: string; rel: string };
+
+/** Everything the user has opened, across machines and workspaces, in the order opened. */
+export interface OpenItems {
+  items: OpenItem[];
+  /** The key of the one item (if any) that the next unpinned open replaces. */
+  preview: string | null;
+  /** The key of the item being shown. */
+  active: string | null;
+}
+
+export const NO_ITEMS: OpenItems = { items: [], preview: null, active: null };
+
+export function itemKey(item: OpenItem): string {
+  return item.kind === "agent" ? "agent:" + paneKey(item.ref) : "file:" + filesKey(item.ws, item.root) + "|" + item.rel;
+}
+
+export function findItem(s: OpenItems, key: string): OpenItem | undefined {
+  return s.items.find((i) => itemKey(i) === key);
+}
+
+const indexOfKey = (items: OpenItem[], key: string) => items.findIndex((i) => itemKey(i) === key);
+
+const keepKey = (items: OpenItem[], key: string | null) => (key && indexOfKey(items, key) >= 0 ? key : null);
+
+/** Opens `item` (pinned or as the preview) and makes it active. */
+export function openItem(s: OpenItems, item: OpenItem, { pin }: { pin: boolean }): OpenItems {
+  const key = itemKey(item);
+  if (indexOfKey(s.items, key) >= 0) return { ...s, preview: pin && s.preview === key ? null : s.preview, active: key };
+  // A pinned open promotes the current preview, so it stays.
+  if (pin) return { items: [...s.items, item], preview: null, active: key };
+  const at = s.preview ? indexOfKey(s.items, s.preview) : -1;
+  const items = at >= 0 ? s.items.map((i, n) => (n === at ? item : i)) : [...s.items, item];
+  return { items, preview: key, active: key };
+}
+
+export function pinItem(s: OpenItems, key: string): OpenItems {
+  return s.preview === key ? { ...s, preview: null } : s;
+}
+
+export function setActive(s: OpenItems, key: string | null): OpenItems {
+  if (key !== null && indexOfKey(s.items, key) < 0) return s;
+  return { ...s, active: key };
+}
+
+/** Closes relative to `key`; a closed active item hands over to `key` if it survives, else the item now at its index, else the one before, else null. Unknown key → s. */
+export function closeItems(s: OpenItems, scope: "one" | CloseScope, key: string): OpenItems {
+  const at = indexOfKey(s.items, key);
+  if (at < 0) return s;
+  const items =
+    scope === "one" ? s.items.filter((_, i) => i !== at) : scope === "others" ? [s.items[at]] : scope === "right" ? s.items.slice(0, at + 1) : [];
+  return { items, preview: keepKey(items, s.preview), active: nextActive(s, items, key) };
+}
+
+function nextActive(s: OpenItems, items: OpenItem[], key: string): string | null {
+  if (s.active === null || indexOfKey(items, s.active) >= 0) return s.active;
+  if (indexOfKey(items, key) >= 0) return key;
+  const from = indexOfKey(s.items, s.active);
+  const next = items[from] ?? items[from - 1];
+  return next ? itemKey(next) : null;
+}
+
+/** Moves `active` by `delta`, wrapping; no active → first item. Empty → s. */
+export function cycleItem(s: OpenItems, delta: 1 | -1): OpenItems {
+  if (s.items.length === 0) return s;
+  const at = s.active ? indexOfKey(s.items, s.active) : -1;
+  const next = at < 0 ? 0 : (at + delta + s.items.length) % s.items.length;
+  return { ...s, active: itemKey(s.items[next]) };
+}
+
+/** For machine `v`: drops agent items whose Pane is gone and file items whose Workspace is gone. Call only with a connected snapshot. */
+export function pruneItems(s: OpenItems, v: MachineView): OpenItems {
+  const panes = new Set<string>();
+  const workspaces = new Set<string>();
+  for (const session of v.sessions)
+    for (const w of session.workspaces) {
+      workspaces.add([session.name, w.workspace_id].join("\0"));
+      for (const t of w.tabs) for (const p of t.panes) panes.add(paneKey({ machine_id: v.id, session: session.name, pane_id: p.pane_id }));
+    }
+  return dropItems(s, (i) =>
+    i.kind === "agent"
+      ? i.ref.machine_id === v.id && !panes.has(paneKey(i.ref))
+      : i.ws.machine_id === v.id && !workspaces.has([i.ws.session, i.ws.workspace_id].join("\0")),
+  );
+}
+
+/** Drops the items `gone` matches; returns s when none match. A dropped active becomes null. */
+export function dropItems(s: OpenItems, gone: (i: OpenItem) => boolean): OpenItems {
+  const items = s.items.filter((i) => !gone(i));
+  if (items.length === s.items.length) return s;
+  return { items, preview: keepKey(items, s.preview), active: keepKey(items, s.active) };
+}
