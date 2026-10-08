@@ -172,6 +172,16 @@ export interface FileContent {
   truncated: boolean;
   size: number;
   mtime: number;
+  /** Set only for text read whole. */
+  cksum: number | null;
+  /** Text, read whole, valid UTF-8. */
+  editable: boolean;
+}
+/** A file's disk version; `files_write` checks it before saving. */
+export interface FileVersion {
+  size: number;
+  mtime: number;
+  cksum: number;
 }
 export interface FileList {
   paths: string[];

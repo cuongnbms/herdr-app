@@ -1,5 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use super::cksum::cksum;
 use super::paths::{check_rel, io_error, is_image, script_argv};
 use super::{BINARY_SNIFF_BYTES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
 use crate::error::{AppError, AppResult};
@@ -20,6 +21,18 @@ pub struct FileContent {
     pub truncated: bool,
     pub size: u64,
     pub mtime: u64,
+    /// Some only for text that was read whole.
+    pub cksum: Option<u32>,
+    /// Text, read whole, and valid UTF-8: the only content the editor can save back.
+    pub editable: bool,
+}
+
+/// What a file looked like on disk when it was read; `files_write` checks it before saving.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+pub struct FileVersion {
+    pub size: u64,
+    pub mtime: u64,
+    pub cksum: u32,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -124,6 +137,8 @@ pub async fn read_file(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Fi
         truncated,
         size,
         mtime,
+        cksum: None,
+        editable: false,
     };
     if image {
         return Ok(content(ContentKind::Image, None, false));
@@ -140,11 +155,16 @@ pub async fn read_file(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Fi
     } else {
         body
     };
-    Ok(content(
+    let mut c = content(
         ContentKind::Text,
         Some(String::from_utf8_lossy(body).into_owned()),
         truncated,
-    ))
+    );
+    if !truncated {
+        c.cksum = Some(cksum(body));
+        c.editable = std::str::from_utf8(body).is_ok();
+    }
+    Ok(c)
 }
 
 pub async fn read_image(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Vec<u8>> {
@@ -183,6 +203,41 @@ mod tests {
         assert_eq!(c.size, 11);
         assert!(!c.truncated);
         assert!(c.mtime > 1_600_000_000);
+    }
+
+    #[tokio::test]
+    async fn text_is_editable_with_its_cksum() {
+        let (_t, r) = root();
+        std::fs::write(format!("{r}/crlf.txt"), b"a\r\nb\n").unwrap();
+        let c = read_file(&LocalTransport, &r, "crlf.txt").await.unwrap();
+        assert!(c.editable);
+        assert_eq!(c.cksum, Some(crate::files::cksum::cksum(b"a\r\nb\n")));
+        assert_eq!(c.text.as_deref(), Some("a\r\nb\n"));
+    }
+
+    #[tokio::test]
+    async fn invalid_utf8_and_truncated_text_are_not_editable() {
+        let (_t, r) = root();
+        std::fs::write(format!("{r}/latin1.txt"), [b'a', 0xE9, b'b', b'\n']).unwrap();
+        let c = read_file(&LocalTransport, &r, "latin1.txt").await.unwrap();
+        assert!(!c.editable);
+        assert!(c.cksum.is_some());
+        std::fs::write(format!("{r}/big.txt"), vec![b'a'; MAX_TEXT_BYTES + 1]).unwrap();
+        let c = read_file(&LocalTransport, &r, "big.txt").await.unwrap();
+        assert!(c.truncated && !c.editable);
+        assert_eq!(c.cksum, None);
+    }
+
+    #[tokio::test]
+    async fn binary_and_images_are_not_editable() {
+        let (_t, r) = root();
+        std::fs::write(format!("{r}/b.bin"), [0u8, 1, 2]).unwrap();
+        std::fs::write(format!("{r}/i.png"), [0x89u8, b'P', b'N', b'G']).unwrap();
+        for rel in ["b.bin", "i.png"] {
+            let c = read_file(&LocalTransport, &r, rel).await.unwrap();
+            assert!(!c.editable, "{rel}");
+            assert_eq!(c.cksum, None, "{rel}");
+        }
     }
 
     #[tokio::test]
