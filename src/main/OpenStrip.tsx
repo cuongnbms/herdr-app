@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { StatusDot } from "../sidebar/StatusDot";
@@ -40,13 +41,27 @@ function placeOf(machines: Record<string, MachineView>, machine_id: string, sess
 }
 
 /** The agents and files opened in any session, like an editor's open files. */
+type Side = "before" | "after";
+
+/** Which half of the tab under the pointer: the dragged tab lands on that side of it. */
+const sideOf = (e: DragEvent): Side => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return e.clientX < r.left + r.width / 2 ? "before" : "after";
+};
+
+const TAB_TYPE = "application/x-herdr-open-item";
+
 export const OpenStrip = memo(function OpenStrip() {
   const machines = useApp((s) => s.machines);
   const { items, preview, active } = useApp((s) => s.openItems);
   const activate = useApp((s) => s.activateItem);
   const pin = useApp((s) => s.pinItem);
   const closeItems = useApp((s) => s.closeItems);
+  const moveItem = useApp((s) => s.moveItem);
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
+  // The tab being dragged, and the tab and side it would land on.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<{ key: string; side: Side } | null>(null);
   const tabs = entries(machines, items);
   if (tabs.length === 0) return null;
 
@@ -66,13 +81,48 @@ export const OpenStrip = memo(function OpenStrip() {
       {tabs.map(({ key, label, title, pane }) => {
         const isActive = key === active;
         const state = `${isActive ? " active" : ""}${key === preview ? " preview" : ""}`;
+        const drop = over?.key === key ? ` drop-${over.side}` : "";
+        const onDragOver = (e: DragEvent) => {
+          if (!dragging || dragging === key) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const side = sideOf(e);
+          setOver((p) => (p?.key === key && p.side === side ? p : { key, side }));
+        };
         return (
           // The tab and its close button are siblings: a tab must not contain another control.
           <div
             key={key}
             role="none"
             title={title}
-            className={`files-tab-item${state}`}
+            className={`files-tab-item${state}${dragging === key ? " dragging" : ""}${drop}`}
+            draggable
+            onDragStart={(e) => {
+              // WebKit starts a drag only when it carries data.
+              e.dataTransfer.setData(TAB_TYPE, key);
+              e.dataTransfer.effectAllowed = "move";
+              setDragging(key);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setOver(null);
+            }}
+            onDragEnter={onDragOver}
+            onDragOver={onDragOver}
+            onDragLeave={(e) => {
+              // By the pointer, not `relatedTarget`, which WebKit may leave null.
+              const r = e.currentTarget.getBoundingClientRect();
+              if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return;
+              setOver((p) => (p?.key === key ? null : p));
+            }}
+            onDrop={(e) => {
+              const from = dragging;
+              setDragging(null);
+              setOver(null);
+              if (!from || from === key) return;
+              e.preventDefault();
+              moveItem(from, key, sideOf(e));
+            }}
             onClick={() => activate(key)}
             onDoubleClick={() => pin(key)}
             onContextMenu={(e) => {

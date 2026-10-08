@@ -1325,6 +1325,11 @@ button.composer-model:disabled { cursor: default; }
 .files-tab-item:hover { color: var(--fg-2); background: var(--hover); }
 .files-tab-item.active { color: var(--fg); background: var(--surface-0); box-shadow: inset 0 -2px 0 var(--accent); }
 .files-tab-item.preview .files-tab-name { font-style: italic; }
+.files-tab-item.dragging { opacity: 0.5; }
+.files-tab-item.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.files-tab-item.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+.files-tab-item.active.drop-before { box-shadow: inset 0 -2px 0 var(--accent), inset 2px 0 0 var(--accent); }
+.files-tab-item.active.drop-after { box-shadow: inset 0 -2px 0 var(--accent), inset -2px 0 0 var(--accent); }
 .files-tab { display: flex; align-items: center; min-width: 0; height: 100%; border-radius: 4px; outline: none; }
 .files-tab:focus-visible { box-shadow: var(--ring); }
 .files-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

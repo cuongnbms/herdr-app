@@ -12,6 +12,7 @@ import {
   dropItems,
   findItem,
   itemKey,
+  moveItem,
   NO_ITEMS,
   openItem,
   pinItem,
@@ -104,6 +105,8 @@ export interface AppState {
   /** Closes relative to `key`; if the new active item is an agent, selects its Pane. */
   closeItems: (key: string, scope: "one" | CloseScope) => void;
   cycleItems: (delta: 1 | -1) => void;
+  /** Moves the item `from` to just `side` of `to` in the open items. */
+  moveItem: (from: string, to: string, side: "before" | "after") => void;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -203,6 +206,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   pinItem: (key) => set((s) => ({ openItems: pinItem(s.openItems, key) })),
   pinAgent: (ref) => set((s) => ({ openItems: openItem(s.openItems, { kind: "agent", ref }, { pin: true }) })),
+  moveItem: (from, to, side) => set((s) => ({ openItems: moveItem(s.openItems, from, to, side) })),
   closeItems: (key, scope) => {
     const old = get().openItems;
     const next = closeItems(old, scope, key);

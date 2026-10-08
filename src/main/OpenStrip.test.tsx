@@ -111,4 +111,17 @@ describe("OpenStrip", () => {
     expect(screen.getByRole("tab", { name: "a.md" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Mermaid diagram" }).getAttribute("aria-selected")).toBe("false");
   });
+
+  it("drags a tab onto another to move it there", () => {
+    openPinned("p1", "p2", "p3");
+    render(<OpenStrip />);
+    const item = (name: RegExp) => screen.getByRole("tab", { name }).closest(".files-tab-item") as HTMLElement;
+    const dataTransfer = { setData: () => {}, effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(item(/Bug button/), { dataTransfer });
+    fireEvent.dragOver(item(/Mermaid diagram/), { dataTransfer });
+    expect(item(/Mermaid diagram/).className).toMatch(/drop-(before|after)/);
+    fireEvent.drop(item(/Mermaid diagram/), { dataTransfer });
+    expect(open()).toEqual(["p1", "p3", "p2"]);
+    expect(item(/Mermaid diagram/).className).not.toMatch(/drop-/);
+  });
 });

@@ -67,6 +67,16 @@ function nextActive(s: OpenItems, items: OpenItem[], key: string): string | null
   return next ? itemKey(next) : null;
 }
 
+/** Moves the item `from` to just `side` of `to`; preview and active are unchanged. Unknown key, same key or no change → s. */
+export function moveItem(s: OpenItems, from: string, to: string, side: "before" | "after"): OpenItems {
+  const at = indexOfKey(s.items, from);
+  if (at < 0 || from === to || indexOfKey(s.items, to) < 0) return s;
+  const rest = s.items.filter((_, i) => i !== at);
+  const dest = indexOfKey(rest, to) + (side === "after" ? 1 : 0);
+  if (dest === at) return s;
+  return { ...s, items: [...rest.slice(0, dest), s.items[at], ...rest.slice(dest)] };
+}
+
 /** Moves `active` by `delta`, wrapping; no active → first item. Empty → s. */
 export function cycleItem(s: OpenItems, delta: 1 | -1): OpenItems {
   if (s.items.length === 0) return s;

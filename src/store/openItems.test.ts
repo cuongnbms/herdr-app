@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView, PaneRef } from "../lib/types";
-import { closeItems, cycleItem, dropItems, itemKey, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
+import { closeItems, cycleItem, dropItems, itemKey, moveItem, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
 
 const ws = (workspace_id = "w1", session = "s", machine_id = "local") => ({ machine_id, session, workspace_id });
 const a = (pane_id: string, session = "s", machine_id = "local"): OpenItem => ({ kind: "agent", ref: { machine_id, session, pane_id } as PaneRef });
@@ -50,6 +50,17 @@ describe("open items", () => {
     expect(cycleItem(s, -1).active).toBe(k(f("b")));
     expect(cycleItem(of([a("p1"), f("b")]), 1).active).toBe(k(a("p1")));
     expect(cycleItem(NO_ITEMS, 1)).toBe(NO_ITEMS);
+  });
+
+  it("moves an item before or after another, keeping preview and active", () => {
+    const s = of([a("p1"), f("b"), a("p3")], f("b"), a("p3"));
+    expect(moveItem(s, k(a("p3")), k(a("p1")), "before")).toEqual(of([a("p3"), a("p1"), f("b")], f("b"), a("p3")));
+    expect(moveItem(s, k(a("p1")), k(a("p3")), "after")).toEqual(of([f("b"), a("p3"), a("p1")], f("b"), a("p3")));
+    expect(moveItem(s, k(a("p1")), k(a("p3")), "before")).toEqual(of([f("b"), a("p1"), a("p3")], f("b"), a("p3")));
+    expect(moveItem(s, k(a("p1")), k(f("b")), "before")).toBe(s);
+    expect(moveItem(s, k(a("p1")), k(a("p1")), "after")).toBe(s);
+    expect(moveItem(s, k(a("nope")), k(a("p1")), "after")).toBe(s);
+    expect(moveItem(s, k(a("p1")), k(a("nope")), "after")).toBe(s);
   });
 
   it("setActive ignores unknown keys", () => {
