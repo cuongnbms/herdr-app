@@ -62,6 +62,12 @@ export function closeItems(s: OpenItems, scope: "one" | CloseScope, key: string)
   return { items, preview: keepKey(items, s.preview), active: nextActive(s, items, key) };
 }
 
+/** The keys `closeItems(s, scope, key)` would remove, in tab order. Derived from `closeItems` so the two cannot drift. */
+export function closingKeys(s: OpenItems, scope: "one" | CloseScope, key: string): string[] {
+  const kept = new Set(closeItems(s, scope, key).items.map(itemKey));
+  return s.items.map(itemKey).filter((k) => !kept.has(k));
+}
+
 function nextActive(s: OpenItems, items: OpenItem[], key: string): string | null {
   if (s.active === null || indexOfKey(items, s.active) >= 0) return s.active;
   if (indexOfKey(items, key) >= 0) return key;

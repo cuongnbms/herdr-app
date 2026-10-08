@@ -20,6 +20,7 @@ import { paneKey } from "./lib/types";
 import { activeItem, chosenLens, selectedPane, useApp } from "./store/app";
 import { itemKey } from "./store/openItems";
 import { syncSeenToHerdr } from "./store/seenSync";
+import { UnsavedDialog } from "./files/unsaved";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { defaultLens } from "./lens";
@@ -260,6 +261,7 @@ export default function App() {
       </main>
       {dashboardOpen && <AgentDashboard />}
       <Toasts />
+      <UnsavedDialog />
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>
   );

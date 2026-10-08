@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView, PaneRef } from "../lib/types";
-import { closeItems, cycleItem, dropFileItems, dropItems, itemKey, renameFileItems, moveItem, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
+import { closeItems, closingKeys, cycleItem, dropFileItems, dropItems, itemKey, renameFileItems, moveItem, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
 
 const ws = (workspace_id = "w1", session = "s", machine_id = "local") => ({ machine_id, session, workspace_id });
 const a = (pane_id: string, session = "s", machine_id = "local"): OpenItem => ({ kind: "agent", ref: { machine_id, session, pane_id } as PaneRef });
@@ -103,5 +103,16 @@ describe("open items", () => {
     const s = of([a("p1"), f("src/a.ts"), f("src/x/y.md"), f("srcs/a.ts"), f("src/a.ts", ws("w2"))], f("srcs/a.ts"), f("src/a.ts"));
     // The active item hands over as when its tab is closed.
     expect(dropFileItems(s, ws(), "/r", "src")).toEqual(of([a("p1"), f("srcs/a.ts"), f("src/a.ts", ws("w2"))], f("srcs/a.ts"), f("srcs/a.ts")));
+  });
+
+  it("lists the keys a close would remove", () => {
+    let s = NO_ITEMS;
+    for (const rel of ["a", "b", "c"]) s = openItem(s, f(rel), pin);
+    const key = (rel: string) => k(f(rel));
+    expect(closingKeys(s, "one", key("b"))).toEqual([key("b")]);
+    expect(closingKeys(s, "others", key("b"))).toEqual([key("a"), key("c")]);
+    expect(closingKeys(s, "right", key("a"))).toEqual([key("b"), key("c")]);
+    expect(closingKeys(s, "all", key("a"))).toEqual([key("a"), key("b"), key("c")]);
+    expect(closingKeys(s, "one", "nope")).toEqual([]);
   });
 });
