@@ -1,6 +1,6 @@
 # 0006: The Files tree creates, renames and deletes items; only Delete destroys, permanently and after a confirm
 
-> Status: Accepted · Date: 2026-10-08
+> Status: Accepted; "Editing a file's content stays out" superseded by [0007](./0007-file-viewer-edits-save-never-silently-overwrites.md) · Date: 2026-10-08
 
 ## Context
 
