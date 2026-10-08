@@ -1263,7 +1263,7 @@ button.composer-model:disabled { cursor: default; }
 .files-panel { flex: 0 0 50%; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .files-panel.collapsed { flex: none; }
 .files-panel-head { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 16px; box-sizing: border-box; }
-.files-panel-head .files-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; letter-spacing: 0.06em; color: var(--fg-3); pointer-events: auto; }
+.files-panel-head .files-title { font-weight: 600; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; letter-spacing: 0.06em; color: var(--fg-3); pointer-events: auto; }
 .files-panel-head .icon-btn { width: 22px; height: 22px; }
 .files-panel-head .icon-btn .icon { width: 14px; height: 14px; }
 .files-panel-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
@@ -1273,45 +1273,12 @@ button.composer-model:disabled { cursor: default; }
 .files-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .files-panel .files-banner { padding: 6px 16px; }
 
-/* Files in the main area */
-.files-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; letter-spacing: 0.06em; color: var(--fg-3); pointer-events: auto; }
-.files-panel-head .icon-btn { width: 22px; height: 22px; }
-.files-panel-head .icon-btn .icon { width: 14px; height: 14px; }
-.files-panel-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
-.files-collapse .icon { transform: rotate(90deg); transition: transform 0.1s; }
-.files-collapse.collapsed .icon { transform: none; }
-.files-set-folder-row { flex: none; padding: 0 12px 6px; }
-.files-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.files-panel .files-banner { padding: 6px 16px; }
-
-/* Files overlay */
-.files-overlay {
-  --files-line-h: 20px;
-  position: absolute; top: 0; bottom: 0; left: 248px; right: 0; z-index: 5;
-  display: flex; flex-direction: column; min-width: 0;
-  background: var(--surface-0); box-shadow: -1px 0 0 var(--line), var(--shadow-panel);
-  animation: dash-in var(--t) var(--ease);
-}
-.files-head {
-  flex: none; display: flex; align-items: center; gap: 10px; height: var(--titlebar); padding: 0 12px 0 20px; box-sizing: border-box;
-  background: var(--surface-chrome); border-bottom: 1px solid var(--line);
-}
-.files-title { font-weight: 600; font-size: 14px; pointer-events: none; white-space: nowrap; }
-.files-root { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font: 12px var(--mono); pointer-events: none; }
 .files-machine { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; }
 .files-head-spacer { flex: 1; }
 .files-set-folder { flex: none; }
 .files-banner { flex: none; padding: 6px 20px; font-size: 12px; color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent); border-bottom: 1px solid var(--line); }
 .files-banner-removed, .files-banner-error { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
-.files-body { flex: 1; min-height: 0; display: flex; }
-.files-side {
-  flex: none; width: var(--files-side, 280px); display: flex; flex-direction: column; min-height: 0;
-  background: var(--surface-side); border-right: 1px solid var(--line);
-}
 .files-side-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 8px; display: flex; flex-direction: column; }
-.files-resize { flex: none; width: 5px; margin-left: -3px; cursor: col-resize; z-index: 1; }
-.files-resize:hover { background: var(--accent-line); }
-.files-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface-0); }
 .files-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--surface-code); }
 .files-empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--fg-3); font-size: 13px; }
 

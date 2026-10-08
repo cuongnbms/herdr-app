@@ -166,6 +166,16 @@ describe("AgentList", () => {
     expect(useFilesPanel.getState().focusTick).toBe(1);
   });
 
+  it("Browse files keeps the selected pane when it is already in that workspace", () => {
+    useFilesPanel.setState(useFilesPanel.getInitialState(), true);
+    useApp.setState({ selected: { machine_id: "local", session: "default", pane_id: "p4" } });
+    render(<AgentList />);
+    fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Browse files" }));
+    expect(useApp.getState().selected?.pane_id).toBe("p4");
+    expect(useFilesPanel.getState().focusTick).toBe(1);
+  });
+
   it("starts an agent from the header menu in the workspace folder", () => {
     setFolder({ machine_id: "local", session: "default", workspace_id: "w2" }, "/srv/web");
     render(<AgentList />);
