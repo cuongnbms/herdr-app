@@ -18,8 +18,11 @@ export interface OpenItems {
 
 export const NO_ITEMS: OpenItems = { items: [], preview: null, active: null };
 
+/** The key of the file `rel` in the files root keyed `fk` (see `filesKey`). */
+export const fileItemKey = (fk: string, rel: string) => "file:" + fk + "|" + rel;
+
 export function itemKey(item: OpenItem): string {
-  return item.kind === "agent" ? "agent:" + paneKey(item.ref) : "file:" + filesKey(item.ws, item.root) + "|" + item.rel;
+  return item.kind === "agent" ? "agent:" + paneKey(item.ref) : fileItemKey(filesKey(item.ws, item.root), item.rel);
 }
 
 export function findItem(s: OpenItems, key: string): OpenItem | undefined {

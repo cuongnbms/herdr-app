@@ -12,6 +12,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.0",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@tanstack/react-virtual": "^3.14.13",
     "@tauri-apps/api": "^2",
