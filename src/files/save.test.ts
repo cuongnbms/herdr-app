@@ -88,4 +88,26 @@ describe("saveDraft", () => {
     expect(await p).toBe(true);
     expect(useDrafts.getState().drafts).toEqual({});
   });
+
+  it("keeps the Draft usable when a read rebases it during the save", async () => {
+    open();
+    let done!: (v: unknown) => void;
+    vi.mocked(invoke).mockReturnValueOnce(new Promise((res) => (done = res)));
+    const p = saveDraft(key, { force: true });
+    useDrafts.getState().rebase(key, { text: "other\n", size: 6, mtime: 20, cksum: 1 });
+    done({ size: 4, mtime: 11, cksum: 5 });
+    expect(await p).toBe(true);
+    expect(useDrafts.getState().drafts[key]).toMatchObject({ saving: false, base: { text: "one\n", cksum: 5 } });
+  });
+
+  it("ignores the result for a Draft re-opened during the save", async () => {
+    open();
+    let done!: (v: unknown) => void;
+    vi.mocked(invoke).mockReturnValueOnce(new Promise((res) => (done = res)));
+    const p = saveDraft(key, { force: true });
+    open("fresh\n");
+    done({ size: 4, mtime: 11, cksum: 5 });
+    await p;
+    expect(useDrafts.getState().drafts[key]).toMatchObject({ saving: false, base: { text: "fresh\n", cksum: 99 } });
+  });
 });

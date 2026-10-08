@@ -18,6 +18,8 @@ export interface DraftTarget {
 }
 
 export interface Draft extends DraftTarget {
+  /** Stable for the life of the Draft (survives rebase, save and rename); a new `open()` gets a new one. */
+  id: number;
   state: EditorState;
   base: DiskVersion;
   /** `base.text` as a document; the Draft is dirty when `state.doc` differs from it. */
@@ -40,7 +42,7 @@ interface DraftsState {
   /** (Re)creates a clean Draft. */
   open(target: DraftTarget, base: DiskVersion): void;
   update(key: string, state: EditorState): void;
-  /** A clean Draft takes the new disk content; a dirty one is left alone. */
+  /** A clean Draft takes the new disk content; a dirty or saving one is left alone. */
   rebase(key: string, base: DiskVersion): void;
   saved(key: string, base: DiskVersion): void;
   setConflict(key: string, c: "changed" | "removed" | null): void;
@@ -49,6 +51,8 @@ interface DraftsState {
   dropUnder(fk: string, rel: string): void;
   drop(key: string): void;
 }
+
+let nextId = 1;
 
 export const useDrafts = create<DraftsState>()((set) => {
   const patch = (key: string, f: (d: Draft) => Partial<Draft>) =>
@@ -63,13 +67,13 @@ export const useDrafts = create<DraftsState>()((set) => {
     drafts: {},
     open: (target, base) => {
       const state = createEditorState(base.text);
-      const draft: Draft = { ...target, state, base, baseDoc: state.doc, dirty: false, conflict: null, saving: false };
+      const draft: Draft = { ...target, id: nextId++, state, base, baseDoc: state.doc, dirty: false, conflict: null, saving: false };
       set((s) => ({ drafts: { ...s.drafts, [draftKey(target.fk, target.rel)]: draft } }));
     },
     update: (key, state) => patch(key, (d) => ({ state, dirty: !state.doc.eq(d.baseDoc) })),
     rebase: (key, base) =>
       patch(key, (d) => {
-        if (d.dirty) return {};
+        if (d.dirty || d.saving) return {};
         const state = createEditorState(base.text);
         return { state, base, baseDoc: state.doc };
       }),

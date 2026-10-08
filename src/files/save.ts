@@ -11,29 +11,26 @@ export async function saveDraft(key: string, opts: { force: boolean }): Promise<
   const draft = drafts[key];
   if (!draft || draft.saving || (draft.conflict && !opts.force)) return false;
   const text = draft.state.sliceDoc();
-  const { fk, machineId, root, rel, base } = draft;
+  const { fk, id, machineId, root, rel, base } = draft;
   setSaving(key, true);
-  // A rename during the save moves the Draft to a new key; it keeps its fk and base object.
-  const current = (): string | null => {
-    const now = useDrafts.getState().drafts;
-    if (now[key]?.base === base) return key;
-    const moved = Object.entries(now).find(([, d]: [string, Draft]) => d.fk === fk && d.base === base);
-    return moved ? moved[0] : null;
-  };
+  // A rename during the save moves the Draft to a new key; it keeps its fk and id.
+  // A Draft re-created by open() has a new id, so this save's result no longer applies.
+  const current = (): [string, Draft] | null =>
+    Object.entries(useDrafts.getState().drafts).find(([, d]) => d.fk === fk && d.id === id) ?? null;
   try {
     const version = await filesWrite(machineId, root, rel, text, opts.force ? null : { size: base.size, mtime: base.mtime, cksum: base.cksum });
-    const k = current();
-    if (k) saved(k, { text, ...version });
+    const found = current();
+    if (found) saved(found[0], { text, ...version });
     return true;
   } catch (e) {
-    const k = current();
+    const found = current();
     const { code, message } = (e ?? {}) as { code?: string; message?: string };
-    if (k) {
-      setSaving(k, false);
-      if (code === "conflict") setConflict(k, "changed");
-      else if (code === "not_found") setConflict(k, "removed");
+    if (found) {
+      setSaving(found[0], false);
+      if (code === "conflict") setConflict(found[0], "changed");
+      else if (code === "not_found") setConflict(found[0], "removed");
     }
-    if (code !== "conflict" && code !== "not_found") showToast(`Cannot save ${rel.split("/").pop()}: ${message ?? String(e)}`);
+    if (code !== "conflict" && code !== "not_found") showToast(`Cannot save ${(found?.[1].rel ?? rel).split("/").pop()}: ${message ?? String(e)}`);
     return false;
   }
 }
