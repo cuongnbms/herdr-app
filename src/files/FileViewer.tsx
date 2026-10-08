@@ -10,7 +10,7 @@ import { showToast } from "../ui/Toast";
 import { useFilesBus } from "./bus";
 import type { FindStatus } from "./find";
 import { settleDrafts } from "./closeGuard";
-import { diskVersion, useDrafts } from "./drafts";
+import { diskVersion, draftKey, useDrafts } from "./drafts";
 import { canEdit, roundTrips } from "./editorSetup";
 import { FileEditor } from "./FileEditor";
 import { FindBar } from "./FindBar";
@@ -54,6 +54,16 @@ export function FileViewer({ item }: Props) {
   const reloads = useFilesBus((s) => s.reloads[key] ?? 0);
   const batch = useFilesBus((s) => s.batches[key]);
 
+  /** A file that is gone: a Draft keeps its text and says so, otherwise the plain banner shows. */
+  const gone = useCallback(
+    (r: string) => {
+      const dk = draftKey(key, r);
+      if (useDrafts.getState().drafts[dk]) useDrafts.getState().setConflict(dk, "removed");
+      else setRemoved(r);
+    },
+    [key],
+  );
+
   const load = useCallback(
     (r: string) => {
       read(machineId, root, r).then(
@@ -62,14 +72,29 @@ export function FileViewer({ item }: Props) {
           setDoc({ rel: r, content });
           setError(null);
           setRemoved(null);
+          // Read at resolve time: `saving` and `dirty` are as they are now, not as they were when the read began.
+          const dk = draftKey(key, r);
+          const { drafts, rebase, setConflict } = useDrafts.getState();
+          const d = drafts[dk];
+          // Our own save coming back from the watch is not a change.
+          if (!d || d.saving) return;
+          if (d.dirty) {
+            if (content.cksum !== d.base.cksum) setConflict(dk, "changed");
+          } else {
+            const base = diskVersion(content);
+            if (base) {
+              rebase(dk, base);
+              if (d.conflict) setConflict(dk, null);
+            } else setConflict(dk, "changed");
+          }
         },
         (e) => {
-          if ((e as { code?: string } | null)?.code === "not_found") setRemoved(r);
+          if ((e as { code?: string } | null)?.code === "not_found") gone(r);
           else setError({ rel: r, message: errMessage(e) });
         },
       );
     },
-    [read, machineId, root],
+    [read, machineId, root, key, gone],
   );
 
   useEffect(() => {
@@ -85,10 +110,10 @@ export function FileViewer({ item }: Props) {
     // A folder above it changed (e.g. removed or renamed): reading it again finds out.
     const above = (c: FileChange) => c.isDir && (c.path === "" || rel.startsWith(c.path + "/"));
     if (own) {
-      if (own.removed) setRemoved(rel);
+      if (own.removed) gone(rel);
       else load(rel);
     } else if (batch.changes.some(above)) load(rel);
-  }, [batch, rel, load]);
+  }, [batch, rel, load, gone]);
 
   // A link's fragment waits on the bus under the key of the file it targets; this viewer takes its own.
   const itemId = itemKey(item);
@@ -130,7 +155,7 @@ export function FileViewer({ item }: Props) {
   const draft = useDrafts(
     useShallow((s) => {
       const d = s.drafts[draftId];
-      return d ? { dirty: d.dirty, saving: d.saving } : null;
+      return d ? { dirty: d.dirty, saving: d.saving, conflict: d.conflict } : null;
     }),
   );
   // Parsing the text is costly, so it is done once per read, not per render.
@@ -141,6 +166,8 @@ export function FileViewer({ item }: Props) {
     const mixedEnds = !editable && shown.kind === "text" && shown.editable && shown.cksum !== null && shown.text !== null && !roundTrips(shown.text);
     return { editable, mixedEnds };
   }, [shown]);
+  /** The conflict banner pulses for a moment when ⌘S is pressed while it is up. */
+  const [flash, setFlash] = useState(false);
   const flashTimer = useRef<number>(undefined);
   useEffect(() => () => window.clearTimeout(flashTimer.current), []);
 
@@ -151,12 +178,28 @@ export function FileViewer({ item }: Props) {
   const done = () => void settleDrafts([draftId]);
   const save = () => {
     if (useDrafts.getState().drafts[draftId]?.conflict) {
-      // The conflict banner (Task 9) is the element with the `files-banner-conflict` class; none yet, so a no-op.
-      const banners = document.querySelectorAll(".files-banner-conflict");
-      banners.forEach((b) => b.classList.add("flash"));
+      setFlash(true);
       window.clearTimeout(flashTimer.current);
-      flashTimer.current = window.setTimeout(() => banners.forEach((b) => b.classList.remove("flash")), 600);
+      flashTimer.current = window.setTimeout(() => setFlash(false), 600);
     } else void saveDraft(draftId, { force: false });
+  };
+
+  /** Drops the edits and takes what is on disk. */
+  const reload = () => {
+    filesRead(machineId, root, rel).then(
+      (content) => {
+        const base = diskVersion(content);
+        if (base) useDrafts.getState().open({ fk: key, machineId, root, rel }, base);
+        else useDrafts.getState().drop(draftId);
+        setDoc({ rel, content });
+      },
+      (e) => showToast(`Cannot reload ${rel.split("/").pop()}: ${errMessage(e)}`),
+    );
+  };
+  const overwrite = () => void saveDraft(draftId, { force: true });
+  const close = () => {
+    useDrafts.getState().drop(draftId);
+    useApp.getState().closeItems(draftId, "one");
   };
 
   const keys = (e: KeyboardEvent) => {
@@ -267,7 +310,23 @@ export function FileViewer({ item }: Props) {
           ) : null}
         </div>
       </div>
-      {removed === rel && <div className="files-banner files-banner-removed">File removed</div>}
+      {draft?.conflict && (
+        <div className={`files-banner files-banner-conflict${flash ? " flash" : ""}`} role="alert">
+          <span>{draft.conflict === "changed" ? "File changed on disk" : "File was deleted"}</span>
+          {draft.conflict === "changed" ? (
+            <>
+              <button type="button" onClick={reload}>Reload</button>
+              <button type="button" onClick={overwrite}>Overwrite</button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={overwrite}>Save again</button>
+              <button type="button" onClick={close}>Close</button>
+            </>
+          )}
+        </div>
+      )}
+      {removed === rel && !draft && <div className="files-banner files-banner-removed">File removed</div>}
       {shown && error && error.rel === rel && (
         <div className="files-banner files-banner-error" role="alert">
           Could not reload: {error.message}

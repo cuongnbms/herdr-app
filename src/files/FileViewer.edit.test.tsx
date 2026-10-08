@@ -18,7 +18,7 @@ import { itemKey } from "../store/openItems";
 import { useFilesBus } from "./bus";
 import { useDrafts } from "./drafts";
 import { FileViewer } from "./FileViewer";
-import { useFiles } from "./store";
+import { filesKey, useFiles } from "./store";
 import { UnsavedDialog } from "./unsaved";
 
 const ws = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -114,5 +114,74 @@ describe("FileViewer edit mode", () => {
     first.unmount();
     render(<FileViewer key="2" item={item} online />);
     await waitFor(() => expect(document.querySelector(".cm-content")?.textContent).toContain("onekept"));
+  });
+
+  const publish = (changes: { path: string; isDir: boolean; removed: boolean }[]) =>
+    act(() => useFilesBus.getState().publish(filesKey(ws, "/r"), changes));
+  const startEditing = async () => {
+    render(<><FileViewer item={item} online /><UnsavedDialog /></>);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  };
+
+  it("a clean draft follows the agent's write", async () => {
+    await startEditing();
+    Object.assign(disk, { text: "agent\n", cksum: 20, mtime: 5 });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(document.querySelector(".cm-content")?.textContent).toContain("agent"));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a dirty draft is never replaced; a real change raises the banner, a touch does not", async () => {
+    await startEditing();
+    typeAtEnd("mine");
+    disk.mtime = 7; // touched only: same cksum
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length).toBe(2));
+    expect(screen.queryByText("File changed on disk")).toBeNull();
+    Object.assign(disk, { text: "agent\n", cksum: 21 });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    expect(await screen.findByText("File changed on disk")).toBeTruthy();
+    expect(document.querySelector(".cm-content")?.textContent).toContain("one" + "mine");
+    press("s", { metaKey: true });
+    expect(writes()).toHaveLength(0);
+    expect(document.querySelector(".files-banner-conflict")?.classList.contains("flash")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Overwrite" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0][1]).toMatchObject({ expected: null, text: "one\nmine" });
+    await waitFor(() => expect(screen.queryByText("File changed on disk")).toBeNull());
+  });
+
+  it("Reload takes the disk version and drops the edits", async () => {
+    await startEditing();
+    typeAtEnd("mine");
+    Object.assign(disk, { text: "agent\n", cksum: 22 });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(document.querySelector(".cm-content")?.textContent).toBe("agent"));
+    expect(useDrafts.getState().drafts[key]).toMatchObject({ dirty: false, conflict: null, base: { cksum: 22 } });
+  });
+
+  it("the app's own save coming back from the watch raises nothing", async () => {
+    await startEditing();
+    typeAtEnd("two\n");
+    let finish!: (v: unknown) => void;
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise((r) => (finish = r)));
+    press("s", { metaKey: true });
+    Object.assign(disk, { text: "one\ntwo\n", cksum: 10, mtime: 2 });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length).toBe(2));
+    await act(async () => finish({ size: 8, mtime: 2, cksum: 10 }));
+    expect(screen.queryByText("File changed on disk")).toBeNull();
+    expect(useDrafts.getState().drafts[key]).toMatchObject({ dirty: false, conflict: null });
+  });
+
+  it("a deleted file offers Save again and Close", async () => {
+    await startEditing();
+    typeAtEnd("mine");
+    publish([{ path: "a.txt", isDir: false, removed: true }]);
+    expect(await screen.findByText("File was deleted")).toBeTruthy();
+    expect(screen.queryByText("File removed")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save again" }));
+    await waitFor(() => expect(writes()[0][1]).toMatchObject({ expected: null }));
   });
 });
