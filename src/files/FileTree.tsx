@@ -3,8 +3,21 @@ import { createPortal } from "react-dom";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { filesListDir } from "../lib/ipc";
 import type { FileChange, FileEntry } from "../lib/types";
-import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
-import { ArrowDownIcon, ArrowUpIcon, ChevronIcon, FileIcon, FolderIcon, FolderInputIcon, FolderOpenIcon } from "../ui/icons";
+import { ConfirmDialog, ContextMenu, TextDialog, type MenuItem } from "../sidebar/ContextMenu";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronIcon,
+  FileIcon,
+  FolderIcon,
+  FolderInputIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  PencilIcon,
+  PlusIcon,
+  TrashIcon,
+} from "../ui/icons";
+import { createItem, deleteItem, renameItem } from "./edit";
 import { startDownload, startUpload } from "./transfer";
 import { useFiles } from "./store";
 import { copyItems } from "./treeMenu";
@@ -15,6 +28,8 @@ interface Props {
   root: string;
   filesKey: string;
   onOpen: (rel: string, pin: boolean) => void;
+  /** An item was renamed to `to`, or deleted (`to` null), from this tree. */
+  onMoved?: (from: string, to: string | null) => void;
   /** Changing it refetches the root and every expanded folder. */
   reloadKey: number;
   /** Lists heavy folders (`.git`, `node_modules`…) too; changing it refetches like `reloadKey`. */
@@ -31,11 +46,13 @@ function errMessage(e: unknown): string {
 }
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+const basename = (rel: string) => rel.slice(rel.lastIndexOf("/") + 1);
+const parentOf = (rel: string) => rel.slice(0, Math.max(rel.lastIndexOf("/"), 0));
 const isFolder = (kind: string | undefined) => kind === "dir" || kind === "dirlink";
 /** A linked folder looks like a folder, named like a symlink. */
 const kindClass = (kind: FileEntry["kind"]) => (kind === "dirlink" ? "files-tree-dir files-tree-symlink" : `files-tree-${kind}`);
 
-export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHeavy = false, changes = null }: Props) {
+export function FileTree({ machineId, root, filesKey, onOpen, onMoved, reloadKey, showHeavy = false, changes = null }: Props) {
   const expanded = useFiles((s) => s.byWs[filesKey]?.expanded ?? NO_DIRS);
   const toggleDir = useFiles((s) => s.toggleDir);
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -54,6 +71,10 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   }
   /** The open context menu: the row it belongs to (null for the tree's empty space) and the folder an Upload goes into. */
   const [menu, setMenu] = useState<{ x: number; y: number; rel: string | null; dir: string } | null>(null);
+  /** The open New, Rename or Delete dialog. */
+  const [dialog, setDialog] = useState<
+    { kind: "new"; dir: string; isDir: boolean } | { kind: "rename"; rel: string } | { kind: "delete"; rel: string; isDir: boolean } | null
+  >(null);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const gen = useRef(0);
@@ -148,15 +169,90 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
     if ((await startUpload(machineId, root, dir, paths)) && scopeRef.current === startedIn) load(dir);
   };
 
+  /** Runs an edit, then relists `dir` unless the root changed meanwhile; `still` tells whether it did not. */
+  const edited = async <T,>(dir: string, op: Promise<T>): Promise<{ done: T; still: boolean }> => {
+    const startedIn = scopeRef.current;
+    const done = await op;
+    const still = scopeRef.current === startedIn;
+    if (done && still) load(dir);
+    return { done, still };
+  };
+
+  const create = async (dir: string, isDir: boolean, name: string) => {
+    name = name.trim();
+    if (!name) return;
+    const rel = join(dir, name);
+    const { done, still } = await edited(dir, createItem(machineId, root, rel, isDir));
+    // Another root is shown now: its folds and tabs are not this file's to open.
+    if (!done || !still) return;
+    if (dir && !useFiles.getState().ws(filesKey).expanded.includes(dir)) toggleDir(filesKey, dir);
+    if (!isDir) onOpen(rel, true);
+  };
+
+  const rename = async (rel: string, name: string) => {
+    name = name.trim();
+    if (!name || name === basename(rel)) return;
+    // Reported even after the root changed: `onMoved` is still the one bound to this root.
+    const { done: to } = await edited(parentOf(rel), renameItem(machineId, root, rel, name));
+    if (to) onMoved?.(rel, to);
+  };
+
+  const remove = async (rel: string) => {
+    const { done } = await edited(parentOf(rel), deleteItem(machineId, root, rel));
+    if (done) onMoved?.(rel, null);
+  };
+
   const menuItems = (m: { rel: string | null; dir: string }): MenuItem[] => {
     const list: MenuItem[] = [
+      { label: "New File…", icon: PlusIcon, onSelect: () => setDialog({ kind: "new", dir: m.dir, isDir: false }) },
+      { label: "New Folder…", icon: FolderPlusIcon, onSelect: () => setDialog({ kind: "new", dir: m.dir, isDir: true }) },
       ...(m.rel !== null ? copyItems(root, m.rel) : []),
       { label: "Upload Files…", icon: ArrowUpIcon, onSelect: () => void upload(m.dir, false) },
       { label: "Upload Folder…", icon: FolderInputIcon, onSelect: () => void upload(m.dir, true) },
     ];
     const rel = m.rel;
-    if (rel !== null) list.push({ label: "Download", icon: ArrowDownIcon, onSelect: () => void startDownload(machineId, root, rel) });
+    if (rel !== null) {
+      // A folder's row opens its menu with the folder itself as `dir`.
+      const isDir = m.dir === rel;
+      list.push(
+        { label: "Download", icon: ArrowDownIcon, onSelect: () => void startDownload(machineId, root, rel) },
+        { label: "Rename…", icon: PencilIcon, onSelect: () => setDialog({ kind: "rename", rel }) },
+        { label: "Delete…", icon: TrashIcon, onSelect: () => setDialog({ kind: "delete", rel, isDir }) },
+      );
+    }
     return list;
+  };
+
+  const renderDialog = () => {
+    if (!dialog) return null;
+    const close = () => setDialog(null);
+    if (dialog.kind === "new") {
+      const what = dialog.isDir ? "Folder" : "File";
+      return (
+        <TextDialog
+          title={`New ${what}${dialog.dir ? ` in ${dialog.dir}/` : ""}`}
+          initial=""
+          submitLabel="Create"
+          onSubmit={(name) => void create(dialog.dir, dialog.isDir, name)}
+          onClose={close}
+        />
+      );
+    }
+    if (dialog.kind === "rename") {
+      return (
+        <TextDialog title="Rename" initial={basename(dialog.rel)} submitLabel="Rename" onSubmit={(name) => void rename(dialog.rel, name)} onClose={close} />
+      );
+    }
+    const name = basename(dialog.rel);
+    return (
+      <ConfirmDialog
+        title={dialog.isDir ? "Delete Folder" : "Delete File"}
+        message={dialog.isDir ? `Delete "${name}" and everything in it? This cannot be undone.` : `Delete "${name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => void remove(dialog.rel)}
+        onClose={close}
+      />
+    );
   };
 
   const items = () => Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);
@@ -305,6 +401,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
       {renderDir("", 0)}
       {/* Fixed to the window rather than to an animating ancestor. */}
       {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />, document.body)}
+      {dialog && createPortal(renderDialog(), document.body)}
     </div>
   );
 }

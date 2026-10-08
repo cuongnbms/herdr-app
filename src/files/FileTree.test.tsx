@@ -277,15 +277,15 @@ describe("FileTree context menu", () => {
     args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "x.ts", kind: "file" }];
   const menuLabels = () => screen.getAllByRole("menuitem").map((b) => b.textContent);
 
-  it("offers Upload and Download on rows, Upload only on empty space", async () => {
+  it("offers every action on rows, New and Upload on empty space", async () => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(listing as any);
     render(<FileTree machineId="m" root="/r" filesKey="m/default/c1" onOpen={() => {}} reloadKey={0} />);
     fireEvent.contextMenu(await screen.findByText("src"));
-    expect(menuLabels()).toEqual(["Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download"]);
+    expect(menuLabels()).toEqual(["New File…", "New Folder…", "Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download", "Rename…", "Delete…"]);
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.contextMenu(screen.getByRole("tree"));
-    expect(menuLabels()).toEqual(["Upload Files…", "Upload Folder…"]);
+    expect(menuLabels()).toEqual(["New File…", "New Folder…", "Upload Files…", "Upload Folder…"]);
   });
 
   it("a right-click on the open menu does not swap it for the root menu", async () => {
@@ -293,10 +293,10 @@ describe("FileTree context menu", () => {
     vi.mocked(invoke).mockImplementation(listing as any);
     render(<FileTree machineId="m" root="/r" filesKey="m/default/c6" onOpen={() => {}} reloadKey={0} />);
     fireEvent.contextMenu(await screen.findByText("a.md"));
-    expect(menuLabels()).toEqual(["Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download"]);
+    expect(menuLabels()).toEqual(["New File…", "New Folder…", "Copy Path", "Copy Relative Path", "Upload Files…", "Upload Folder…", "Download", "Rename…", "Delete…"]);
     fireEvent.contextMenu(screen.getByRole("menuitem", { name: "Download" }));
     // The menu's own overlay closes it; the tree must not open its root menu in its place.
-    expect(screen.queryAllByRole("menuitem").map((b) => b.textContent)).not.toEqual(["Upload Files…", "Upload Folder…"]);
+    expect(screen.queryAllByRole("menuitem").map((b) => b.textContent)).not.toEqual(["New File…", "New Folder…", "Upload Files…", "Upload Folder…"]);
     expect(screen.queryAllByRole("menuitem")).toEqual([]);
   });
 
@@ -362,5 +362,165 @@ describe("FileTree context menu", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(vi.mocked(invoke).mock.calls.slice(before).filter(([, a]: any) => a.root === "/r")).toEqual([]);
     expect(vi.mocked(invoke).mock.calls.length).toBe(before);
+  });
+});
+
+describe("FileTree edits", () => {
+  const listing = async (cmd: string, args: any) => {
+    if (cmd === "files_rename") return args.rel.replace(/[^/]*$/, args.name);
+    if (cmd !== "files_list_dir") return null;
+    return args.rel === "" ? [{ name: "src", kind: "dir" }, { name: "a.md", kind: "file" }] : [{ name: "x.ts", kind: "file" }];
+  };
+  const calls = (cmd: string) => vi.mocked(invoke).mock.calls.filter(([c]) => c === cmd).map(([, a]) => a);
+  const lists = (rel: string) => calls("files_list_dir").filter((a: any) => a.rel === rel).length;
+  const type = (value: string) => {
+    const input = screen.getByRole("dialog").querySelector("input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+  const setup = async (fk: string, extra: { onOpen?: any; onMoved?: any } = {}) => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(listing as any);
+    vi.mocked(showToast).mockClear();
+    const view = render(<FileTree machineId="m" root="/r" filesKey={fk} onOpen={extra.onOpen ?? (() => {})} onMoved={extra.onMoved} reloadKey={0} />);
+    await screen.findByText("src");
+    return view;
+  };
+
+  it("creates a file in the folder, opens it pinned and relists the folder", async () => {
+    const onOpen = vi.fn();
+    await setup("m/default/e1", { onOpen });
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New File…" }));
+    const before = lists("src");
+    type("b.ts");
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith("src/b.ts", true));
+    expect(calls("files_create")).toEqual([{ machineId: "m", root: "/r", rel: "src/b.ts", isDir: false }]);
+    await waitFor(() => expect(lists("src")).toBeGreaterThan(before));
+  });
+
+  it("creates a folder beside a file, or at the root from empty space", async () => {
+    const onOpen = vi.fn();
+    await setup("m/default/e2", { onOpen });
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New Folder…" }));
+    type("docs");
+    await waitFor(() => expect(calls("files_create")).toEqual([{ machineId: "m", root: "/r", rel: "docs", isDir: true }]));
+    fireEvent.contextMenu(screen.getByRole("tree"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New File…" }));
+    type("notes/today.md");
+    await waitFor(() => expect(calls("files_create")[1]).toEqual({ machineId: "m", root: "/r", rel: "notes/today.md", isDir: false }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("expands a collapsed folder a file is created in", async () => {
+    await setup("m/default/e3");
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New File…" }));
+    type("b.ts");
+    await screen.findByText("x.ts");
+    expect(screen.getByText("src").closest("[role=treeitem]")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("ignores an empty name", async () => {
+    await setup("m/default/e4");
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New File…" }));
+    type("  ");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls("files_create")).toEqual([]);
+  });
+
+  it("shows why a create failed and opens nothing", async () => {
+    const onOpen = vi.fn();
+    await setup("m/default/e5", { onOpen });
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "files_create") throw { code: "invalid", message: "src/x.ts already exists" };
+      return listing(cmd, args);
+    });
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New File…" }));
+    type("x.ts");
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Cannot create x.ts: src/x.ts already exists"));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("renames in place with the old name filled in, then reports the move", async () => {
+    const onMoved = vi.fn();
+    await setup("m/default/e6", { onMoved });
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    expect((screen.getByRole("dialog").querySelector("input") as HTMLInputElement).value).toBe("a.md");
+    type("b.md");
+    await waitFor(() => expect(onMoved).toHaveBeenCalledWith("a.md", "b.md"));
+    expect(calls("files_rename")).toEqual([{ machineId: "m", root: "/r", rel: "a.md", name: "b.md" }]);
+  });
+
+  it("does not rename to the same name", async () => {
+    const onMoved = vi.fn();
+    await setup("m/default/e7", { onMoved });
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    type("a.md");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls("files_rename")).toEqual([]);
+    expect(onMoved).not.toHaveBeenCalled();
+  });
+
+  it("deletes a folder only after confirming, then reports it gone", async () => {
+    const onMoved = vi.fn();
+    await setup("m/default/e8", { onMoved });
+    fireEvent.contextMenu(screen.getByText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete…" }));
+    expect(screen.getByRole("dialog").textContent).toContain('Delete "src" and everything in it? This cannot be undone.');
+    expect(calls("files_delete")).toEqual([]);
+    const before = lists("");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(onMoved).toHaveBeenCalledWith("src", null));
+    expect(calls("files_delete")).toEqual([{ machineId: "m", root: "/r", rel: "src" }]);
+    await waitFor(() => expect(lists("")).toBeGreaterThan(before));
+  });
+
+  it("cancelling a delete deletes nothing", async () => {
+    await setup("m/default/e9");
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete…" }));
+    expect(screen.getByRole("dialog").textContent).toContain('Delete "a.md"? This cannot be undone.');
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls("files_delete")).toEqual([]);
+  });
+
+  it("shows why a delete failed and reports nothing", async () => {
+    const onMoved = vi.fn();
+    await setup("m/default/e10", { onMoved });
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args: any) => {
+      if (cmd === "files_delete") throw { code: "io", message: "Permission denied" };
+      return listing(cmd, args);
+    });
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith("Cannot delete a.md: Permission denied"));
+    expect(onMoved).not.toHaveBeenCalled();
+  });
+
+  it("still reports a rename that finished after the root changed, without relisting the old root", async () => {
+    const onMoved = vi.fn();
+    const { rerender } = await setup("m/default/e11", { onMoved });
+    let finish!: (to: string) => void;
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args: any) =>
+      cmd === "files_rename" ? new Promise((r) => (finish = r)) : listing(cmd, args),
+    );
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    type("b.md");
+    await waitFor(() => expect(calls("files_rename")).toHaveLength(1));
+    rerender(<FileTree machineId="m" root="/s" filesKey="m/default/e11" onOpen={() => {}} onMoved={onMoved} reloadKey={0} />);
+    await screen.findByText("a.md");
+    const before = vi.mocked(invoke).mock.calls.length;
+    finish("b.md");
+    await waitFor(() => expect(onMoved).toHaveBeenCalledWith("a.md", "b.md"));
+    expect(vi.mocked(invoke).mock.calls.slice(before)).toEqual([]);
   });
 });

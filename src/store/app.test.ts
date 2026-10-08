@@ -474,4 +474,22 @@ describe("open items", () => {
     useApp.getState().removeMachine("local");
     expect(useApp.getState().openItems).toEqual(NO_ITEMS);
   });
+
+  it("a renamed file's item follows it, and so does its recent entry", () => {
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().filesMoved(ws, "/r", "a.md", "b.md");
+    expect(activeItem(useApp.getState())).toEqual({ ...fileItem, rel: "b.md" });
+    expect(useFiles.getState().ws(filesKey(ws, "/r")).recent[0]).toBe("b.md");
+    expect(useFiles.getState().ws(filesKey(ws, "/r")).recent).not.toContain("a.md");
+  });
+
+  it("a deleted file's item closes and an agent beside it becomes active", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().filesMoved(ws, "/r", "a.md", null);
+    expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: ref("w2:p2") }]);
+    expect(useApp.getState().openItems.active).toBe(key("w2:p2"));
+    expect(useFiles.getState().ws(filesKey(ws, "/r")).recent).not.toContain("a.md");
+  });
 });

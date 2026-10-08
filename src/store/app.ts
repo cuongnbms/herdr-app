@@ -9,6 +9,7 @@ import { useFiles, filesKey } from "../files/store";
 import {
   closeItems,
   cycleItem,
+  dropFileItems,
   dropItems,
   findItem,
   itemKey,
@@ -17,6 +18,7 @@ import {
   openItem,
   pinItem,
   pruneItems,
+  renameFileItems,
   setActive,
   type CloseScope,
   type OpenItem,
@@ -97,6 +99,8 @@ export interface AppState {
   openItems: OpenItems;
   /** Opens a file item (pinned or as the preview) and makes it active; `selected` is unchanged. Records it in useFiles recent. */
   openFile: (ws: WorkspaceRef, root: string, rel: string, opts: { pin: boolean }) => void;
+  /** After `from` below `root` was renamed to `to`, or deleted (`to` null): its file items and Files state follow. */
+  filesMoved: (ws: WorkspaceRef, root: string, from: string, to: string | null) => void;
   /** Activates an item: an agent item selects its Pane; a file item only becomes active. */
   activateItem: (key: string) => void;
   pinItem: (key: string) => void;
@@ -197,6 +201,14 @@ export const useApp = create<AppState>((set, get) => ({
   openFile: (ws, root, rel, opts) => {
     set((s) => ({ openItems: openItem(s.openItems, { kind: "file", ws, root, rel }, opts) }));
     useFiles.getState().addRecent(filesKey(ws, root), rel);
+  },
+  filesMoved: (ws, root, from, to) => {
+    const old = get().openItems;
+    const next = to === null ? dropFileItems(old, ws, root, from) : renameFileItems(old, ws, root, from, to);
+    useFiles.getState().moveRel(filesKey(ws, root), from, to);
+    if (next === old) return;
+    set({ openItems: next });
+    if (next.active !== old.active) selectIfAgent(get(), next);
   },
   activateItem: (key) => {
     const item = findItem(get().openItems, key);

@@ -1,5 +1,5 @@
 import { paneKey, type MachineView, type PaneRef } from "../lib/types";
-import { filesKey } from "../files/store";
+import { filesKey, relUnder } from "../files/store";
 import type { WorkspaceRef } from "../workspaces/folder";
 
 export type CloseScope = "others" | "right" | "all";
@@ -106,4 +106,29 @@ export function dropItems(s: OpenItems, gone: (i: OpenItem) => boolean): OpenIte
   const items = s.items.filter((i) => !gone(i));
   if (items.length === s.items.length) return s;
   return { items, preview: keepKey(items, s.preview), active: keepKey(items, s.active) };
+}
+
+const inRoot = (i: OpenItem, fk: string): i is Extract<OpenItem, { kind: "file" }> =>
+  i.kind === "file" && filesKey(i.ws, i.root) === fk;
+
+/** After `from` was renamed to `to` below `root`: its file items (and those inside it) follow, keeping preview and active. */
+export function renameFileItems(s: OpenItems, ws: WorkspaceRef, root: string, from: string, to: string): OpenItems {
+  const fk = filesKey(ws, root);
+  const renamed = new Map<string, string>();
+  const items = s.items.map((i) => {
+    if (!inRoot(i, fk) || !relUnder(i.rel, from)) return i;
+    const next = { ...i, rel: to + i.rel.slice(from.length) };
+    renamed.set(itemKey(i), itemKey(next));
+    return next;
+  });
+  if (!renamed.size) return s;
+  const remap = (key: string | null) => (key && renamed.get(key)) ?? key;
+  return { items, preview: remap(s.preview), active: remap(s.active) };
+}
+
+/** After `rel` was deleted below `root`: closes its file items and those inside it, as closing their tabs would. */
+export function dropFileItems(s: OpenItems, ws: WorkspaceRef, root: string, rel: string): OpenItems {
+  const fk = filesKey(ws, root);
+  const gone = s.items.filter((i) => inRoot(i, fk) && relUnder(i.rel, rel)).map(itemKey);
+  return gone.reduce((acc, key) => closeItems(acc, "one", key), s);
 }

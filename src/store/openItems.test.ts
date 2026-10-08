@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MachineView, PaneRef } from "../lib/types";
-import { closeItems, cycleItem, dropItems, itemKey, moveItem, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
+import { closeItems, cycleItem, dropFileItems, dropItems, itemKey, renameFileItems, moveItem, NO_ITEMS, openItem, pinItem, pruneItems, setActive, type OpenItem, type OpenItems } from "./openItems";
 
 const ws = (workspace_id = "w1", session = "s", machine_id = "local") => ({ machine_id, session, workspace_id });
 const a = (pane_id: string, session = "s", machine_id = "local"): OpenItem => ({ kind: "agent", ref: { machine_id, session, pane_id } as PaneRef });
@@ -80,5 +80,28 @@ describe("open items", () => {
     const s = of([a("p1"), f("x")]);
     expect(dropItems(s, () => false)).toBe(s);
     expect(dropItems(s, (i) => i.kind === "file")).toEqual(of([a("p1")]));
+  });
+
+  it("renames a file item and keeps it active and the preview", () => {
+    const s = of([a("p1"), f("src/a.ts")], f("src/a.ts"), f("src/a.ts"));
+    expect(renameFileItems(s, ws(), "/r", "src/a.ts", "src/b.ts")).toEqual(of([a("p1"), f("src/b.ts")], f("src/b.ts"), f("src/b.ts")));
+  });
+
+  it("renames the files inside a renamed folder, not its namesakes", () => {
+    const s = of([f("src/a.ts"), f("src/x/y.md"), f("srcs/a.ts"), f("src/a.ts", ws("w2")), f("src/a.ts", ws(), "/other")], null, f("src/x/y.md"));
+    expect(renameFileItems(s, ws(), "/r", "src", "lib")).toEqual(
+      of([f("lib/a.ts"), f("lib/x/y.md"), f("srcs/a.ts"), f("src/a.ts", ws("w2")), f("src/a.ts", ws(), "/other")], null, f("lib/x/y.md")),
+    );
+  });
+
+  it("returns the same state when no file is renamed", () => {
+    const s = of([f("a")]);
+    expect(renameFileItems(s, ws(), "/r", "b", "c")).toBe(s);
+  });
+
+  it("closes a deleted file and the files inside a deleted folder", () => {
+    const s = of([a("p1"), f("src/a.ts"), f("src/x/y.md"), f("srcs/a.ts"), f("src/a.ts", ws("w2"))], f("srcs/a.ts"), f("src/a.ts"));
+    // The active item hands over as when its tab is closed.
+    expect(dropFileItems(s, ws(), "/r", "src")).toEqual(of([a("p1"), f("srcs/a.ts"), f("src/a.ts", ws("w2"))], f("srcs/a.ts"), f("srcs/a.ts")));
   });
 });

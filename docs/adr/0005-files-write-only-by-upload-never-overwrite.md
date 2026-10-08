@@ -1,6 +1,6 @@
 # 0005: The Files overlay writes only by Upload, and Upload never overwrites
 
-> Status: Accepted · Date: 2026-10-07
+> Status: Superseded by [0006](./0006-files-tree-creates-renames-deletes-delete-is-permanent.md) · Date: 2026-10-07
 
 ## Context
 

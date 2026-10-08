@@ -130,3 +130,10 @@ export const filesUpload = (machineId: string, root: string, destRel: string, so
   invoke<string[]>("files_upload", { machineId, root, destRel, sources });
 export const filesDownload = (machineId: string, root: string, rel: string) =>
   invoke<string>("files_download", { machineId, root, rel });
+export const filesCreate = (machineId: string, root: string, rel: string, isDir: boolean) =>
+  invoke<void>("files_create", { machineId, root, rel, isDir });
+/** Renames `rel` within its folder; resolves to its new path. */
+export const filesRename = (machineId: string, root: string, rel: string, name: string) =>
+  invoke<string>("files_rename", { machineId, root, rel, name });
+export const filesDelete = (machineId: string, root: string, rel: string) =>
+  invoke<void>("files_delete", { machineId, root, rel });

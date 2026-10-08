@@ -5,6 +5,7 @@ use crate::{
     error::AppError,
     files::{
         all::{self, FileList},
+        edit,
         list::{self, Entry},
         paths::{check_rel, resolve_root},
         read::{self, FileContent},
@@ -808,6 +809,46 @@ pub async fn files_upload(
         transfer::check_upload_into_self(std::path::Path::new(&dest), &sources)?;
     }
     tokio::task::spawn_blocking(move || transfer::upload(&*t, &dest, &existing, sources))
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn files_create(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+    is_dir: bool,
+) -> Result<(), AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    edit::create(&*t, &root, &rel, is_dir).await
+}
+
+#[tauri::command]
+pub async fn files_rename(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+    name: String,
+) -> Result<String, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    edit::rename(&*t, &root, &rel, &name).await
+}
+
+#[tauri::command]
+pub async fn files_delete(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+) -> Result<(), AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    tokio::task::spawn_blocking(move || edit::delete(&*t, &root, &rel))
         .await
         .map_err(|e| AppError::new("io", e.to_string()))?
 }

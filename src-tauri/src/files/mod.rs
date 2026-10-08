@@ -1,7 +1,9 @@
-//! File browsing on a Machine: scripts run over the transport. The only write is Upload
-//! (`transfer`), which never overwrites (ADR-0005).
+//! File browsing on a Machine: scripts run over the transport. Upload (`transfer`) and
+//! Create/Rename (`edit`) never overwrite; Delete (`edit`) is the one destructive write
+//! (ADR-0005, ADR-0006).
 
 pub mod all;
+pub mod edit;
 pub mod list;
 pub mod paths;
 pub mod read;

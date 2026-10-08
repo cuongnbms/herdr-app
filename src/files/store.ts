@@ -16,6 +16,22 @@ const RECENT_MAX = 20;
 const recentWith = (recent: string[], rel: string) => [rel, ...recent.filter((r) => r !== rel)].slice(0, RECENT_MAX);
 const EMPTY: FilesWs = { expanded: [], scroll: {}, recent: [], modes: {} };
 
+/** Whether `rel` is `path` or inside it. */
+export const relUnder = (rel: string, path: string) => rel === path || rel.startsWith(path + "/");
+
+/** `rel` after `from` became `to` (null: was deleted); paths outside `from` are kept. */
+const moved = (rel: string, from: string, to: string | null): string | null =>
+  !relUnder(rel, from) ? rel : to === null ? null : to + rel.slice(from.length);
+
+function moveKeys<T>(m: Record<string, T>, from: string, to: string | null): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [rel, v] of Object.entries(m)) {
+    const next = moved(rel, from, to);
+    if (next !== null) out[next] = v;
+  }
+  return out;
+}
+
 export function wsKey(ref: WorkspaceRef): string {
   return [ref.machine_id, ref.session, ref.workspace_id].join("/");
 }
@@ -33,6 +49,8 @@ interface FilesState {
   toggleDir: (key: string, rel: string) => void;
   setScroll: (key: string, rel: string, top: number) => void;
   setMode: (key: string, rel: string, mode: FileMode) => void;
+  /** After `from` was renamed to `to`, or deleted (`to` null): folds, recent files, scroll and modes follow. */
+  moveRel: (key: string, from: string, to: string | null) => void;
 }
 
 export const useFiles = create<FilesState>((set, get) => {
@@ -50,5 +68,10 @@ export const useFiles = create<FilesState>((set, get) => {
       })),
     setScroll: (key, rel, top) => update(key, (w) => ({ ...w, scroll: { ...w.scroll, [rel]: top } })),
     setMode: (key, rel, mode) => update(key, (w) => ({ ...w, modes: { ...w.modes, [rel]: mode } })),
+    moveRel: (key, from, to) =>
+      update(key, (w) => {
+        const list = (l: string[]) => l.map((r) => moved(r, from, to)).filter((r): r is string => r !== null);
+        return { expanded: list(w.expanded), recent: list(w.recent), scroll: moveKeys(w.scroll, from, to), modes: moveKeys(w.modes, from, to) };
+      }),
   };
 });

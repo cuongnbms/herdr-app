@@ -298,6 +298,7 @@ function PanelBody({ wsRef, root, online, showHeavy, hidden, gotoRef, onMissing 
   });
 
   const onOpen = useCallback((rel: string, pin: boolean) => useApp.getState().openFile(wsRef, root, rel, { pin }), [wsRef, root]);
+  const onMoved = useCallback((from: string, to: string | null) => useApp.getState().filesMoved(wsRef, root, from, to), [wsRef, root]);
 
   return (
     <div className="files-panel-body" hidden={hidden}>
@@ -308,7 +309,7 @@ function PanelBody({ wsRef, root, online, showHeavy, hidden, gotoRef, onMissing 
       )}
       <GoToFile list={list} recent={recent} onOpen={onOpen} inputRef={gotoRef} />
       <div className="files-side-scroll">
-        <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} reloadKey={reloadKey} showHeavy={showHeavy} changes={batch} />
+        <FileTree machineId={machineId} root={root} filesKey={key} onOpen={onOpen} onMoved={onMoved} reloadKey={reloadKey} showHeavy={showHeavy} changes={batch} />
       </div>
     </div>
   );

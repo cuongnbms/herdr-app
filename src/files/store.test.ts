@@ -37,4 +37,32 @@ describe("files store", () => {
     expect(useFiles.getState().ws(filesKey(ref, "/b")).recent).toEqual([]);
     expect(useFiles.getState().ws(filesKey(ref, "/a")).recent).toEqual(["x.ts"]);
   });
+
+  it("moves a renamed item's folds, recent entry, scroll and mode, and those inside it", () => {
+    const { toggleDir, addRecent, setScroll, setMode, moveRel } = useFiles.getState();
+    toggleDir(K, "src");
+    toggleDir(K, "src/x");
+    toggleDir(K, "srcs");
+    addRecent(K, "src/a.md");
+    addRecent(K, "b.md");
+    setScroll(K, "src/a.md", 7);
+    setMode(K, "src/a.md", "source");
+    moveRel(K, "src", "lib");
+    expect(s().expanded).toEqual(["lib", "lib/x", "srcs"]);
+    expect(s().recent).toEqual(["b.md", "lib/a.md"]);
+    expect(s().scroll).toEqual({ "lib/a.md": 7 });
+    expect(s().modes).toEqual({ "lib/a.md": "source" });
+  });
+
+  it("forgets a deleted item and what was inside it", () => {
+    const { toggleDir, addRecent, setScroll, moveRel } = useFiles.getState();
+    toggleDir(K, "src");
+    addRecent(K, "src/a.md");
+    addRecent(K, "b.md");
+    setScroll(K, "src/a.md", 7);
+    moveRel(K, "src", null);
+    expect(s().expanded).toEqual([]);
+    expect(s().recent).toEqual(["b.md"]);
+    expect(s().scroll).toEqual({});
+  });
 });
