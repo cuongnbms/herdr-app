@@ -1,5 +1,5 @@
 import type { WorkspaceView } from "../lib/types";
-import { selectedPane } from "../store/app";
+import { activeItem, selectedPane } from "../store/app";
 import type { AppState } from "../store/app";
 import { getFolder, suggestFolder } from "../workspaces/folder";
 import type { WorkspaceRef } from "../workspaces/folder";
@@ -10,7 +10,7 @@ export type Root = { path: string; source: "folder" | "pane" };
 export const absPath = (root: string, rel: string) => `${root === "/" ? "" : root}/${rel}`;
 
 /**
- * The folder the Files overlay browses: the Workspace's folder, else a pane's cwd.
+ * The folder the Files panel browses: the Workspace's folder, else a pane's cwd.
  * `selectedCwd` must be `null` unless the selected pane belongs to `ref`'s Workspace;
  * another Workspace's cwd would become this one's root.
  */
@@ -22,10 +22,10 @@ export function resolveRoot(ref: WorkspaceRef, ws: WorkspaceView | undefined, se
 }
 
 /**
- * The root the Files overlay opens on for `ref`: as `resolveRoot`, counting the selected pane's
+ * The root the Files panel opens on for `ref`: as `resolveRoot`, counting the selected pane's
  * cwd only when that pane belongs to this Workspace.
  */
-export function overlayRoot(ref: WorkspaceRef, state: Pick<AppState, "machines" | "selected">): Root | null {
+export function panelRoot(ref: WorkspaceRef, state: Pick<AppState, "machines" | "selected">): Root | null {
   const ws = state.machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session)?.workspaces.find((w) => w.workspace_id === ref.workspace_id);
   const sel = state.selected;
   let cwd: string | null = null;
@@ -40,4 +40,10 @@ export function workspaceOfSelection(state: Pick<AppState, "machines" | "selecte
   const sel = selectedPane(state);
   if (!sel) return null;
   return { machine_id: sel.machine.id, session: sel.session.name, workspace_id: sel.workspace.workspace_id };
+}
+
+/** The Workspace the Files panel shows: the active item's, else the selected Pane's. */
+export function panelWorkspace(s: Pick<AppState, "machines" | "selected" | "openItems">): WorkspaceRef | null {
+  const item = activeItem(s);
+  return item?.kind === "file" ? item.ws : workspaceOfSelection(s);
 }

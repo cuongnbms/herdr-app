@@ -220,6 +220,15 @@ describe("FileTree", () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1);
   });
 
+  it("does not replay a batch that was published before it mounted", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async () => [{ name: "a.md", kind: "file" }]);
+    // Replayed, a removal of the root would forget the listing the mount just started.
+    const batch = { seq: 3, changes: [{ path: "", isDir: true, removed: true }] };
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w-stale" onOpen={() => {}} reloadKey={0} changes={batch} />);
+    expect(await screen.findByText("a.md")).toBeTruthy();
+  });
+
   it("lists a removed then re-created expanded folder afresh", async () => {
     vi.mocked(invoke).mockReset();
     let state: "up" | "down" = "up";

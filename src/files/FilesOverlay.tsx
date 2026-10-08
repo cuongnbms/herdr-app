@@ -11,7 +11,7 @@ import { FileTabs } from "./FileTabs";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { GoToFile } from "./GoToFile";
-import { overlayRoot, type Root } from "./root";
+import { panelRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { useWatch } from "./useWatch";
 
@@ -40,7 +40,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
 
   // Resolved when the overlay opens, and again only when the Workspace folder is set: a cd in
   // the pane must not move the root under the open tabs.
-  const resolve = () => overlayRoot(ref, useApp.getState());
+  const resolve = () => panelRoot(ref, useApp.getState());
   const [root, setRoot] = useState<Root | null>(resolve);
   const folderSeen = useRef(folder);
   useEffect(() => {

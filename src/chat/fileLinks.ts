@@ -1,6 +1,6 @@
 import type { PaneRef } from "../lib/types";
 import { selectedPane, useApp } from "../store/app";
-import { overlayRoot } from "../files/root";
+import { panelRoot } from "../files/root";
 import { filesKey, useFiles } from "../files/store";
 import { showToast } from "../ui/Toast";
 
@@ -72,7 +72,7 @@ export function openInFiles(pane: PaneRef, path: string): void {
   const found = selectedPane({ machines: state.machines, selected: pane });
   if (!found) return;
   const ref = { machine_id: pane.machine_id, session: pane.session, workspace_id: found.workspace.workspace_id };
-  const root = overlayRoot(ref, state);
+  const root = panelRoot(ref, state);
   const rel = root && relUnderRoot(path, found.pane.cwd, root.path);
   if (!root || !rel) {
     showToast(root ? `${path} is outside the workspace folder` : "This workspace has no folder");

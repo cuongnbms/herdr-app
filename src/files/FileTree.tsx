@@ -111,7 +111,8 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
   entriesRef.current = entries;
   const errorsRef = useRef(errors);
   errorsRef.current = errors;
-  const handledSeq = useRef<number | null>(null);
+  // A batch published before this tree mounted is not its to handle.
+  const handledSeq = useRef<number | null>(changes?.seq ?? null);
   // A change batch relists the folders it touched that are loaded, and forgets removed folders.
   useEffect(() => {
     if (!changes || changes.seq === handledSeq.current) return;
@@ -162,7 +163,14 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]');
-    if (!el) return;
+    if (!el) {
+      // The tree itself has focus (it was focused before its rows loaded): ArrowDown enters it.
+      if (e.target === treeRef.current && e.key === "ArrowDown") {
+        e.preventDefault();
+        items()[0]?.focus();
+      }
+      return;
+    }
     const all = items();
     const at = all.indexOf(el);
     const rel = el.dataset.rel ?? "";
@@ -284,6 +292,7 @@ export function FileTree({ machineId, root, filesKey, onOpen, reloadKey, showHea
     <div
       className="files-tree"
       role="tree"
+      tabIndex={-1}
       ref={treeRef}
       onKeyDown={onKeyDown}
       onContextMenu={(e) => {

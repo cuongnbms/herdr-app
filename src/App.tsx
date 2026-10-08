@@ -14,6 +14,7 @@ import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
 import { toggleFilesOverlay } from "./files/FilesEntry";
+import { FilesPanel } from "./files/FilesPanel";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
 import { chosenLens, selectedPane, useApp } from "./store/app";
@@ -196,6 +197,7 @@ export default function App() {
       </nav>
       <aside className="agents" aria-label="Agents">
         <AgentList />
+        <FilesPanel />
       </aside>
       <main className="main">
         {pane && ref ? (
