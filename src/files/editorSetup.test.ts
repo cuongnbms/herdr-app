@@ -1,3 +1,4 @@
+import { undo } from "@codemirror/commands";
 import { describe, expect, it } from "vitest";
 import { canEdit, createEditorState, languageFor, roundTrips } from "./editorSetup";
 
@@ -30,5 +31,30 @@ describe("editorSetup", () => {
     expect(await languageFor("src/a.ts")).not.toBeNull();
     expect(await languageFor("README.md")).not.toBeNull();
     expect(await languageFor("notes.zzz")).toBeNull();
+  });
+
+  it("keeps a CRLF document clean when LF or CR text is inserted", () => {
+    for (const [ins, want] of [["x\ny", "ax\r\nyb\r\n"], ["p\rq", "ap\r\nqb\r\n"], ["m\r\nn", "am\r\nnb\r\n"]]) {
+      const s = createEditorState("ab\r\n");
+      const next = s.update({ changes: { from: 1, insert: ins }, selection: { anchor: 1 + ins.length } }).state;
+      expect(next.sliceDoc()).toBe(want);
+      expect(roundTrips(next.sliceDoc())).toBe(true);
+    }
+    const s = createEditorState("ab\r\n");
+    const next = s.update(s.replaceSelection("P\nQ")).state;
+    expect(next.sliceDoc()).toBe("P\r\nQab\r\n");
+    expect(next.selection.main.head).toBe(3);
+  });
+
+  it("undoes a normalized insert", () => {
+    let st = createEditorState("ab\r\n");
+    st = st.update({ changes: { from: 1, insert: "x\ny" } }).state;
+    undo({ state: st, dispatch: (tr) => void (st = tr.state) });
+    expect(st.sliceDoc()).toBe("ab\r\n");
+  });
+
+  it("leaves LF documents alone", () => {
+    const st = createEditorState("a\n").update({ changes: { from: 1, insert: "x\ny" } }).state;
+    expect(st.sliceDoc()).toBe("ax\ny\n");
   });
 });
