@@ -3,6 +3,7 @@
 //! (ADR-0005, ADR-0006).
 
 pub mod all;
+pub mod cksum;
 pub mod edit;
 pub mod list;
 pub mod paths;
