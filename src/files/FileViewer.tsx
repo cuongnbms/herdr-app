@@ -1,4 +1,5 @@
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { filesRead } from "../lib/ipc";
 import type { FileChange, FileContent } from "../lib/types";
@@ -125,10 +126,21 @@ export function FileViewer({ item }: Props) {
   const count = findOpen && searchable && query ? status.count : 0;
 
   const draftId = itemKey(item);
-  const draft = useDrafts((s) => s.drafts[draftId]);
-  const editable = shown !== null && canEdit(shown);
-  // Text the editor would not give back as it is (mixed line endings) is offered, but cannot be edited.
-  const mixedEnds = !editable && shown?.kind === "text" && shown.editable && shown.cksum !== null && shown.text !== null && !roundTrips(shown.text);
+  // Only what the toolbar shows, so typing in the editor does not re-render the viewer.
+  const draft = useDrafts(
+    useShallow((s) => {
+      const d = s.drafts[draftId];
+      return d ? { dirty: d.dirty, saving: d.saving } : null;
+    }),
+  );
+  // Parsing the text is costly, so it is done once per read, not per render.
+  const { editable, mixedEnds } = useMemo(() => {
+    if (!shown) return { editable: false, mixedEnds: false };
+    const editable = canEdit(shown);
+    // Text the editor would not give back as it is (mixed line endings) is offered, but cannot be edited.
+    const mixedEnds = !editable && shown.kind === "text" && shown.editable && shown.cksum !== null && shown.text !== null && !roundTrips(shown.text);
+    return { editable, mixedEnds };
+  }, [shown]);
   const flashTimer = useRef<number>(undefined);
   useEffect(() => () => window.clearTimeout(flashTimer.current), []);
 
@@ -161,6 +173,7 @@ export function FileViewer({ item }: Props) {
       save();
     } else if (k === "e" && e.shiftKey) {
       e.preventDefault();
+      if (e.repeat) return;
       if (!draft && editable) edit();
       else if (draft) done();
     } else if (draft && (k === "f" || k === "g")) {
