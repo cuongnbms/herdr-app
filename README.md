@@ -12,6 +12,10 @@ A macOS desktop client for the [herdr](https://herdr.dev) terminal multiplexer. 
 |---|---|
 | ![The File viewer showing rendered markdown with an outline](docs/screenshots/files-markdown.png) | ![The Files panel with Go to file, and find in a source file](docs/screenshots/files-code.png) |
 
+## Files
+
+Press **Edit** (⌘⇧E) on a text file to change it. ⌘S saves, Esc or **Done** leaves. If an Agent changed the file since you opened it, Save stops and offers **Reload** or **Overwrite**.
+
 ## Install
 
 1. Install [herdr](https://herdr.dev) (see Requirements below).
