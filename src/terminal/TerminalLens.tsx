@@ -14,6 +14,7 @@ import { StartingOverlay } from "./StartingOverlay";
 import { ensureTermFont, useSettings, watchTermFont } from "../settings/store";
 import { watchTermTheme } from "../settings/theme";
 import { applyCopyOnSelect } from "./copyOnSelect";
+import { applyHoldSelection } from "./holdSelection";
 import { createAckBatcher, createInputQueue } from "./ipcBatch";
 import { createImagePaste } from "./imagePaste";
 import { createKeyHandler } from "./keyHandler";
@@ -47,6 +48,7 @@ function createEntry(key: string) {
   applyUnicode11(term);
   applyOsc52(term, (text) => void writeText(text).catch((e) => console.error("OSC 52 copy failed", e)));
   const stopCopyOnSelect = applyCopyOnSelect(term, (text) => void writeText(text).catch((e) => console.error("selection copy failed", e)));
+  const stopHoldSelection = applyHoldSelection(term);
   term.attachCustomKeyEventHandler(createKeyHandler((text) => term.input(text)));
   applyWheelScroll(term);
   const unwatchFont = watchTermFont(term, fit);
@@ -59,6 +61,7 @@ function createEntry(key: string) {
     cleanup: () => {
       output.dispose();
       stopCopyOnSelect();
+      stopHoldSelection();
       forgetWebgl(key);
       unwatchFont();
       unwatchTheme();
