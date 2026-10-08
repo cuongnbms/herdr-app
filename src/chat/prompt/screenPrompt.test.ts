@@ -180,6 +180,21 @@ Ready to submit your answers?
  Esc to cancel · Tab to amend
 `);
     expect(underText).toMatchObject({ kind: "approval", title: "Bash command", body: "rm -rf junk\nDelete the junk directory" });
+    // an unattended session counts down to an auto-deny: the ticking clock is not a new prompt
+    const countdown = (left: string) => parseInteractivePrompt("claude", `
+────────────────────────────────────────
+ Bash command
+   rm -rf junk
+   Delete the junk directory
+ This shell -c script runs rm and could not be checked
+ ⚠ Claude Code will automatically deny this request in ${left}, to avoid blocking progress on an unattended session
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend
+`);
+    expect(countdown("0:26")?.id).toBe(countdown("0:25")?.id);
+    expect(countdown("0:26")?.body).toBe("rm -rf junk\nDelete the junk directory\nThis shell -c script runs rm and could not be checked");
     // an MCP call is a call too: the first rule under it opens the panel, not a rule in its preview
     const mcp = parseInteractivePrompt("claude", `
 ● github - create_issue (MCP)(title: "Flaky test")

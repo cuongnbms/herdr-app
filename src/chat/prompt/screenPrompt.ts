@@ -412,8 +412,10 @@ function parseClaudeApproval(screen: string): ParsedPrompt | null {
     const rules = lines.slice(0, questionIndex).flatMap((line, index) => index > callIndex && SOLID_RULE_RE.test(cleanLine(line)) ? [index] : []);
     const ruleIndex = callIndex >= 0 ? rules[0] ?? -1 : lastOf(rules) ?? -1;
     if (ruleIndex < 0 || questionIndex - ruleIndex > 60) return null;
+    // an unattended session's auto-deny countdown ticks every second: in the id, it would make
+    // every answer to the card stale
     const panel = lines.slice(ruleIndex + 1, questionIndex).map(cleanLine)
-      .filter((line) => line && !isDivider(line) && !/^Tip:/i.test(line));
+      .filter((line) => line && !isDivider(line) && !/^Tip:/i.test(line) && !/will automatically deny this request in\b/i.test(line));
     if (panel.length === 0) return null;
     title = panel[0]!;
     body = panel.slice(1).join("\n");
