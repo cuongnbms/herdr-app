@@ -1347,6 +1347,9 @@ button.composer-model:disabled { cursor: default; }
 .files-outline-btn + .files-mode { margin-left: 0; }
 .files-mode { margin-left: auto; display: flex; padding: 2px; border-radius: var(--r-sm); background: var(--seg-track); }
 .files-mode button { height: 22px; padding: 0 10px; border: 0; border-radius: 4px; background: none; color: var(--fg-3); font-size: 12px; cursor: pointer; }
+.files-mode + .files-edit, .files-outline-btn + .files-edit { margin-left: 6px; }
+.files-edit:empty { display: none; }
+.files-edit button:disabled { opacity: 0.5; cursor: default; }
 .files-mode button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--fg); }
 
 .files-find { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 16px; background: var(--surface-1); border-bottom: 1px solid var(--line); }

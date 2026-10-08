@@ -8,6 +8,10 @@ import { CopyIcon, FileCopyIcon, OutlineIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { useFilesBus } from "./bus";
 import type { FindStatus } from "./find";
+import { settleDrafts } from "./closeGuard";
+import { diskVersion, useDrafts } from "./drafts";
+import { canEdit, roundTrips } from "./editorSetup";
+import { FileEditor } from "./FileEditor";
 import { FindBar } from "./FindBar";
 import { FileView, type FileMode } from "./FileView";
 import { latestOnly, STALE } from "./latest";
@@ -15,6 +19,7 @@ import { HIGHLIGHT_LIMIT } from "./limits";
 import { lineOfHash } from "./links";
 import { useOutline } from "./outlineStore";
 import { absPath } from "./root";
+import { saveDraft } from "./save";
 import { filesKey, useFiles } from "./store";
 
 const isMarkdown = (rel: string) => /\.(md|markdown)$/i.test(rel);
@@ -119,12 +124,49 @@ export function FileViewer({ item }: Props) {
   const [status, setStatus] = useState<FindStatus>({ count: 0, index: 0 });
   const count = findOpen && searchable && query ? status.count : 0;
 
+  const draftId = itemKey(item);
+  const draft = useDrafts((s) => s.drafts[draftId]);
+  const editable = shown !== null && canEdit(shown);
+  // Text the editor would not give back as it is (mixed line endings) is offered, but cannot be edited.
+  const mixedEnds = !editable && shown?.kind === "text" && shown.editable && shown.cksum !== null && shown.text !== null && !roundTrips(shown.text);
+  const flashTimer = useRef<number>(undefined);
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
+
+  const edit = () => {
+    const base = shown && diskVersion(shown);
+    if (base) useDrafts.getState().open({ fk: key, machineId, root, rel }, base);
+  };
+  const done = () => void settleDrafts([draftId]);
+  const save = () => {
+    if (useDrafts.getState().drafts[draftId]?.conflict) {
+      // The conflict banner (Task 9) is the element with the `files-banner-conflict` class; none yet, so a no-op.
+      const banners = document.querySelectorAll(".files-banner-conflict");
+      banners.forEach((b) => b.classList.add("flash"));
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = window.setTimeout(() => banners.forEach((b) => b.classList.remove("flash")), 600);
+    } else void saveDraft(draftId, { force: false });
+  };
+
   const keys = (e: KeyboardEvent) => {
-    if (!e.metaKey || e.altKey || e.ctrlKey) return;
-    // A dialog over the file (Change folder…) keeps its keys.
+    // A dialog over the file (Change folder…, Unsaved Changes) keeps its keys.
     if (document.querySelector(".overlay")) return;
+    if (e.key === "Escape" && !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+      if (draft && !e.defaultPrevented) done();
+      return;
+    }
+    if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
-    if (!e.shiftKey && k === "f") {
+    if (k === "s" && !e.shiftKey && draft) {
+      e.preventDefault();
+      save();
+    } else if (k === "e" && e.shiftKey) {
+      e.preventDefault();
+      if (!draft && editable) edit();
+      else if (draft) done();
+    } else if (draft && (k === "f" || k === "g")) {
+      // The editor's own search takes them.
+      return;
+    } else if (!e.shiftKey && k === "f") {
       e.preventDefault();
       if (!searchable) return;
       setFindOpen(true);
@@ -176,7 +218,7 @@ export function FileViewer({ item }: Props) {
             <FileCopyIcon />
           </button>
         )}
-        {md && mode === "render" && hasOutline && (
+        {md && !draft && mode === "render" && hasOutline && (
           <button
             type="button"
             className="icon-btn files-outline-btn"
@@ -188,7 +230,7 @@ export function FileViewer({ item }: Props) {
             <OutlineIcon />
           </button>
         )}
-        {md && shown?.kind === "text" && (
+        {md && !draft && shown?.kind === "text" && (
           <div className="files-mode" role="group" aria-label="Markdown view">
             {(["render", "source"] as const).map((m) => (
               <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>
@@ -197,6 +239,20 @@ export function FileViewer({ item }: Props) {
             ))}
           </div>
         )}
+        <div className="files-mode files-edit" role="group" aria-label="Edit">
+          {draft ? (
+            <>
+              <button type="button" disabled={!draft.dirty} onClick={save}>
+                Save{draft.saving ? "…" : ""}
+              </button>
+              <button type="button" onClick={done}>Done</button>
+            </>
+          ) : editable ? (
+            <button type="button" aria-label="Edit" onClick={edit}>Edit</button>
+          ) : mixedEnds ? (
+            <button type="button" aria-label="Edit" disabled title="Mixed line endings">Edit</button>
+          ) : null}
+        </div>
       </div>
       {removed === rel && <div className="files-banner files-banner-removed">File removed</div>}
       {shown && error && error.rel === rel && (
@@ -204,7 +260,7 @@ export function FileViewer({ item }: Props) {
           Could not reload: {error.message}
         </div>
       )}
-      {findOpen && searchable && (
+      {!draft && findOpen && searchable && (
         <FindBar
           count={count}
           index={status.index}
@@ -225,7 +281,9 @@ export function FileViewer({ item }: Props) {
         />
       )}
       <div className="files-view">
-        {shown ? (
+        {draft ? (
+          <FileEditor draftKey={draftId} />
+        ) : shown ? (
           <FileView
             machineId={machineId}
             root={root}
