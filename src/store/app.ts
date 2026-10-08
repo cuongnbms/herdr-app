@@ -192,9 +192,11 @@ export const useApp = create<AppState>((set, get) => ({
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
       openItems: !ref
         ? s.openItems
-        : findPane(s.machines, ref)?.agent
-          ? openItem(s.openItems, { kind: "agent", ref }, { pin: false })
-          : setActive(s.openItems, null),
+        : findItem(s.openItems, itemKey({ kind: "agent", ref }))
+          ? setActive(s.openItems, itemKey({ kind: "agent", ref }))
+          : findPane(s.machines, ref)?.agent
+            ? openItem(s.openItems, { kind: "agent", ref }, { pin: false })
+            : setActive(s.openItems, null),
     })),
   openFile: (ws, root, rel, opts) => {
     set((s) => ({ openItems: openItem(s.openItems, { kind: "file", ws, root, rel }, opts) }));

@@ -463,6 +463,17 @@ describe("open items", () => {
     expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: ref("w2:p4") }]);
   });
 
+  it("an open agent item activates after its agent exits", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    const m = withW2();
+    m.sessions[0].workspaces[1].tabs[0].panes[0].agent = null;
+    useApp.getState().upsertMachine(m);
+    useApp.getState().activateItem(key("w2:p2"));
+    expect(useApp.getState().openItems.active).toBe(key("w2:p2"));
+  });
+
   it("a snapshot does not reopen a closed item or steal the active file", () => {
     useApp.getState().select(ref("w2:p2"));
     useApp.getState().pinItem(key("w2:p2"));
