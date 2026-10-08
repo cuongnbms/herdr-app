@@ -8,7 +8,7 @@ use crate::{
         edit,
         list::{self, Entry},
         paths::{check_rel, resolve_root},
-        read::{self, FileContent},
+        read::{self, FileContent, FileVersion},
         transfer,
         watch::{watch_refusal, WatchEvent},
         watch_manager::{FilesWatch, WatchSink},
@@ -851,6 +851,20 @@ pub async fn files_delete(
     tokio::task::spawn_blocking(move || edit::delete(&*t, &root, &rel))
         .await
         .map_err(|e| AppError::new("io", e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn files_write(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    root: String,
+    rel: String,
+    text: String,
+    expected: Option<FileVersion>,
+) -> Result<FileVersion, AppError> {
+    let root = files_root(&mgr, &machine_id, &root)?;
+    let t = mgr.transport(&machine_id)?;
+    edit::write(&*t, &root, &rel, &text, expected).await
 }
 
 #[tauri::command]

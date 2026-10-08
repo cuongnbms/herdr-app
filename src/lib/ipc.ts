@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { showToast } from "../ui/Toast";
-import type { AttachEvent, ChatEvent, ChatItem, FileContent, FileEntry, FileList, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
+import type { AttachEvent, ChatEvent, ChatItem, FileContent, FileEntry, FileList, FileVersion, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
@@ -137,3 +137,6 @@ export const filesRename = (machineId: string, root: string, rel: string, name: 
   invoke<string>("files_rename", { machineId, root, rel, name });
 export const filesDelete = (machineId: string, root: string, rel: string) =>
   invoke<void>("files_delete", { machineId, root, rel });
+/** Rejects with code `conflict` when the file is no longer `expected`. */
+export const filesWrite = (machineId: string, root: string, rel: string, text: string, expected: FileVersion | null) =>
+  invoke<FileVersion>("files_write", { machineId, root, rel, text, expected });

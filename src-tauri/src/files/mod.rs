@@ -1,6 +1,7 @@
 //! File browsing on a Machine: scripts run over the transport. Upload (`transfer`) and
 //! Create/Rename (`edit`) never overwrite; Delete (`edit`) is the one destructive write
-//! (ADR-0005, ADR-0006).
+//! (ADR-0005, ADR-0006). Write (`edit`) replaces a file's content only after a version check,
+//! ADR-0007.
 
 pub mod all;
 pub mod cksum;

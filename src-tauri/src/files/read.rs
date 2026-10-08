@@ -66,7 +66,7 @@ case "${s%% *}" in ''|*[!0-9]*) exit 5;; esac
 [ "${s%% *}" -le "$3" ] || exit 4
 cat -- "$f""#;
 
-fn parse_stat(line: &str) -> Option<FileStat> {
+pub(super) fn parse_stat(line: &str) -> Option<FileStat> {
     let (size, mtime) = line.trim().split_once(' ')?;
     Some(FileStat {
         size: size.parse().ok()?,

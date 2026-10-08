@@ -80,6 +80,7 @@ pub fn run() {
             commands::files_create,
             commands::files_rename,
             commands::files_delete,
+            commands::files_write,
             commands::system_fonts,
             commands::font_face,
             commands::quota_fetch,

@@ -4,7 +4,7 @@ use serde::Serialize;
 ///
 /// Allowed codes: `herdr_error`, `timeout`, `io`, `protocol`, `ssh_auth`,
 /// `ssh_forward_denied`, `herdr_not_found`, `incompatible`, `attach_held`,
-/// `not_found`, `invalid`.
+/// `not_found`, `invalid`, `conflict`.
 #[derive(Debug, Clone, PartialEq, Serialize, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct AppError {
