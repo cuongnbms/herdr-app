@@ -134,14 +134,24 @@ export function AgentDashboard() {
         e.preventDefault();
         search.current?.focus();
         search.current?.select();
-      } else if (e.key === "Escape") {
-        // The innermost layer first: the Filter menu, then any dialog opened over the dashboard.
-        if (filterOpenRef.current) setFilterOpen(false);
-        else if (!document.querySelector(".overlay")) setOpen(false);
       }
     };
+    // Escape is taken before the views behind the dashboard see it (an open file's editor would
+    // leave Edit mode on it), so it listens in the capture phase and marks the key handled.
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // The innermost layer first: the Filter menu, then any dialog opened over the dashboard.
+      if (filterOpenRef.current) setFilterOpen(false);
+      else if (!document.querySelector(".overlay")) setOpen(false);
+      else return;
+      e.preventDefault();
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onEscape, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onEscape, true);
+    };
   }, [setOpen]);
 
   const shown = cards.filter(

@@ -95,6 +95,22 @@ describe("AgentDashboard", () => {
     expect(useApp.getState().dashboardOpen).toBe(false);
   });
 
+  it("Escape is taken by the dashboard, so a file behind it (listening since before) does not act on it", () => {
+    const seen: boolean[] = [];
+    const behind = (e: KeyboardEvent) => seen.push(e.defaultPrevented);
+    window.addEventListener("keydown", behind);
+    try {
+      render(<AgentDashboard />);
+      fireEvent.click(screen.getByRole("button", { name: /filter/i }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(seen).toEqual([true, true]);
+      expect(useApp.getState().dashboardOpen).toBe(false);
+    } finally {
+      window.removeEventListener("keydown", behind);
+    }
+  });
+
   it("Escape closes the Filter menu before the dashboard", () => {
     render(<AgentDashboard />);
     fireEvent.click(screen.getByRole("button", { name: /filter/i }));
