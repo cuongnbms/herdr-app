@@ -14,7 +14,8 @@ overwrite a file that changed on disk after it was opened.
 
 In:
 
-- An **Edit mode** in the File viewer, entered with an **Edit** button (⌘E), backed by
+- An **Edit mode** in the File viewer, entered with an **Edit** button (⌘⇧E; ⌘E already
+  focuses the tree), backed by
   CodeMirror 6: line numbers, undo/redo, search and replace, bracket matching, Tab indent,
   syntax highlighting by file extension.
 - **Save** (⌘S) with a check that the file on disk is still the version the edit started
@@ -110,7 +111,9 @@ from `'self'`, so the current CSP holds). The theme uses the existing CSS variab
 (JetBrains Mono, `--files-line-h`, colours).
 
 A file whose text contains `\r\n` gets `EditorState.lineSeparator.of("\r\n")`, so saving does
-not turn it into LF. The trailing newline is kept as it is.
+not turn it into LF. The trailing newline is kept as it is. A file whose text does not come
+back byte for byte from the editor (mixed LF and CRLF, or a lone `\r`) is not editable: the
+Edit button is replaced by a disabled one titled "Mixed line endings".
 
 ### Save (`src/files/save.ts`)
 
@@ -125,7 +128,7 @@ While `conflict` is set, ⌘S does not write. It flashes the banner instead.
 
 ### File viewer (`src/files/FileViewer.tsx`)
 
-- **Edit** in the breadcrumbs when `content.editable` (⌘E).
+- **Edit** in the breadcrumbs when the file can be edited (⌘⇧E toggles Edit / Done).
 - With a Draft: **Save** (⌘S, disabled when not dirty) and **Done** (Esc) replace the
   Render/Source switch. Outline and the viewer's FindBar are hidden, and `FileEditor` takes
   the view.
@@ -155,8 +158,10 @@ When the bus reports the open file changed:
 - `closeItems` (one, Others, to the Right, All, and ⌘W): if any item being closed has a
   dirty Draft, a dialog lists those files with **Save All / Discard / Cancel**. A closed
   item's Draft is dropped.
-- Window close / quit: Tauri `onCloseRequested`. With dirty Drafts, the same dialog asks
-  first.
+- Window close: Tauri `onCloseRequested`. ⌘Q: the menu's predefined Quit is replaced by a
+  custom "Quit herdr-app" item (⌘Q) that asks the page first, then exits through an
+  `app_quit` command. With dirty Drafts, the same dialog asks first. Quit from the Dock
+  bypasses the menu and is not guarded.
 - Switching Workspace or Session: nothing to guard. Open items span all of them and Drafts
   live in the store.
 - Rename in the tree moves the Draft to the new key, next to the existing follow code
