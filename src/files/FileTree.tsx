@@ -20,6 +20,7 @@ import {
 import { createItem, deleteItem, renameItem } from "./edit";
 import { startDownload, startUpload } from "./transfer";
 import { useFiles } from "./store";
+import { dirtyUnder } from "./drafts";
 import { copyItems } from "./treeMenu";
 import { dirsToRelist } from "./watchDirs";
 
@@ -244,10 +245,11 @@ export function FileTree({ machineId, root, filesKey, onOpen, onMoved, reloadKey
       );
     }
     const name = basename(dialog.rel);
+    const lost = dirtyUnder(filesKey, dialog.rel).length > 0 ? " Unsaved changes will be lost." : "";
     return (
       <ConfirmDialog
         title={dialog.isDir ? "Delete Folder" : "Delete File"}
-        message={dialog.isDir ? `Delete "${name}" and everything in it? This cannot be undone.` : `Delete "${name}"? This cannot be undone.`}
+        message={dialog.isDir ? `Delete "${name}" and everything in it? This cannot be undone.${lost}` : `Delete "${name}"? This cannot be undone.${lost}`}
         confirmLabel="Delete"
         onConfirm={() => void remove(dialog.rel)}
         onClose={close}

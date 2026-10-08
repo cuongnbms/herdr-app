@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApp } from "../store/app";
 import { OpenStrip } from "./OpenStrip";
@@ -135,12 +135,23 @@ describe("OpenStrip", () => {
     const s = useDrafts.getState().drafts[draftKey(fk, "a.txt")].state;
     useDrafts.getState().update(draftKey(fk, "a.txt"), s.update({ changes: { from: 0, insert: "!" } }).state);
     render(<><OpenStrip /><UnsavedDialog /></>);
-    fireEvent.click(screen.getByRole("button", { name: "Close a.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close a.txt (unsaved)" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(useApp.getState().openItems.items).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Close a.txt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close a.txt (unsaved)" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(useApp.getState().openItems.items).toHaveLength(0));
+  });
+  it("marks a file with an unsaved draft", () => {
+    const ws = { machine_id: "local", session: "default", workspace_id: "w1" };
+    useApp.getState().openFile(ws, "/r", "a.txt", { pin: true });
+    const fk = filesKey(ws, "/r");
+    useDrafts.getState().open({ fk, machineId: "local", root: "/r", rel: "a.txt" }, { text: "t", size: 1, mtime: 1, cksum: 1 });
+    render(<OpenStrip />);
+    expect(screen.getByRole("button", { name: "Close a.txt" })).toBeTruthy();
+    const s = useDrafts.getState().drafts[draftKey(fk, "a.txt")].state;
+    act(() => useDrafts.getState().update(draftKey(fk, "a.txt"), s.update({ changes: { from: 0, insert: "!" } }).state));
+    expect(screen.getByRole("button", { name: "Close a.txt (unsaved)" })).toBeTruthy();
   });
 });

@@ -6,6 +6,7 @@ import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 import { newAgentOnTerminal } from "../settings/lens";
 import { useFiles, filesKey } from "../files/store";
+import { useDrafts } from "../files/drafts";
 import {
   closeItems,
   cycleItem,
@@ -206,6 +207,8 @@ export const useApp = create<AppState>((set, get) => ({
     const old = get().openItems;
     const next = to === null ? dropFileItems(old, ws, root, from) : renameFileItems(old, ws, root, from, to);
     useFiles.getState().moveRel(filesKey(ws, root), from, to);
+    if (to === null) useDrafts.getState().dropUnder(filesKey(ws, root), from);
+    else useDrafts.getState().moveUnder(filesKey(ws, root), from, to);
     if (next === old) return;
     set({ openItems: next });
     if (next.active !== old.active) selectIfAgent(get(), next);

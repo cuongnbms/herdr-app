@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 const dialogOpen = vi.fn();
@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { showToast } from "../ui/Toast";
 import { FileTree } from "./FileTree";
+import { draftKey, useDrafts } from "./drafts";
 
 describe("FileTree", () => {
   it("loads lazily and opens files as preview or pinned", async () => {
@@ -479,6 +480,17 @@ describe("FileTree edits", () => {
     await waitFor(() => expect(onMoved).toHaveBeenCalledWith("src", null));
     expect(calls("files_delete")).toEqual([{ machineId: "m", root: "/r", rel: "src" }]);
     await waitFor(() => expect(lists("")).toBeGreaterThan(before));
+  });
+
+  it("warns in the Delete confirm when a file under it has unsaved changes", async () => {
+    await setup("m/default/e10");
+    useDrafts.getState().open({ fk: "m/default/e10", machineId: "m", root: "/r", rel: "a.md" }, { text: "t", size: 1, mtime: 1, cksum: 1 });
+    const key = draftKey("m/default/e10", "a.md");
+    act(() => useDrafts.getState().update(key, useDrafts.getState().drafts[key].state.update({ changes: { from: 0, insert: "!" } }).state));
+    fireEvent.contextMenu(screen.getByText("a.md"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete…" }));
+    expect(await screen.findByText('Delete "a.md"? This cannot be undone. Unsaved changes will be lost.')).toBeTruthy();
+    useDrafts.setState({ drafts: {} });
   });
 
   it("cancelling a delete deletes nothing", async () => {

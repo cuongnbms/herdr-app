@@ -7,6 +7,7 @@ import type { MachineView } from "../lib/types";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { EMPTY_LAYOUT, sessionKey, useLayout } from "../sidebar/groups";
 import { useLensSettings } from "../settings/lens";
+import { draftKey, useDrafts } from "../files/drafts";
 
 const machine: MachineView = {
   id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "blocked",
@@ -481,6 +482,16 @@ describe("open items", () => {
     expect(activeItem(useApp.getState())).toEqual({ ...fileItem, rel: "b.md" });
     expect(useFiles.getState().ws(filesKey(ws, "/r")).recent[0]).toBe("b.md");
     expect(useFiles.getState().ws(filesKey(ws, "/r")).recent).not.toContain("a.md");
+  });
+
+  it("moves Drafts with a renamed folder and drops them with a deleted one", () => {
+    const fk = filesKey(ws, "/r");
+    useDrafts.getState().open({ fk, machineId: "local", root: "/r", rel: "src/a.txt" }, { text: "t", size: 1, mtime: 1, cksum: 1 });
+    useApp.getState().filesMoved(ws, "/r", "src", "lib");
+    expect(Object.keys(useDrafts.getState().drafts)).toEqual([draftKey(fk, "lib/a.txt")]);
+    expect(useDrafts.getState().drafts[draftKey(fk, "lib/a.txt")].rel).toBe("lib/a.txt");
+    useApp.getState().filesMoved(ws, "/r", "lib", null);
+    expect(useDrafts.getState().drafts).toEqual({});
   });
 
   it("a deleted file's item closes and an agent beside it becomes active", () => {
