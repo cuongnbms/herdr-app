@@ -56,6 +56,15 @@ describe("FileViewer edit mode", () => {
     expect(useDrafts.getState().drafts[key]).toBeUndefined();
   });
 
+  it("Edit pins a preview tab, so opening another file as the preview keeps the Draft's tab", async () => {
+    useApp.getState().openFile(ws, "/r", "a.txt", { pin: false });
+    render(<><FileViewer item={item} online /><UnsavedDialog /></>);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(useApp.getState().openItems.preview).toBeNull();
+    act(() => useApp.getState().openFile(ws, "/r", "b.txt", { pin: false }));
+    expect(useApp.getState().openItems.items.map(itemKey)).toEqual([key, itemKey({ ...item, rel: "b.txt" })]);
+  });
+
   it("⌘⇧E enters, Esc with unsaved changes asks, Cancel stays", async () => {
     render(<><FileViewer item={item} online /><UnsavedDialog /></>);
     await screen.findByRole("button", { name: "Edit" });

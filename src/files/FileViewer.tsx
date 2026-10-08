@@ -181,7 +181,10 @@ export function FileViewer({ item, online }: Props) {
 
   const edit = () => {
     const base = shown && diskVersion(shown);
-    if (base) useDrafts.getState().open({ fk: key, machineId, root, rel }, base);
+    if (!base) return;
+    useDrafts.getState().open({ fk: key, machineId, root, rel }, base);
+    // A preview tab is replaced by the next file opened; a Draft's tab must stay until it is settled.
+    useApp.getState().pinItem(draftId);
   };
   const done = () => void settleDrafts([draftId]);
   const save = () => {
