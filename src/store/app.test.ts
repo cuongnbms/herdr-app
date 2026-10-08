@@ -8,6 +8,9 @@ import { getFolder, setFolder } from "../workspaces/folder";
 import { EMPTY_LAYOUT, sessionKey, useLayout } from "../sidebar/groups";
 import { useLensSettings } from "../settings/lens";
 import { draftKey, useDrafts } from "../files/drafts";
+import { showToast } from "../ui/Toast";
+
+vi.mock("../ui/Toast", async (importOriginal) => ({ ...(await importOriginal<typeof import("../ui/Toast")>()), showToast: vi.fn() }));
 
 const machine: MachineView = {
   id: "local", label: "local", kind: "local", state: "connected", error: null, version: "0.9.3", status: "blocked",
@@ -492,6 +495,35 @@ describe("open items", () => {
     expect(useDrafts.getState().drafts[draftKey(fk, "lib/a.txt")].rel).toBe("lib/a.txt");
     useApp.getState().filesMoved(ws, "/r", "lib", null);
     expect(useDrafts.getState().drafts).toEqual({});
+  });
+
+  it("a pruned file tab takes its Draft along, and a dirty one is reported", () => {
+    useDrafts.setState(useDrafts.getInitialState(), true);
+    vi.mocked(showToast).mockClear();
+    const w1 = { ...ws, workspace_id: "w1" };
+    const draft = (w: typeof ws, rel: string, dirty: boolean) => {
+      const fk = filesKey(w, "/r");
+      useApp.getState().openFile(w, "/r", rel, { pin: true });
+      useDrafts.getState().open({ fk, machineId: "local", root: "/r", rel }, { text: "t", size: 1, mtime: 1, cksum: 1 });
+      const k = draftKey(fk, rel);
+      if (dirty) useDrafts.getState().update(k, useDrafts.getState().drafts[k].state.update({ changes: { from: 0, insert: "!" } }).state);
+      return k;
+    };
+    useApp.getState().upsertMachine(withW2());
+    draft(ws, "dir/a.md", true);
+    draft(ws, "b.md", false);
+    const kept = draft(w1, "c.md", true);
+    // A snapshot without w2 closes its tabs.
+    useApp.getState().upsertMachine(machine);
+    expect(Object.keys(useDrafts.getState().drafts)).toEqual([kept]);
+    expect(vi.mocked(showToast).mock.calls).toEqual([["Unsaved changes to a.md were discarded"]]);
+    // A snapshot that closes nothing reports nothing.
+    useApp.getState().upsertMachine(machine);
+    expect(vi.mocked(showToast)).toHaveBeenCalledTimes(1);
+    draft(w1, "d.md", true);
+    useApp.getState().removeMachine("local");
+    expect(useDrafts.getState().drafts).toEqual({});
+    expect(vi.mocked(showToast).mock.calls[1]).toEqual(["Unsaved changes to 2 files were discarded"]);
   });
 
   it("a deleted file's item closes and an agent beside it becomes active", () => {

@@ -7,6 +7,7 @@ import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar
 import { newAgentOnTerminal } from "../settings/lens";
 import { useFiles, filesKey } from "../files/store";
 import { useDrafts } from "../files/drafts";
+import { showToast } from "../ui/Toast";
 import {
   closeItems,
   cycleItem,
@@ -154,6 +155,7 @@ export const useApp = create<AppState>((set, get) => ({
       const gone = prev.filter((p) => !v.sessions.some((s) => s.name === p.name)).map((p) => sessionKey(v.id, p.name));
       if (gone.length) useLayout.getState().update((l) => forgetSessions(l, gone));
     }
+    const before = get().openItems;
     set((s) => {
       // Unchanged Panes, Tabs and Workspaces keep their objects, so their readers stay quiet.
       const shared = s.machines[v.id] ? shareEqual(s.machines[v.id], v) : v;
@@ -170,9 +172,11 @@ export const useApp = create<AppState>((set, get) => ({
         openItems,
       };
     });
+    dropClosedDrafts(before, get().openItems);
   },
   removeMachine: (id) => {
     useLayout.getState().update((l) => forgetMachine(l, id));
+    const before = get().openItems;
     set((s) => {
       const { [id]: _gone, ...machines } = s.machines;
       return {
@@ -183,6 +187,7 @@ export const useApp = create<AppState>((set, get) => ({
         viewed: s.viewed?.machine_id === id ? null : s.viewed,
       };
     });
+    dropClosedDrafts(before, get().openItems);
   },
   select: (ref) =>
     set((s) => ({
@@ -280,6 +285,18 @@ export function activeItem(s: Pick<AppState, "openItems">): OpenItem | null {
 function selectIfAgent(s: AppState, items: OpenItems) {
   const active = items.active ? findItem(items, items.active) : undefined;
   if (active?.kind === "agent") s.select(active.ref);
+}
+
+/** Drops the Drafts of the file items that closed going from `before` to `after` without asking
+ *  (their Machine, Session or Workspace went away), and reports any unsaved changes lost with them. */
+function dropClosedDrafts(before: OpenItems, after: OpenItems) {
+  if (before === after) return;
+  const open = new Set(after.items.map(itemKey));
+  const { drafts, drop } = useDrafts.getState();
+  const closed = before.items.map(itemKey).filter((k) => !open.has(k) && k in drafts);
+  const lost = closed.filter((k) => drafts[k].dirty).map((k) => drafts[k].rel.split("/").pop());
+  closed.forEach(drop);
+  if (lost.length) showToast(`Unsaved changes to ${lost.length === 1 ? lost[0] : `${lost.length} files`} were discarded`);
 }
 
 /** Drops closed panes' and workspaces' items (only a connected snapshot says they are gone) and opens
