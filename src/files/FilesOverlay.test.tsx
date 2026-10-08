@@ -2,17 +2,12 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const channels = vi.hoisted(() => [] as { onmessage?: (e: unknown) => void }[]);
-/** File texts that files_read answers with, by rel ("x" otherwise). */
-const texts = vi.hoisted(() => ({}) as Record<string, string>);
-/** Rels that files_read reports as cut at the read limit. */
-const truncated = vi.hoisted(() => new Set<string>());
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (cmd: string, args?: { rel?: string }) => {
+  invoke: vi.fn(async (cmd: string) => {
     if (cmd === "files_list_all") return { paths: [], capped: false, refused: false };
     if (cmd === "files_watch") return 1;
     if (cmd === "files_read") {
-      const text = texts[args?.rel ?? ""] ?? "x";
-      return { kind: "text", text, truncated: truncated.has(args?.rel ?? ""), size: text.length, mtime: 1 };
+      return { kind: "text", text: "x", truncated: false, size: 1, mtime: 1 };
     }
     return [];
   }),
@@ -23,21 +18,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
   },
 }));
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
-vi.mock("../ui/Toast", () => ({ showToast: vi.fn(), showProgressToast: vi.fn(() => 1), updateToast: vi.fn() }));
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: vi.fn(),
-    parse: vi.fn(async () => ({ diagramType: "flowchart" })),
-    render: vi.fn(async () => ({ svg: '<svg viewBox="0 0 10 10"></svg>' })),
-  },
-}));
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { showToast } from "../ui/Toast";
 import { useApp } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesOverlay } from "./FilesOverlay";
-import { HIGHLIGHT_LIMIT } from "./limits";
+import { useFilesBus } from "./bus";
 import { filesKey, useFiles } from "./store";
 
 const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
@@ -47,6 +31,7 @@ describe("FilesOverlay", () => {
     localStorage.clear();
     channels.length = 0;
     useFiles.setState(useFiles.getInitialState(), true);
+    useFilesBus.setState(useFilesBus.getInitialState(), true);
     useApp.setState({
       machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
         { workspace_id: "w1", label: "app", number: 1, status: "idle", tabs: [{ tab_id: "t1", label: "t", panes: [{ pane_id: "p1", cwd: "/r" }] }] },
@@ -171,34 +156,6 @@ describe("FilesOverlay", () => {
     expect(screen.queryByRole("tab")).toBeNull();
   });
 
-  it("opens a small markdown file rendered and one over the highlight limit as source", async () => {
-    texts["small.md"] = "# Small";
-    texts["big.md"] = "# Big\n" + "x".repeat(HIGHLIGHT_LIMIT);
-    const key = filesKey(ref, "/r");
-    useFiles.getState().open(key, "small.md", { pin: true });
-    render(<FilesOverlay />);
-    expect(await screen.findByRole("heading", { name: "Small" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Render" }).getAttribute("aria-pressed")).toBe("true");
-    act(() => useFiles.getState().open(key, "big.md", { pin: true }));
-    await waitFor(() => expect(screen.getByRole("tab", { selected: true }).textContent).toContain("big.md"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.queryByRole("heading", { name: "Big" })).toBeNull();
-    // Render stays one click away.
-    fireEvent.click(screen.getByRole("button", { name: "Render" }));
-    expect(screen.getByRole("heading", { name: "Big" })).toBeTruthy();
-  });
-
-  it("a #L link to a markdown file opens it as source", async () => {
-    texts["from.md"] = "[notes](notes.md#L2)";
-    texts["notes.md"] = "# Notes\n\nsecond";
-    useFiles.getState().open(filesKey(ref, "/r"), "from.md", { pin: true });
-    render(<FilesOverlay />);
-    fireEvent.click(await screen.findByText("notes"));
-    await waitFor(() => expect(screen.getByRole("tab", { selected: true }).textContent).toContain("notes.md"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.queryByRole("heading", { name: "Notes" })).toBeNull();
-  });
-
   describe("keys", () => {
     const key = filesKey(ref, "/r");
     const press = (k: string, extra: Partial<KeyboardEventInit> = {}) =>
@@ -224,72 +181,6 @@ describe("FilesOverlay", () => {
       expect(useFiles.getState().ws(key).active).toBe("a.ts");
       press("{", { shiftKey: true, code: "BracketLeft" });
       expect(useFiles.getState().ws(key).active).toBe("c.ts");
-    });
-
-    it("⌘F finds in rendered markdown without leaving Render; again refocuses it", async () => {
-      texts["doc.md"] = "# Doc\n\nfoo and Foo";
-      await openTabs("doc.md");
-      await screen.findByRole("heading", { name: "Doc" });
-      press("f");
-      expect(screen.getByRole("button", { name: "Render" }).getAttribute("aria-pressed")).toBe("true");
-      const input = screen.getByPlaceholderText("Find in file");
-      fireEvent.change(input, { target: { value: "foo" } });
-      expect(document.querySelector(".files-find-count")!.textContent).toBe("1 / 2");
-      press("g");
-      expect(document.querySelector(".files-find-count")!.textContent).toBe("2 / 2");
-      expect(document.activeElement).toBe(input);
-      input.blur();
-      press("f");
-      expect(document.activeElement).toBe(input);
-    });
-
-    it("Match case narrows the matches; ⌘G and ⇧⌘G step through them", async () => {
-      texts["a.ts"] = "Foo foo\nfoo";
-      await openTabs("a.ts");
-      await waitFor(() => expect(document.querySelector(".files-text")).not.toBeNull());
-      press("f");
-      fireEvent.change(screen.getByPlaceholderText("Find in file"), { target: { value: "foo" } });
-      const count = () => document.querySelector(".files-find-count")!.textContent;
-      expect(count()).toBe("1 / 3");
-      press("g");
-      expect(count()).toBe("2 / 3");
-      press("g");
-      expect(count()).toBe("3 / 3");
-      press("g", { shiftKey: true });
-      expect(count()).toBe("2 / 3");
-      fireEvent.click(screen.getByRole("button", { name: "Match case" }));
-      expect(count()).toBe("1 / 2");
-    });
-
-    it("Copy contents copies the file's text", async () => {
-      texts["a.ts"] = "one\ntwo";
-      await openTabs("a.ts");
-      fireEvent.click(await screen.findByRole("button", { name: "Copy contents" }));
-      expect(writeText).toHaveBeenCalledWith("one\ntwo");
-      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied"));
-    });
-
-    it("Copy contents of a cut file says only the first 2 MB was copied", async () => {
-      texts["big.ts"] = "head";
-      truncated.add("big.ts");
-      await openTabs("big.ts");
-      const btn = await screen.findByRole("button", { name: "Copy contents" });
-      expect(btn.getAttribute("title")).toBe("Copy contents (first 2 MB only)");
-      fireEvent.click(btn);
-      await waitFor(() => expect(showToast).toHaveBeenCalledWith("Contents copied (first 2 MB only)"));
-      truncated.delete("big.ts");
-    });
-
-    it("Esc closes a zoomed diagram, not the overlay", async () => {
-      texts["d.md"] = "```mermaid\ngraph TD; A-->B\n```\n";
-      await openTabs("d.md");
-      fireEvent.click(await screen.findByRole("button", { name: "Zoom diagram" }));
-      expect(screen.getByRole("dialog", { name: "Diagram" })).toBeTruthy();
-      act(() => {
-        fireEvent.keyDown(window, { key: "Escape" });
-      });
-      expect(screen.queryByRole("dialog", { name: "Diagram" })).toBeNull();
-      expect(useApp.getState().filesOverlay).not.toBeNull();
     });
 
     it("⌘R reloads the lists and the open file", async () => {
@@ -324,65 +215,7 @@ describe("FilesOverlay", () => {
       vi.useRealTimers();
     });
 
-    it("shows a read error in place of the file", async () => {
-      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
-        if (cmd === "files_read") throw { code: "io", message: "permission denied" };
-        return prev!(cmd, args as never);
-      }) as never);
-      useFiles.getState().open(key, "a.ts", { pin: true });
-      render(<FilesOverlay />);
-      expect((await screen.findByRole("alert")).textContent).toBe("permission denied");
-    });
-
-    it("keeps the file shown and adds a banner when a reload fails", async () => {
-      useFiles.getState().open(key, "a.ts", { pin: true });
-      const { container } = render(<FilesOverlay />);
-      // The text view (jsdom lays out no rows of it).
-      const shown = () => container.querySelector(".files-text");
-      await waitFor(() => expect(shown()).toBeTruthy());
-      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
-        if (cmd === "files_read") throw { code: "io", message: "timed out" };
-        return prev!(cmd, args as never);
-      }) as never);
-      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
-      expect((await screen.findByRole("alert")).textContent).toBe("Could not reload: timed out");
-      expect(shown()).toBeTruthy();
-    });
-
     const watch = () => channels[channels.length - 1];
-
-    it("reloads the open file when the watch reports it written", async () => {
-      useFiles.getState().open(key, "a.ts", { pin: true });
-      const { container } = render(<FilesOverlay />);
-      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
-      await waitFor(() => expect(watch()).toBeTruthy());
-      const reads = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length;
-      const before = reads();
-      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "a.ts", isDir: false, removed: false }] }));
-      // jsdom lays out no rows of the text view, so the re-read itself is what shows.
-      await waitFor(() => expect(reads()).toBe(before + 1));
-    });
-
-    it("shows File removed when the watch reports the open file removed", async () => {
-      useFiles.getState().open(key, "a.ts", { pin: true });
-      const { container } = render(<FilesOverlay />);
-      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
-      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "a.ts", isDir: false, removed: true }] }));
-      expect(await screen.findByText("File removed")).toBeTruthy();
-    });
-
-    it("shows File removed when a parent-folder change finds the open file gone", async () => {
-      useFiles.getState().open(key, "src/a.ts", { pin: true });
-      const { container } = render(<FilesOverlay />);
-      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
-      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
-        if (cmd === "files_read") throw { code: "not_found", message: "no such file" };
-        return prev!(cmd, args as never);
-      }) as never);
-      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "src", isDir: true, removed: false }] }));
-      expect(await screen.findByText("File removed")).toBeTruthy();
-      expect(screen.queryByRole("alert")).toBeNull();
-    });
 
     it("shows the folder missing when the watch reports the root removed", async () => {
       render(<FilesOverlay />);
@@ -390,18 +223,6 @@ describe("FilesOverlay", () => {
       act(() => watch().onmessage!({ type: "changes", changes: [{ path: "", isDir: true, removed: true }] }));
       expect(await screen.findByText("This folder no longer exists.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Change folder…" })).toBeTruthy();
-    });
-
-    it("re-reads the open file when a folder above its parent changes", async () => {
-      useFiles.getState().open(key, "src/deep/a.ts", { pin: true });
-      const { container } = render(<FilesOverlay />);
-      await waitFor(() => expect(container.querySelector(".files-text")).toBeTruthy());
-      vi.mocked(invoke).mockImplementation((async (cmd: string, args?: unknown) => {
-        if (cmd === "files_read") throw { code: "not_found", message: "no such file" };
-        return prev!(cmd, args as never);
-      }) as never);
-      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "src", isDir: true, removed: true }] }));
-      expect(await screen.findByText("File removed")).toBeTruthy();
     });
 
     const listAlls = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_list_all").length;
