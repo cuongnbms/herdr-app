@@ -56,12 +56,20 @@ _Avoid_: plugin, extension
 A way of viewing a Pane: the **Terminal lens** (the raw attached terminal) or the **Chat lens** (the Agent's Transcript as a conversation).
 _Avoid_: mode, view
 
-**Files overlay**:
-A full-screen view over the app for reading the files of one Workspace, rooted at its Workspace folder (else the selected Pane's cwd). It reads files, and moves files in by Upload and out by Download; it never overwrites, edits or deletes.
-_Avoid_: file lens, file browser
+**Files panel**:
+The file tree of one Workspace under the agent list, following the active Open item, rooted at its Workspace folder (else the selected Pane's cwd). It reads files, and moves files in by Upload and out by Download; it never overwrites, edits or deletes.
+_Avoid_: files overlay, file browser
+
+**Open item**:
+An Agent's Pane or a file the user opened, shown as a tab in the **Open strip** above the main area, across all Machines and Sessions.
+_Avoid_: tab (a herdr Tab is a layout of Panes), editor
+
+**File viewer**:
+The main area's view of the active file Open item.
+_Avoid_: file lens (a Lens views a Pane)
 
 **Files watch**:
-The live feed of changes under the Files overlay's root (`inotifywait`, a `find` poll loop, or FSEvents) that reloads the open file and the loaded folders of the tree. One at a time, owned by the open Files overlay.
+The live feed of changes under the Files panel's root (`inotifywait`, a `find` poll loop, or FSEvents) that reloads the open file and the loaded folders of the tree. One at a time, owned by the Files panel.
 _Avoid_: watcher (herdr's session watcher), polling
 
 **Transcript**:
