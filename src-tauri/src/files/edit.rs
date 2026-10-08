@@ -35,8 +35,10 @@ const DELETE_SCRIPT: &str = r#"cd "$1" || exit 3
 rm -rf -- "./$2""#;
 
 /// `$1` root, `$2` file, `$3` `check` or `force`, `$4` size, `$5` mtime, `$6` cksum (empty when
-/// forced); stdin is the new content. Exit 3 no such root, 5 no such file (or, forced, no such
-/// folder), 6 the file is not the expected version, 7 too many links, 8 not a file. Links are
+/// forced), `$7` the byte length of the new content; stdin is the new content. Exit 3 no such
+/// root, 5 no such file (or, forced, no such folder), 6 the file is not the expected version,
+/// 7 too many links, 8 not a file, 9 fewer bytes arrived than `$7` (an ssh client that dies
+/// mid-transfer closes stdin, and `cat` takes that EOF for the end of the content). Links are
 /// followed by hand so the temp file lands beside the real file and the link survives; the
 /// temp file takes the old mode and replaces the file with one `mv`.
 const WRITE_SCRIPT: &str = r#"cd "$1" || exit 3
@@ -60,6 +62,7 @@ fi
 t="$(dirname -- "$f")/.$(basename -- "$f").herdr-$$.tmp"
 trap 'rm -f -- "$t"' EXIT
 cat > "$t" || exit 1
+[ "$(wc -c < "$t" | tr -d " ")" = "$7" ] || exit 9
 if [ -f "$f" ]; then
   m=$(stat -c '%a' -- "$f" 2>/dev/null || stat -f '%Lp' -- "$f") || exit 1
   chmod "$m" "$t" || exit 1
@@ -91,6 +94,19 @@ fn script_error(status: i32, stderr: &str, root: &str, rel: &str) -> AppError {
         4 => AppError::new("invalid", format!("{rel} already exists")),
         5 => AppError::new("not_found", format!("no such file or folder: {rel:?}")),
         _ => io_error(status, stderr),
+    }
+}
+
+/// The error for WRITE_SCRIPT's exit `status` (non-zero).
+fn write_error(status: i32, stderr: &str, root: &str, rel: &str) -> AppError {
+    match status {
+        3 => AppError::new("not_found", format!("no such folder: {root:?}")),
+        5 => AppError::new("not_found", format!("no such file: {rel:?}")),
+        6 => AppError::new("conflict", format!("{rel} changed on disk")),
+        7 => AppError::new("invalid", format!("too many links: {rel:?}")),
+        8 => AppError::new("invalid", format!("{rel} is not a file")),
+        9 => AppError::new("io", "incomplete write"),
+        s => io_error(s, stderr),
     }
 }
 
@@ -161,21 +177,11 @@ pub async fn write(
         ),
         None => ("force", String::new(), String::new(), String::new()),
     };
-    let argv = script_argv(WRITE_SCRIPT, &[root, rel, mode, &size, &mtime, &sum]);
+    let len = text.len().to_string();
+    let argv = script_argv(WRITE_SCRIPT, &[root, rel, mode, &size, &mtime, &sum, &len]);
     let out = exec_input(t, &argv, Some(text.as_bytes())).await?;
-    match out.status {
-        0 => {}
-        3 => {
-            return Err(AppError::new(
-                "not_found",
-                format!("no such folder: {root:?}"),
-            ))
-        }
-        5 => return Err(AppError::new("not_found", format!("no such file: {rel:?}"))),
-        6 => return Err(AppError::new("conflict", format!("{rel} changed on disk"))),
-        7 => return Err(AppError::new("invalid", format!("too many links: {rel:?}"))),
-        8 => return Err(AppError::new("invalid", format!("{rel} is not a file"))),
-        s => return Err(io_error(s, &out.stderr)),
+    if out.status != 0 {
+        return Err(write_error(out.status, &out.stderr, root, rel));
     }
     let stat = out
         .stdout
@@ -472,6 +478,40 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(code(e), "not_found");
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_transfer_leaves_the_file_untouched() {
+        // An ssh client that dies mid-save closes the remote stdin: `cat` sees EOF and
+        // succeeds, so the script must compare the bytes it got with the length it was sent.
+        let (_t, r) = root();
+        let p = format!("{r}/src/a.txt");
+        std::fs::write(&p, "old content\n").unwrap();
+        for (mode, size, mtime, sum) in [
+            ("force", String::new(), String::new(), String::new()),
+            (
+                "check",
+                ver(&p).size.to_string(),
+                ver(&p).mtime.to_string(),
+                ver(&p).cksum.to_string(),
+            ),
+        ] {
+            let argv = script_argv(
+                WRITE_SCRIPT,
+                &[&r, "src/a.txt", mode, &size, &mtime, &sum, "20"],
+            );
+            let out = exec_input(&LocalTransport, &argv, Some(b"partial"))
+                .await
+                .unwrap();
+            assert_eq!(out.status, 9, "{mode}");
+            let e = write_error(out.status, &out.stderr, &r, "src/a.txt");
+            assert_eq!(
+                (e.code.as_str(), e.message.as_str()),
+                ("io", "incomplete write")
+            );
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), "old content\n");
+            assert!(!temp_left(&format!("{r}/src")));
+        }
     }
 
     #[tokio::test]

@@ -160,7 +160,9 @@ pub async fn read_file(t: &dyn Transport, root: &str, rel: &str) -> AppResult<Fi
         Some(String::from_utf8_lossy(body).into_owned()),
         truncated,
     );
-    if !truncated {
+    // Only a body exactly as long as stat said is that version: a file that grew or shrank
+    // between the stat and the read must not be saved back over.
+    if !truncated && body.len() as u64 == size {
         c.cksum = Some(cksum(body));
         c.editable = std::str::from_utf8(body).is_ok();
     }
@@ -333,6 +335,21 @@ mod tests {
         let text = c.text.unwrap();
         assert!(!text.ends_with('\u{FFFD}'));
         assert_eq!(text.len(), MAX_TEXT_BYTES - 1);
+    }
+
+    #[tokio::test]
+    async fn text_that_changed_size_while_read_is_not_editable() {
+        // Stat said 5 bytes, then the file grew (or shrank) before `head` read it: what was
+        // read is not the version stat describes, so saving it back must not be offered.
+        use crate::files::Canned;
+        for out in ["printf '5 9\\n0\\nhello world'", "printf '5 9\\n0\\nhel'"] {
+            let c = read_file(&Canned(out), "/r", "a.txt").await.unwrap();
+            assert!(!c.editable && c.cksum.is_none(), "{out}");
+        }
+        let c = read_file(&Canned("printf '5 9\\n0\\nhello'"), "/r", "a.txt")
+            .await
+            .unwrap();
+        assert!(c.editable && c.cksum.is_some());
     }
 
     #[tokio::test]
