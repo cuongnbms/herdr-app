@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { CloseIcon } from "../ui/icons";
-import type { CloseScope } from "./store";
+import type { CloseScope } from "../store/openItems";
 
 interface Props {
   tabs: string[];

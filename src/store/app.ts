@@ -5,8 +5,22 @@ import { pruneFolders, type WorkspaceRef } from "../workspaces/folder";
 import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 import { newAgentOnTerminal } from "../settings/lens";
-import { closeTabs, dropTabs, NO_TABS, openTab, pruneTabs, type AgentTabs } from "../agents/openAgents";
-import type { CloseScope } from "../files/store";
+import { useFiles, filesKey } from "../files/store";
+import {
+  closeItems,
+  cycleItem,
+  dropItems,
+  findItem,
+  itemKey,
+  NO_ITEMS,
+  openItem,
+  pinItem,
+  pruneItems,
+  setActive,
+  type CloseScope,
+  type OpenItem,
+  type OpenItems,
+} from "./openItems";
 
 export interface SessionRef {
   machine_id: string;
@@ -81,12 +95,16 @@ export interface AppState {
   /** When each pane's status last changed (by paneKey, ms since epoch), as seen by this app run:
    *  panes in a machine's first snapshot have none. Orders the dashboard's Idle column. Not persisted. */
   statusSince: Record<string, number>;
-  /** The agent panes opened, across machines and sessions, shown as tabs above the lens. Not persisted. */
-  agentTabs: AgentTabs;
-  /** Pins `ref`'s tab, opening it if needed: a pinned tab is not replaced by the next pane opened. */
-  pinAgentTab: (ref: PaneRef) => void;
-  /** Closes tabs relative to `ref`'s; closing the selected pane's tab selects a neighbour. */
-  closeAgentTabs: (ref: PaneRef, scope: "one" | CloseScope) => void;
+  /** The agents and files opened, across machines and workspaces, shown as tabs above the lens. Not persisted. */
+  openItems: OpenItems;
+  /** Opens a file item (pinned or as the preview) and makes it active; `selected` is unchanged. Records it in useFiles recent. */
+  openFile: (ws: WorkspaceRef, root: string, rel: string, opts: { pin: boolean }) => void;
+  /** Activates an item: an agent item selects its Pane; a file item only becomes active. */
+  activateItem: (key: string) => void;
+  pinItem: (key: string) => void;
+  /** Closes relative to `key`; if the new active item is an agent, selects its Pane. */
+  closeItems: (key: string, scope: "one" | CloseScope) => void;
+  cycleItems: (delta: 1 | -1) => void;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -108,7 +126,7 @@ export const useApp = create<AppState>((set, get) => ({
   filesOverlay: null,
   doneSeen: {},
   statusSince: {},
-  agentTabs: NO_TABS,
+  openItems: NO_ITEMS,
   ...load(),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setFilesOverlay: (ref) =>
@@ -140,14 +158,14 @@ export const useApp = create<AppState>((set, get) => ({
       // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
       const doneSeen = seenAfterSnapshot(s.doneSeen, shared, s.dashboardOpen ? null : s.selected);
       const statusSince = sinceAfterSnapshot(s.statusSince, s.machines[v.id], shared, Date.now());
-      const agentTabs = tabsAfterSnapshot(s.agentTabs, shared, s.selected);
+      const openItems = itemsAfterSnapshot(s.openItems, s.machines[v.id], shared, s.selected);
       return {
         machines: s.machines[v.id] === shared ? s.machines : { ...s.machines, [v.id]: shared },
         lensOverride: agentStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
         order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
         doneSeen: sameKeys(doneSeen, s.doneSeen) ? s.doneSeen : doneSeen,
         statusSince: sameTimes(statusSince, s.statusSince) ? s.statusSince : statusSince,
-        agentTabs,
+        openItems,
       };
     });
   },
@@ -159,7 +177,7 @@ export const useApp = create<AppState>((set, get) => ({
         machines,
         order: s.order.filter((o) => o !== id),
         selected: s.selected?.machine_id === id ? null : s.selected,
-        agentTabs: dropTabs(s.agentTabs, (t) => t.machine_id === id),
+        openItems: dropItems(s.openItems, (i) => (i.kind === "agent" ? i.ref : i.ws).machine_id === id),
         viewed: s.viewed?.machine_id === id ? null : s.viewed,
       };
     });
@@ -172,21 +190,34 @@ export const useApp = create<AppState>((set, get) => ({
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
       lastPane: ref ? { ...s.lastPane, [sessionKey(ref.machine_id, ref.session)]: ref } : s.lastPane,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
-      agentTabs: ref && findPane(s.machines, ref)?.agent ? openTab(s.agentTabs, ref, { pin: false }) : s.agentTabs,
+      openItems: !ref
+        ? s.openItems
+        : findPane(s.machines, ref)?.agent
+          ? openItem(s.openItems, { kind: "agent", ref }, { pin: false })
+          : setActive(s.openItems, null),
     })),
-  pinAgentTab: (ref) => set((s) => ({ agentTabs: openTab(s.agentTabs, ref, { pin: true }) })),
-  closeAgentTabs: (ref, scope) => {
-    const s = get();
-    const old = s.agentTabs;
-    const next = closeTabs(old, scope, ref);
+  openFile: (ws, root, rel, opts) => {
+    set((s) => ({ openItems: openItem(s.openItems, { kind: "file", ws, root, rel }, opts) }));
+    useFiles.getState().addRecent(filesKey(ws, root), rel);
+  },
+  activateItem: (key) => {
+    const item = findItem(get().openItems, key);
+    if (!item) return;
+    if (item.kind === "agent") get().select(item.ref);
+    else set((s) => ({ openItems: setActive(s.openItems, key) }));
+  },
+  pinItem: (key) => set((s) => ({ openItems: pinItem(s.openItems, key) })),
+  closeItems: (key, scope) => {
+    const old = get().openItems;
+    const next = closeItems(old, scope, key);
     if (next === old) return;
-    set({ agentTabs: next });
-    const sel = s.selected;
-    const has = (s: AgentTabs, r: PaneRef) => s.tabs.some((t) => paneKey(t) === paneKey(r));
-    if (!sel || !has(old, sel) || has(next, sel)) return;
-    const at = old.tabs.findIndex((t) => paneKey(t) === paneKey(sel));
-    const to = has(next, ref) ? ref : (next.tabs[at] ?? next.tabs[at - 1]);
-    if (to) s.select(to);
+    set({ openItems: next });
+    if (next.active !== old.active) selectIfAgent(get(), next);
+  },
+  cycleItems: (delta) => {
+    const next = cycleItem(get().openItems, delta);
+    set({ openItems: next });
+    selectIfAgent(get(), next);
   },
   // Viewing another session also opens its pane: the one last selected there, else its first.
   view: (ref) => {
@@ -225,11 +256,25 @@ export const useApp = create<AppState>((set, get) => ({
   },
 }));
 
-/** Drops closed panes' tabs (only a connected snapshot says a pane is gone) and opens the tab of
- *  an agent started in the selected pane. */
-function tabsAfterSnapshot(prev: AgentTabs, v: MachineView, selected: PaneRef | null): AgentTabs {
-  const next = v.state === "connected" ? pruneTabs(prev, v) : prev;
-  return selected?.machine_id === v.id && findPane({ [v.id]: v }, selected)?.agent ? openTab(next, selected, { pin: false }) : next;
+/** The item being shown above the lens, if any. */
+export function activeItem(s: Pick<AppState, "openItems">): OpenItem | null {
+  return (s.openItems.active && findItem(s.openItems, s.openItems.active)) || null;
+}
+
+/** Selects the Pane of the active item when it is an agent. */
+function selectIfAgent(s: AppState, items: OpenItems) {
+  const active = items.active ? findItem(items, items.active) : undefined;
+  if (active?.kind === "agent") s.select(active.ref);
+}
+
+/** Drops closed panes' and workspaces' items (only a connected snapshot says they are gone) and opens
+ *  the item of an agent started in the selected pane. */
+function itemsAfterSnapshot(prev: OpenItems, before: MachineView | undefined, v: MachineView, selected: PaneRef | null): OpenItems {
+  const next = v.state === "connected" ? pruneItems(prev, v) : prev;
+  if (selected?.machine_id !== v.id || !findPane({ [v.id]: v }, selected)?.agent) return next;
+  const item: OpenItem = { kind: "agent", ref: selected };
+  const started = !before || !findPane({ [v.id]: before }, selected)?.agent;
+  return started && !findItem(next, itemKey(item)) ? openItem(next, item, { pin: false }) : next;
 }
 
 export function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView | undefined {

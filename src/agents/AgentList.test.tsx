@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn().mockResolvedValue(undefined) }));
 import { herdrCall } from "../lib/ipc";
 import { useApp } from "../store/app";
+import { NO_ITEMS } from "../store/openItems";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { AgentList, workspaceGroups } from "./AgentList";
 import type { MachineView, PaneView } from "../lib/types";
@@ -72,10 +73,12 @@ describe("AgentList", () => {
   });
 
   it("pins the pane's tab on double click", () => {
-    useApp.setState({ agentTabs: { tabs: [], preview: null } });
+    useApp.setState({ openItems: NO_ITEMS });
     render(<AgentList />);
+    fireEvent.click(screen.getByText("Guard export"));
     fireEvent.doubleClick(screen.getByText("Guard export"));
-    expect(useApp.getState().agentTabs).toEqual({ tabs: [{ machine_id: "local", session: "default", pane_id: "p2" }], preview: null });
+    expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: { machine_id: "local", session: "default", pane_id: "p2" } }]);
+    expect(useApp.getState().openItems.preview).toBeNull();
   });
 
   it("shows a header per workspace with its folder, empty workspaces included", () => {

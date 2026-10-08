@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chosenLens, useApp, selectedPane } from "./app";
+import { activeItem, chosenLens, useApp, selectedPane } from "./app";
+import { itemKey, NO_ITEMS } from "./openItems";
+import { filesKey, useFiles } from "../files/store";
 import { paneKey } from "../lib/types";
 import type { MachineView } from "../lib/types";
 import { getFolder, setFolder } from "../workspaces/folder";
@@ -356,97 +358,127 @@ describe("the Files overlay and the main area", () => {
   });
 });
 
-describe("agent tabs", () => {
+describe("open items", () => {
   const ref = (pane_id: string, session = "default") => ({ machine_id: "local", session, pane_id });
-  const tabs = () => useApp.getState().agentTabs.tabs.map((t) => (t.session === "default" ? t.pane_id : `${t.session}/${t.pane_id}`));
-  const preview = () => useApp.getState().agentTabs.preview;
-  const withShell = () => {
+  const key = (pane_id: string, session = "default") => itemKey({ kind: "agent", ref: ref(pane_id, session) });
+  const ws = { machine_id: "local", session: "default", workspace_id: "w2" };
+  const fileItem = { kind: "file" as const, ws, root: "/r", rel: "a.md" };
+  const withW2 = (): MachineView => {
     const m = structuredClone(machine);
-    m.sessions[0].workspaces[0].tabs[0].panes.push({ pane_id: "w1:p3", terminal_id: "term_c", title: "zsh", cwd: "/x", agent: null, status: "idle" });
-    m.sessions.push({ ...structuredClone(machine.sessions[0]), name: "other" });
+    m.sessions[0].workspaces.push({
+      workspace_id: "w2", label: "other", number: 2, status: "idle",
+      tabs: [{ tab_id: "w2:t1", label: "1", number: 1, status: "idle", panes: [
+        { pane_id: "w2:p2", terminal_id: "term_d", title: "A", cwd: "/x", agent: "claude", status: "idle" },
+        { pane_id: "w2:p3", terminal_id: "term_e", title: "B", cwd: "/x", agent: "pi", status: "idle" },
+        { pane_id: "w2:p4", terminal_id: "term_f", title: "zsh", cwd: "/x", agent: null, status: "idle" },
+      ] }],
+    });
     return m;
   };
-  // Selects each pane and pins its tab.
-  const openPinned = (...refs: ReturnType<typeof ref>[]) => {
-    for (const r of refs) {
-      useApp.getState().select(r);
-      useApp.getState().pinAgentTab(r);
-    }
-  };
   beforeEach(() => {
-    useApp.setState({ machines: {}, order: [], selected: null, agentTabs: { tabs: [], preview: null } });
-    useApp.getState().upsertMachine(withShell());
+    useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
+    useApp.getState().upsertMachine(withW2());
   });
 
-  it("selecting an agent pane previews it, replacing the previous preview, across sessions; a shell pane gets none", () => {
-    const { select } = useApp.getState();
-    select(ref("w1:p2"));
-    expect(tabs()).toEqual(["w1:p2"]);
-    select(ref("w1:p1", "other"));
-    expect(tabs()).toEqual(["other/w1:p1"]);
-    expect(preview()).toBe(paneKey(ref("w1:p1", "other")));
-    select(ref("w1:p3"));
-    expect(tabs()).toEqual(["other/w1:p1"]);
+  it("selecting an agent opens its item as the active preview", () => {
+    useApp.getState().select(ref("w2:p2"));
+    const s = useApp.getState().openItems;
+    expect(s.items).toEqual([{ kind: "agent", ref: ref("w2:p2") }]);
+    expect(s.active).toBe(key("w2:p2"));
+    expect(s.preview).toBe(key("w2:p2"));
   });
 
-  it("a pinned tab stays when another pane is selected; pinning the preview keeps it too", () => {
-    const { select, pinAgentTab } = useApp.getState();
-    select(ref("w1:p2"));
-    pinAgentTab(ref("w1:p2"));
-    select(ref("w1:p1"));
-    select(ref("w1:p1", "other"));
-    expect(tabs()).toEqual(["w1:p2", "other/w1:p1"]);
-    select(ref("w1:p2"));
-    expect(tabs()).toEqual(["w1:p2", "other/w1:p1"]);
-    pinAgentTab(ref("w1:p1", "other"));
-    select(ref("w1:p1"));
-    expect(tabs()).toEqual(["w1:p2", "other/w1:p1", "w1:p1"]);
-    expect(preview()).toBe(paneKey(ref("w1:p1")));
+  it("selecting a shell pane opens nothing and clears the active item", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().select(ref("w2:p4"));
+    expect(useApp.getState().openItems.items).toHaveLength(1);
+    expect(useApp.getState().openItems.active).toBeNull();
   });
 
-  it("an agent started in the selected pane opens its tab", () => {
-    useApp.getState().select(ref("w1:p3"));
-    const m = withShell();
-    m.sessions[0].workspaces[0].tabs[0].panes[2].agent = "claude";
+  it("opening a file keeps the selected pane and makes the file active, and records it as recent", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+    expect(activeItem(useApp.getState())).toEqual(fileItem);
+    expect(useFiles.getState().ws(filesKey(ws, "/r")).recent).toEqual(["a.md"]);
+  });
+
+  it("activating an agent item selects its pane", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().activateItem(key("w2:p2"));
+    expect(activeItem(useApp.getState())).toEqual({ kind: "agent", ref: ref("w2:p2") });
+  });
+
+  it("activating a file item leaves the selected pane", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().activateItem(key("w2:p2"));
+    useApp.getState().activateItem(itemKey(fileItem));
+    expect(useApp.getState().openItems.active).toBe(itemKey(fileItem));
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+  });
+
+  it("cycling selects the agent it lands on", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().cycleItems(1);
+    expect(useApp.getState().openItems.active).toBe(key("w2:p2"));
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+  });
+
+  it("closing the active file hands over to the agent and keeps the selection", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: false });
+    useApp.getState().closeItems(itemKey(fileItem), "one");
+    expect(activeItem(useApp.getState())).toEqual({ kind: "agent", ref: ref("w2:p2") });
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+  });
+
+  it("closing the only file leaves no active item and the selected pane stays", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().closeItems(key("w2:p2"), "one");
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: false });
+    useApp.getState().closeItems(itemKey(fileItem), "one");
+    expect(useApp.getState().openItems.active).toBeNull();
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+  });
+
+  it("closing the active agent selects the next agent item", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().select(ref("w2:p3"));
+    useApp.getState().closeItems(key("w2:p3"), "one");
+    expect(useApp.getState().selected).toEqual(ref("w2:p2"));
+  });
+
+  it("an agent started in the selected pane opens its item", () => {
+    useApp.getState().select(ref("w2:p4"));
+    const m = withW2();
+    m.sessions[0].workspaces[1].tabs[0].panes[2].agent = "claude";
     useApp.getState().upsertMachine(m);
-    expect(tabs()).toEqual(["w1:p3"]);
+    expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: ref("w2:p4") }]);
   });
 
-  it("a closed pane or session loses its tab; removing the machine drops them all", () => {
-    openPinned(ref("w1:p1"), ref("w1:p2"), ref("w1:p2", "other"));
-    const m = withShell();
-    m.sessions[0].workspaces[0].tabs[0].panes.splice(0, 1);
-    useApp.getState().upsertMachine(m);
-    expect(tabs()).toEqual(["w1:p2", "other/w1:p2"]);
-    m.sessions.pop();
-    useApp.getState().upsertMachine(m);
-    expect(tabs()).toEqual(["w1:p2"]);
+  it("a snapshot does not reopen a closed item or steal the active file", () => {
+    useApp.getState().select(ref("w2:p2"));
+    useApp.getState().pinItem(key("w2:p2"));
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().upsertMachine(withW2());
+    expect(useApp.getState().openItems.active).toBe(itemKey(fileItem));
+  });
+
+  it("a connected snapshot without the workspace drops its files; removing the machine drops all", () => {
+    useApp.getState().openFile(ws, "/r", "a.md", { pin: true });
+    useApp.getState().upsertMachine({ ...withW2(), state: "disconnected", sessions: [] });
+    expect(useApp.getState().openItems.items).toHaveLength(1);
+    useApp.getState().upsertMachine(machine);
+    expect(useApp.getState().openItems.items).toEqual([]);
+    useApp.getState().openFile({ ...ws, workspace_id: "w1" }, "/r", "b.md", { pin: true });
     useApp.getState().removeMachine("local");
-    expect(tabs()).toEqual([]);
-  });
-
-  it("closing the selected pane's tab selects its neighbour, even in another session; others keep the selection", () => {
-    const { select, closeAgentTabs } = useApp.getState();
-    openPinned(ref("w1:p1"), ref("w1:p2", "other"));
-    select(ref("w1:p3"));
-    closeAgentTabs(ref("w1:p1"), "one");
-    expect(tabs()).toEqual(["other/w1:p2"]);
-    expect(useApp.getState().selected).toEqual(ref("w1:p3"));
-    select(ref("w1:p1"));
-    closeAgentTabs(ref("w1:p1"), "one");
-    expect(tabs()).toEqual(["other/w1:p2"]);
-    expect(preview()).toBeNull();
-    expect(useApp.getState().selected).toEqual(ref("w1:p2", "other"));
-  });
-
-  it("close others selects the tab it was invoked on; close all keeps the selected pane open", () => {
-    const { closeAgentTabs } = useApp.getState();
-    openPinned(ref("w1:p1"), ref("w1:p2", "other"));
-    closeAgentTabs(ref("w1:p1"), "others");
-    expect(tabs()).toEqual(["w1:p1"]);
-    expect(useApp.getState().selected).toEqual(ref("w1:p1"));
-    closeAgentTabs(ref("w1:p1"), "all");
-    expect(tabs()).toEqual([]);
-    expect(useApp.getState().selected).toEqual(ref("w1:p1"));
+    expect(useApp.getState().openItems).toEqual(NO_ITEMS);
   });
 });

@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApp } from "../store/app";
-import { AgentTabs } from "./AgentTabs";
+import { OpenStrip } from "./OpenStrip";
+import { itemKey, NO_ITEMS } from "../store/openItems";
 import type { MachineView, PaneView } from "../lib/types";
 
 const pane = (id: string, title: string, status: PaneView["status"]): PaneView => ({
@@ -22,32 +23,32 @@ const m: MachineView = {
 };
 
 const ref = (pane_id: string, session = "default") => ({ machine_id: "local", session, pane_id });
-const open = () => useApp.getState().agentTabs.tabs.map((t) => t.pane_id);
+const open = () => useApp.getState().openItems.items.map((i) => (i.kind === "agent" ? i.ref.pane_id : i.rel));
 // Selects each pane and pins its tab.
 const openPinned = (...ids: string[]) => {
   for (const id of ids) {
     useApp.getState().select(ref(id));
-    useApp.getState().pinAgentTab(ref(id));
+    useApp.getState().pinItem(itemKey({ kind: "agent", ref: ref(id) }));
   }
 };
 
-describe("AgentTabs", () => {
+describe("OpenStrip", () => {
   beforeEach(() => {
-    useApp.setState({ machines: {}, order: [], selected: null, agentTabs: { tabs: [], preview: null } });
+    useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
     useApp.getState().upsertMachine(m);
   });
 
   it("shows nothing until an agent is opened", () => {
-    const { container } = render(<AgentTabs />);
+    const { container } = render(<OpenStrip />);
     expect(container.firstChild).toBeNull();
   });
 
   it("lists the opened agents across workspaces and sessions, marking the selected one", () => {
     openPinned("p1");
     useApp.getState().select(ref("p1", "pegabot"));
-    useApp.getState().pinAgentTab(ref("p1", "pegabot"));
+    useApp.getState().pinItem(itemKey({ kind: "agent", ref: ref("p1", "pegabot") }));
     useApp.getState().select(ref("p3"));
-    render(<AgentTabs />);
+    render(<OpenStrip />);
     const tabs = screen.getAllByRole("tab");
     expect(tabs.map((t) => t.textContent)).toEqual(["Mermaid diagram", "Webhook retry", "Bug button"]);
     expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["false", "false", "true"]);
@@ -61,18 +62,18 @@ describe("AgentTabs", () => {
   it("italicises the preview tab and pins it on double click", () => {
     openPinned("p1");
     useApp.getState().select(ref("p2"));
-    render(<AgentTabs />);
+    render(<OpenStrip />);
     const tab = screen.getByRole("tab", { name: /Chat tabs/ });
     expect(tab.className).toContain("preview");
     expect(screen.getByRole("tab", { name: /Mermaid diagram/ }).className).not.toContain("preview");
     fireEvent.doubleClick(tab);
-    expect(useApp.getState().agentTabs.preview).toBeNull();
+    expect(useApp.getState().openItems.preview).toBeNull();
     expect(screen.getByRole("tab", { name: /Chat tabs/ }).className).not.toContain("preview");
   });
 
   it("selects on click; closes on the close button and on middle click", () => {
     openPinned("p1", "p2", "p3");
-    render(<AgentTabs />);
+    render(<OpenStrip />);
     fireEvent.click(screen.getByRole("tab", { name: /Mermaid diagram/ }));
     expect(useApp.getState().selected).toEqual(ref("p1"));
     fireEvent.click(screen.getByRole("button", { name: "Close Chat tabs" }));
@@ -84,10 +85,30 @@ describe("AgentTabs", () => {
 
   it("right click offers the close commands that would close something", () => {
     openPinned("p1", "p2");
-    render(<AgentTabs />);
+    render(<OpenStrip />);
     fireEvent.contextMenu(screen.getByRole("tab", { name: /Chat tabs/ }));
     expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["Close", "Close Others", "Close All"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Close Others" }));
     expect(open()).toEqual(["p2"]);
+  });
+
+  it("shows a file item by basename with its place in the tooltip, and activates it on click", () => {
+    openPinned("p1");
+    useApp.getState().openFile({ machine_id: "local", session: "default", workspace_id: "w2" }, "/r", "src/main.ts", { pin: true });
+    useApp.getState().select(ref("p1"));
+    render(<OpenStrip />);
+    const tab = screen.getByRole("tab", { name: "main.ts" });
+    expect(tab.closest(".files-tab-item")?.getAttribute("title")).toBe("local/default · herdr-app · src/main.ts");
+    fireEvent.click(tab);
+    expect(useApp.getState().openItems.active).toBe("file:local/default/w2|/r|src/main.ts");
+    expect(useApp.getState().selected).toEqual(ref("p1"));
+  });
+
+  it("marks the active item, not the selected pane, as selected", () => {
+    openPinned("p1");
+    useApp.getState().openFile({ machine_id: "local", session: "default", workspace_id: "w2" }, "/r", "a.md", { pin: true });
+    render(<OpenStrip />);
+    expect(screen.getByRole("tab", { name: "a.md" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Mermaid diagram" }).getAttribute("aria-selected")).toBe("false");
   });
 });

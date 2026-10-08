@@ -8,7 +8,7 @@ import { Settings } from "./settings/Settings";
 import { applyChatFont, useSettings } from "./settings/store";
 import { applyTheme, useTheme } from "./settings/theme";
 import { Header } from "./main/Header";
-import { AgentTabs } from "./agents/AgentTabs";
+import { OpenStrip } from "./main/OpenStrip";
 import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
@@ -201,7 +201,7 @@ export default function App() {
         {pane && ref ? (
           <>
             <Header />
-            <AgentTabs />
+            <OpenStrip />
             <Suspense fallback={null}>
               {defaultLens(pane, remembered) === "chat" ? (
                 <ChatLens key={key} pane={ref} view={pane} />

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { WorkspaceRef } from "../workspaces/folder";
+import type { CloseScope } from "../store/openItems";
 
 export interface FilesWs {
   tabs: string[];
@@ -14,8 +15,7 @@ export interface FilesWs {
 
 const RECENT_MAX = 20;
 
-/** Which tabs a "Close …" command closes, relative to the tab it was invoked on. */
-export type CloseScope = "others" | "right" | "all";
+const recentWith = (recent: string[], rel: string) => [rel, ...recent.filter((r) => r !== rel)].slice(0, RECENT_MAX);
 const EMPTY: FilesWs = { tabs: [], preview: null, active: null, expanded: [], scroll: {}, recent: [] };
 
 export function wsKey(ref: WorkspaceRef): string {
@@ -31,6 +31,8 @@ interface FilesState {
   byWs: Record<string, FilesWs>;
   ws: (key: string) => FilesWs;
   open: (key: string, rel: string, opts: { pin: boolean }) => void;
+  /** Puts `rel` first in the Workspace root's recent files. */
+  addRecent: (key: string, rel: string) => void;
   pin: (key: string, rel: string) => void;
   close: (key: string, rel: string) => void;
   closeTabs: (key: string, scope: CloseScope, rel: string) => void;
@@ -46,9 +48,10 @@ export const useFiles = create<FilesState>((set, get) => {
   return {
     byWs: {},
     ws: (key) => get().byWs[key] ?? EMPTY,
+    addRecent: (key, rel) => update(key, (w) => ({ ...w, recent: recentWith(w.recent, rel) })),
     open: (key, rel, { pin }) =>
       update(key, (w) => {
-        const recent = [rel, ...w.recent.filter((r) => r !== rel)].slice(0, RECENT_MAX);
+        const recent = recentWith(w.recent, rel);
         if (w.tabs.includes(rel)) {
           return { ...w, active: rel, recent, preview: pin && w.preview === rel ? null : w.preview };
         }
