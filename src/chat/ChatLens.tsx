@@ -295,6 +295,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {err && <div className="chat-notice chat-error">{err.code}: {err.message}</div>}
       {pending && !err && outgoing.list.length === 0 && <div className="chat-notice neutral">New conversation: send the first message to start it.</div>}
       {!loaded && loadingShown && !pending && !err && <div className="chat-notice neutral">Loading transcript…</div>}
+      {/* The pill sits on the scroll area's bottom edge, above whichever panel is below it. */}
+      <div className="chat-scroll-wrap">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} onWheel={unpick} onPointerDown={unpick} onKeyDown={unpick}>
         <div ref={contentRef} style={{ height: virt.getTotalSize(), position: "relative" }}>
           {virt.getVirtualItems().map((v) => {
@@ -345,6 +347,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
           <ArrowDownIcon /> New messages
         </button>
       )}
+      </div>
       <WorkingIndicator status={view.status} />
       {view.status === "blocked" || picker.open ? (
         <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />

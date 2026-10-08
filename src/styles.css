@@ -727,6 +727,7 @@ kbd {
 }
 .chat-outline button:hover { background: var(--hover); color: var(--fg); }
 .chat-outline button[aria-current="true"] { border-left-color: var(--accent); color: var(--fg); }
+.chat-scroll-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
 /* A user turn stacks its images, the bubble line and its Skill chips, all at the right edge. */
@@ -868,7 +869,7 @@ kbd {
 .chat-notice.chat-error::before { background: var(--err); }
 .chat-error { color: var(--err-fg); }
 .chat-new {
-  position: absolute; left: 0; right: 0; bottom: 132px; width: max-content; margin: 0 auto;
+  position: absolute; left: 0; right: 0; bottom: 12px; width: max-content; margin: 0 auto;
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
   border-radius: 999px; border: 1px solid var(--line-2); background: var(--surface-3); color: var(--fg);
   font-size: 12px; font-weight: 500; cursor: pointer; box-shadow: var(--shadow-pop);
