@@ -75,4 +75,22 @@ describe("drafts", () => {
     useDrafts.getState().dropUnder(fk, "lib");
     expect(Object.keys(useDrafts.getState().drafts)).toEqual([draftKey(fk, "srcx.txt")]);
   });
+
+  it("touch refreshes the base mtime and clears a conflict without replacing the state", () => {
+    const k = draftKey(fk, "a.txt");
+    useDrafts.getState().open(target("a.txt"), base("one\n"));
+    type("a.txt", "mine");
+    useDrafts.getState().setConflict(k, "removed");
+    const before = d("a.txt").state;
+    useDrafts.getState().touch(k, 9);
+    expect(d("a.txt").state).toBe(before);
+    expect(d("a.txt")).toMatchObject({ dirty: true, conflict: null, base: { mtime: 9, cksum: 1, text: "one\n" } });
+  });
+
+  it("counts the saves that landed", () => {
+    const k = draftKey(fk, "a.txt");
+    useDrafts.getState().open(target("a.txt"), base("one\n"));
+    useDrafts.getState().saved(k, base("one\n", 2));
+    expect(d("a.txt").gen).toBe(1);
+  });
 });

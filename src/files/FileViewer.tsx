@@ -32,7 +32,7 @@ interface Props {
 }
 
 /** Shows one open file: breadcrumbs, render/source, find, and a re-read when the change bus says so. */
-export function FileViewer({ item }: Props) {
+export function FileViewer({ item, online }: Props) {
   const { ws, root, rel } = item;
   const machineId = ws.machine_id;
   const key = filesKey(ws, root);
@@ -55,17 +55,22 @@ export function FileViewer({ item }: Props) {
   const batch = useFilesBus((s) => s.batches[key]);
 
   /** A file that is gone: a Draft keeps its text and says so, otherwise the plain banner shows. */
+  const onlineRef = useRef(online);
+  onlineRef.current = online;
   const gone = useCallback(
     (r: string) => {
       const dk = draftKey(key, r);
-      if (useDrafts.getState().drafts[dk]) useDrafts.getState().setConflict(dk, "removed");
-      else setRemoved(r);
+      // A Machine that is not connected fails every read with not_found; that says nothing about the file.
+      if (useDrafts.getState().drafts[dk]) {
+        if (onlineRef.current) useDrafts.getState().setConflict(dk, "removed");
+      } else setRemoved(r);
     },
     [key],
   );
 
   const load = useCallback(
     (r: string) => {
+      const started = useDrafts.getState().drafts[draftKey(key, r)];
       read(machineId, root, r).then(
         (content) => {
           if (content === STALE) return;
@@ -74,12 +79,15 @@ export function FileViewer({ item }: Props) {
           setRemoved(null);
           // Read at resolve time: `saving` and `dirty` are as they are now, not as they were when the read began.
           const dk = draftKey(key, r);
-          const { drafts, rebase, setConflict } = useDrafts.getState();
+          const { drafts, rebase, setConflict, touch } = useDrafts.getState();
           const d = drafts[dk];
-          // Our own save coming back from the watch is not a change.
-          if (!d || d.saving) return;
-          if (d.dirty) {
-            if (content.cksum !== d.base.cksum) setConflict(dk, "changed");
+          // Our own save, or a read that began before it (or before this Draft), says nothing about the file now.
+          if (!d || d.saving || !started || started.saving || started.id !== d.id || started.gen !== d.gen) return;
+          if (content.cksum === d.base.cksum && content.size === d.base.size) {
+            // Only the mtime moved (a touch, or our save echoing back): keep the editor state and its history.
+            if (content.mtime !== d.base.mtime || d.conflict) touch(dk, content.mtime);
+          } else if (d.dirty) {
+            setConflict(dk, "changed");
           } else {
             const base = diskVersion(content);
             if (base) {

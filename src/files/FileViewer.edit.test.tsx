@@ -184,4 +184,59 @@ describe("FileViewer edit mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save again" }));
     await waitFor(() => expect(writes()[0][1]).toMatchObject({ expected: null }));
   });
+
+  it("the echo of the app's own save, arriving after it, leaves the editor state alone", async () => {
+    await startEditing();
+    typeAtEnd("two\n");
+    press("s", { metaKey: true });
+    await waitFor(() => expect(useDrafts.getState().drafts[key]).toMatchObject({ dirty: false, saving: false, gen: 1 }));
+    const state = useDrafts.getState().drafts[key].state;
+    Object.assign(disk, { text: "one\ntwo\n", cksum: 10, mtime: 2 });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length).toBe(2));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(useDrafts.getState().drafts[key].state).toBe(state);
+    expect(useDrafts.getState().drafts[key].conflict).toBeNull();
+  });
+
+  it("a touch on a dirty draft refreshes the mtime so the next save is not a false conflict", async () => {
+    await startEditing();
+    typeAtEnd("mine");
+    disk.mtime = 7;
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(useDrafts.getState().drafts[key].base.mtime).toBe(7));
+    press("s", { metaKey: true });
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0][1]).toMatchObject({ expected: { size: 4, mtime: 7, cksum: 9 } });
+  });
+
+  it("a failed read while the machine is offline is not a deletion", async () => {
+    render(<FileViewer item={item} online={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    typeAtEnd("mine");
+    vi.mocked(invoke).mockImplementationOnce(async () => {
+      throw { code: "not_found", message: "machine local is not connected" };
+    });
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter((c) => c[0] === "files_read").length).toBe(2));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(screen.queryByText("File was deleted")).toBeNull();
+    expect(useDrafts.getState().drafts[key].conflict).toBeNull();
+  });
+
+  it("a read that began before a save and lands after it is ignored", async () => {
+    await startEditing();
+    typeAtEnd("mine");
+    let land!: (v: unknown) => void;
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise((r) => (land = r)));
+    publish([{ path: "a.txt", isDir: false, removed: false }]);
+    await waitFor(() => expect(land).toBeDefined());
+    press("s", { metaKey: true });
+    await waitFor(() => expect(useDrafts.getState().drafts[key]).toMatchObject({ dirty: false, saving: false }));
+    const state = useDrafts.getState().drafts[key].state;
+    await act(async () => land({ kind: "text", text: "one\n", truncated: false, size: 4, mtime: 1, cksum: 9, editable: true }));
+    expect(screen.queryByText("File changed on disk")).toBeNull();
+    expect(useDrafts.getState().drafts[key].state).toBe(state);
+    expect(useDrafts.getState().drafts[key].base.cksum).toBe(10);
+  });
 });

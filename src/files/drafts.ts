@@ -27,6 +27,8 @@ export interface Draft extends DraftTarget {
   dirty: boolean;
   conflict: "changed" | "removed" | null;
   saving: boolean;
+  /** Bumped by every save that lands, so a read that began before it can tell it is out of date. */
+  gen: number;
 }
 
 /** A Draft's key is its file Open item's key. */
@@ -45,6 +47,8 @@ interface DraftsState {
   /** A clean Draft takes the new disk content; a dirty or saving one is left alone. */
   rebase(key: string, base: DiskVersion): void;
   saved(key: string, base: DiskVersion): void;
+  /** The disk file has the same size and checksum as the base (only its mtime moved): keeps the state and history. */
+  touch(key: string, mtime: number): void;
   setConflict(key: string, c: "changed" | "removed" | null): void;
   setSaving(key: string, on: boolean): void;
   moveUnder(fk: string, from: string, to: string): void;
@@ -67,7 +71,7 @@ export const useDrafts = create<DraftsState>()((set) => {
     drafts: {},
     open: (target, base) => {
       const state = createEditorState(base.text);
-      const draft: Draft = { ...target, id: nextId++, state, base, baseDoc: state.doc, dirty: false, conflict: null, saving: false };
+      const draft: Draft = { ...target, id: nextId++, state, base, baseDoc: state.doc, dirty: false, conflict: null, saving: false, gen: 0 };
       set((s) => ({ drafts: { ...s.drafts, [draftKey(target.fk, target.rel)]: draft } }));
     },
     update: (key, state) => patch(key, (d) => ({ state, dirty: !state.doc.eq(d.baseDoc) })),
@@ -80,8 +84,9 @@ export const useDrafts = create<DraftsState>()((set) => {
     saved: (key, base) =>
       patch(key, (d) => {
         const baseDoc = d.state.toText(base.text);
-        return { base, baseDoc, dirty: !d.state.doc.eq(baseDoc), conflict: null, saving: false };
+        return { base, baseDoc, dirty: !d.state.doc.eq(baseDoc), conflict: null, saving: false, gen: d.gen + 1 };
       }),
+    touch: (key, mtime) => patch(key, (d) => ({ base: { ...d.base, mtime }, conflict: null })),
     setConflict: (key, conflict) => patch(key, () => ({ conflict })),
     setSaving: (key, saving) => patch(key, () => ({ saving })),
     moveUnder: (fk, from, to) =>
