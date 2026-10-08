@@ -83,9 +83,6 @@ export interface AppState {
   /** Whether the Agent Dashboard overlay is open. Not persisted. */
   dashboardOpen: boolean;
   setDashboardOpen: (open: boolean) => void;
-  /** The Workspace whose Files overlay is open, if any. Not persisted. */
-  filesOverlay: WorkspaceRef | null;
-  setFilesOverlay: (ref: WorkspaceRef | null) => void;
   /** Whether the Command Palette is open. Not persisted. */
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
@@ -123,20 +120,15 @@ export const useApp = create<AppState>((set, get) => ({
   starting: {},
   dashboardOpen: false,
   paletteOpen: false,
-  filesOverlay: null,
   doneSeen: {},
   statusSince: {},
   openItems: NO_ITEMS,
   ...load(),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  setFilesOverlay: (ref) =>
-    set(ref ? { filesOverlay: ref, dashboardOpen: false, paletteOpen: false } : { filesOverlay: null }),
   // Closing returns to the selected pane, so a done one counts as seen then.
   setDashboardOpen: (open) =>
     set((s) => ({
       dashboardOpen: open,
-      // The dashboard and Files share the main area: opening one closes the other.
-      filesOverlay: open ? null : s.filesOverlay,
       doneSeen:
         !open && s.selected && findPane(s.machines, s.selected)?.status === "done"
           ? { ...s.doneSeen, [paneKey(s.selected)]: true }
@@ -186,7 +178,6 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       selected: ref,
       dashboardOpen: ref ? false : s.dashboardOpen,
-      filesOverlay: ref ? null : s.filesOverlay,
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
       lastPane: ref ? { ...s.lastPane, [sessionKey(ref.machine_id, ref.session)]: ref } : s.lastPane,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,

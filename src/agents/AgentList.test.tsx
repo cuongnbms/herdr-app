@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn().mockResolvedValue(undefined) }));
 import { herdrCall } from "../lib/ipc";
+import { useFilesPanel } from "../files/panelStore";
 import { useApp } from "../store/app";
 import { NO_ITEMS } from "../store/openItems";
 import { getFolder, setFolder } from "../workspaces/folder";
@@ -154,6 +155,15 @@ describe("AgentList", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "/srv/web-app" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(within(screen.getByRole("group", { name: "web" })).getByText("web-app", { selector: ".ws-folder" })).toBeTruthy();
+  });
+
+  it("Browse files selects a pane of the workspace and focuses the file tree", () => {
+    useFilesPanel.setState(useFilesPanel.getInitialState(), true);
+    render(<AgentList />);
+    fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Browse files" }));
+    expect(useApp.getState().selected).toEqual({ machine_id: "local", session: "default", pane_id: "p2" });
+    expect(useFilesPanel.getState().focusTick).toBe(1);
   });
 
   it("starts an agent from the header menu in the workspace folder", () => {

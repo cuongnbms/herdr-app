@@ -4,7 +4,7 @@ vi.mock("../lib/ipc", () => ({ chatImage: vi.fn().mockResolvedValue(new Uint8Arr
 import { ChatItemView } from "./ChatItemView";
 import { ChatPaneContext } from "./images";
 import { useApp } from "../store/app";
-import { filesKey, useFiles } from "../files/store";
+import { useFiles } from "../files/store";
 describe("ChatItemView", () => {
   it("renders markdown", () => {
     render(<ChatItemView item={{ kind: "assistant_text", markdown: "Hello **world**" }} />);
@@ -126,12 +126,10 @@ describe("ChatItemView", () => {
 
 describe("file paths open in Files", () => {
   const pane = { machine_id: "local", session: "default", pane_id: "p1" };
-  const wsRef = { machine_id: "local", session: "default", workspace_id: "w1" };
   beforeEach(() => {
     localStorage.clear();
     useFiles.setState({ byWs: {} });
     useApp.setState({
-      filesOverlay: null,
       selected: pane,
       machines: {
         local: { id: "local", sessions: [{ name: "default", workspaces: [{ workspace_id: "w1", tabs: [{ panes: [{ pane_id: "p1", cwd: "/w/app" }] }] }] }] },
@@ -143,8 +141,8 @@ describe("file paths open in Files", () => {
   it("opens inline code that reads as a path", () => {
     inPane(<ChatItemView item={{ kind: "assistant_text", markdown: "Wrote `docs/a.md` and `/point`." }} />);
     fireEvent.click(screen.getByRole("link", { name: "docs/a.md" }));
-    expect(useApp.getState().filesOverlay).toEqual(wsRef);
-    expect(useFiles.getState().ws(filesKey(wsRef, "/w/app")).active).toBe("docs/a.md");
+    expect(useApp.getState().openItems.active).toBe("file:local/default/w1|/w/app|docs/a.md");
+    expect(useApp.getState().selected).toEqual(pane);
     expect(screen.queryByRole("link", { name: "/point" })).toBeNull();
   });
   it("leaves inline code plain outside a chat pane and in a fenced block", () => {
@@ -156,13 +154,14 @@ describe("file paths open in Files", () => {
   it("opens a tool call's file without toggling the call", () => {
     inPane(<ChatItemView item={{ kind: "tool_call", id: "t1", name: "Write", input_summary: "/w/app/src/x.ts", input: { file_path: "/w/app/src/x.ts", content: "x" } }} />);
     fireEvent.click(screen.getByRole("link", { name: "/w/app/src/x.ts" }));
-    expect(useFiles.getState().ws(filesKey(wsRef, "/w/app")).active).toBe("src/x.ts");
+    expect(useApp.getState().openItems.active).toBe("file:local/default/w1|/w/app|src/x.ts");
     expect(screen.getByRole("button", { name: /Write/ }).getAttribute("aria-expanded")).toBe("false");
   });
   it("says so when the file is outside the workspace folder", () => {
     inPane(<ChatItemView item={{ kind: "assistant_text", markdown: "`/etc/x.conf`" }} />);
+    const before = useApp.getState().openItems.items;
     fireEvent.click(screen.getByRole("link", { name: "/etc/x.conf" }));
-    expect(useApp.getState().filesOverlay).toBeNull();
+    expect(useApp.getState().openItems.items).toBe(before);
   });
 });
 
@@ -170,7 +169,6 @@ describe("a long tool path", () => {
   it("still opens when the summary cut it short", () => {
     const pane = { machine_id: "local", session: "default", pane_id: "p1" };
     useApp.setState({
-      filesOverlay: null,
       selected: pane,
       machines: { local: { id: "local", sessions: [{ name: "default", workspaces: [{ workspace_id: "w1", tabs: [{ panes: [{ pane_id: "p1", cwd: "/w/app" }] }] }] }] } } as never,
     });
@@ -181,6 +179,6 @@ describe("a long tool path", () => {
       </ChatPaneContext.Provider>,
     );
     fireEvent.click(screen.getByRole("link"));
-    expect(useApp.getState().filesOverlay).toEqual({ machine_id: "local", session: "default", workspace_id: "w1" });
+    expect(useApp.getState().openItems.active).toMatch(/^file:local\/default\/w1\|\/w\/app\|d\/d\//);
   });
 });

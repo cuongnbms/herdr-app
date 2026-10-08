@@ -4,95 +4,21 @@ import { filesKey, useFiles, wsKey } from "./store";
 const K = wsKey({ machine_id: "local", session: "default", workspace_id: "w1" });
 const s = () => useFiles.getState().ws(K);
 
-describe("files tabs", () => {
+describe("files store", () => {
   beforeEach(() => useFiles.setState(useFiles.getInitialState(), true));
 
-  describe("closeTabs", () => {
-    const four = (active: string) => {
-      const { open } = useFiles.getState();
-      for (const r of ["a", "b", "c", "d"]) open(K, r, { pin: true });
-      open(K, "e", { pin: false });
-      open(K, active, { pin: false });
-    };
-
-    it("others keeps only the tab it was invoked on, which becomes active", () => {
-      four("d");
-      useFiles.getState().closeTabs(K, "others", "b");
-      expect(s().tabs).toEqual(["b"]);
-      expect(s().active).toBe("b");
-      expect(s().preview).toBeNull();
-    });
-
-    it("right closes the tabs after it and keeps an active tab that stays", () => {
-      four("a");
-      useFiles.getState().closeTabs(K, "right", "b");
-      expect(s().tabs).toEqual(["a", "b"]);
-      expect(s().active).toBe("a");
-      four("e");
-      useFiles.getState().closeTabs(K, "right", "c");
-      expect(s().tabs).toEqual(["a", "b", "c"]);
-      expect(s().active).toBe("c");
-      expect(s().preview).toBeNull();
-    });
-
-    it("all closes every tab; an unknown tab does nothing", () => {
-      four("e");
-      useFiles.getState().closeTabs(K, "right", "zz");
-      expect(s().tabs).toEqual(["a", "b", "c", "d", "e"]);
-      useFiles.getState().closeTabs(K, "all", "c");
-      expect(s().tabs).toEqual([]);
-      expect(s().active).toBeNull();
-      expect(s().preview).toBeNull();
-    });
-  });
-
-  it("previews replace each other; pinned stay", () => {
-    const { open } = useFiles.getState();
-    open(K, "a.ts", { pin: false });
-    open(K, "b.ts", { pin: false });
-    expect(s().tabs).toEqual(["b.ts"]);
-    expect(s().preview).toBe("b.ts");
-    open(K, "c.ts", { pin: true });
-    open(K, "d.ts", { pin: false });
-    expect(s().tabs).toEqual(["b.ts", "c.ts", "d.ts"]);
-    expect(s().preview).toBe("d.ts");
-    expect(s().active).toBe("d.ts");
-  });
-
-  it("pin keeps the preview tab", () => {
-    const { open, pin } = useFiles.getState();
-    open(K, "a.ts", { pin: false });
-    pin(K, "a.ts");
-    open(K, "b.ts", { pin: false });
-    expect(s().tabs).toEqual(["a.ts", "b.ts"]);
-  });
-
-  it("closing the active tab activates the right neighbour, else the left", () => {
-    const { open, close } = useFiles.getState();
-    for (const f of ["a", "b", "c"]) open(K, f, { pin: true });
-    useFiles.getState().open(K, "b", { pin: true });
-    close(K, "b");
-    expect(s().active).toBe("c");
-    close(K, "c");
-    expect(s().active).toBe("a");
-    close(K, "a");
-    expect(s().active).toBeNull();
-  });
-
-  it("cycles and records recent files newest first", () => {
-    const { open, cycle } = useFiles.getState();
-    for (const f of ["a", "b", "c"]) open(K, f, { pin: true });
-    cycle(K, 1);
-    expect(s().active).toBe("a");
-    cycle(K, -1);
-    expect(s().active).toBe("c");
-    expect(s().recent.slice(0, 3)).toEqual(["c", "b", "a"]);
+  it("records recent files newest first", () => {
+    const { addRecent } = useFiles.getState();
+    addRecent(K, "a");
+    addRecent(K, "b");
+    addRecent(K, "a");
+    expect(s().recent).toEqual(["a", "b"]);
   });
 
   it("keeps workspaces apart", () => {
     const other = wsKey({ machine_id: "local", session: "default", workspace_id: "w2" });
-    useFiles.getState().open(K, "a", { pin: true });
-    expect(useFiles.getState().ws(other).tabs).toEqual([]);
+    useFiles.getState().addRecent(K, "a");
+    expect(useFiles.getState().ws(other).recent).toEqual([]);
   });
 
   it("toggles directories and remembers scroll", () => {
@@ -107,30 +33,8 @@ describe("files tabs", () => {
 
   it("keeps roots of one workspace apart", () => {
     const ref = { machine_id: "local", session: "default", workspace_id: "w1" };
-    useFiles.getState().open(filesKey(ref, "/a"), "x.ts", { pin: true });
-    expect(useFiles.getState().ws(filesKey(ref, "/b")).tabs).toEqual([]);
-    expect(useFiles.getState().ws(filesKey(ref, "/a")).tabs).toEqual(["x.ts"]);
-  });
-
-  it("a pinned open of the current preview pins it in place", () => {
-    const { open } = useFiles.getState();
-    open(K, "a.ts", { pin: true });
-    open(K, "b.ts", { pin: false });
-    open(K, "b.ts", { pin: true });
-    expect(s().tabs).toEqual(["a.ts", "b.ts"]);
-    expect(s().preview).toBeNull();
-    expect(s().active).toBe("b.ts");
-    open(K, "c.ts", { pin: false });
-    expect(s().tabs).toEqual(["a.ts", "b.ts", "c.ts"]);
-  });
-
-  it("closing the preview tab leaves no preview", () => {
-    const { open, close } = useFiles.getState();
-    open(K, "a.ts", { pin: true });
-    open(K, "b.ts", { pin: false });
-    close(K, "b.ts");
-    expect(s()).toMatchObject({ tabs: ["a.ts"], preview: null, active: "a.ts" });
-    open(K, "c.ts", { pin: false });
-    expect(s().tabs).toEqual(["a.ts", "c.ts"]);
+    useFiles.getState().addRecent(filesKey(ref, "/a"), "x.ts");
+    expect(useFiles.getState().ws(filesKey(ref, "/b")).recent).toEqual([]);
+    expect(useFiles.getState().ws(filesKey(ref, "/a")).recent).toEqual(["x.ts"]);
   });
 });

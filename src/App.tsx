@@ -13,11 +13,13 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
-import { toggleFilesOverlay } from "./files/FilesEntry";
 import { FilesPanel } from "./files/FilesPanel";
+import { FileViewer } from "./files/FileViewer";
+import { useFilesPanel } from "./files/panelStore";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
-import { chosenLens, selectedPane, useApp } from "./store/app";
+import { activeItem, chosenLens, selectedPane, useApp } from "./store/app";
+import { itemKey } from "./store/openItems";
 import { syncSeenToHerdr } from "./store/seenSync";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -87,7 +89,6 @@ function EmptyMain() {
 const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
 const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
 
-const FilesOverlay = lazy(() => import("./files/FilesOverlay").then((m) => ({ default: m.FilesOverlay })));
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
   // Only the selected Pane and its ids: a change elsewhere on its Machine does not re-render App.
@@ -98,7 +99,8 @@ export default function App() {
   const paletteOpen = useApp((s) => s.paletteOpen);
   const setPaletteOpen = useApp((s) => s.setPaletteOpen);
   const dashboardOpen = useApp((s) => s.dashboardOpen);
-  const filesOverlay = useApp((s) => s.filesOverlay);
+  const item = useApp(activeItem);
+  const online = useApp((s) => (item?.kind === "file" ? s.machines[item.ws.machine_id]?.state === "connected" : false));
   const chatFontSize = useSettings((s) => s.chatFontSize);
 
   const theme = useTheme((s) => s.theme);
@@ -159,15 +161,30 @@ export default function App() {
         setPaletteOpen(false);
         setDashboardOpen(!dashboardOpen);
       }
-      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "e") {
+      const plain = e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey;
+      const k = e.key.toLowerCase();
+      // A dialog keeps its keys.
+      if (document.querySelector(".overlay")) return;
+      if (plain && k === "e") {
         e.preventDefault();
         if (e.repeat) return;
-        toggleFilesOverlay();
+        useFilesPanel.getState().focusTree();
+      } else if (plain && k === "p") {
+        e.preventDefault();
+        if (e.repeat || useApp.getState().paletteOpen) return;
+        useFilesPanel.getState().focusGoto();
+      } else if (plain && k === "w") {
+        e.preventDefault();
+        if (e.repeat) return;
+        const active = useApp.getState().openItems.active;
+        if (active) useApp.getState().closeItems(active, "one");
+      } else if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
+        e.preventDefault();
+        useApp.getState().cycleItems(e.code === "BracketLeft" ? -1 : 1);
       }
       if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         if (e.repeat) return;
-        useApp.getState().setFilesOverlay(null);
         openNewTabHere().catch((err: unknown) =>
           showToast(`Could not open a new tab: ${(err as { message?: string } | null)?.message ?? String(err)}`),
         );
@@ -200,7 +217,13 @@ export default function App() {
         <FilesPanel />
       </aside>
       <main className="main">
-        {pane && ref ? (
+        {item?.kind === "file" ? (
+          <>
+            {pane && ref ? <Header /> : <div className="titlebar" data-tauri-drag-region />}
+            <OpenStrip />
+            <FileViewer key={itemKey(item)} item={item} online={online} />
+          </>
+        ) : pane && ref ? (
           <>
             <Header />
             <OpenStrip />
@@ -217,6 +240,7 @@ export default function App() {
           // rather than flashing the empty state.
           <>
             <div className="titlebar" data-tauri-drag-region />
+            <OpenStrip />
             <div className="term-lens">
               <StartingOverlay pane={selRef} />
             </div>
@@ -224,6 +248,7 @@ export default function App() {
         ) : (
           <>
             <div className="titlebar" data-tauri-drag-region />
+            <OpenStrip />
             <div className="main-empty">
               <EmptyMain />
             </div>
@@ -231,11 +256,6 @@ export default function App() {
         )}
       </main>
       {dashboardOpen && <AgentDashboard />}
-      {filesOverlay && (
-        <Suspense fallback={null}>
-          <FilesOverlay />
-        </Suspense>
-      )}
       <Toasts />
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </div>

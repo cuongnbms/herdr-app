@@ -2,6 +2,7 @@ import { memo } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
+import { useFilesPanel } from "../files/panelStore";
 import { useApp } from "../store/app";
 import { itemKey } from "../store/openItems";
 import type { MenuItem } from "../sidebar/ContextMenu";
@@ -126,10 +127,17 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
     const r = e.currentTarget.getBoundingClientRect();
     a.menuAt(r.left, r.bottom + 4, AGENTS.map((agent) => agentItem(agent, agent)));
   };
+  // The panel follows the selected Pane, so browsing a Workspace selects one of its panes first.
+  const browse = () => {
+    const first = ws.tabs.flatMap((t) => t.panes)[0];
+    if (!first) return;
+    useApp.getState().select({ machine_id: machineId, session, pane_id: first.pane_id });
+    useFilesPanel.getState().focusTree();
+  };
   const items: MenuItem[] = a
     ? [
         ...AGENTS.map((agent) => agentItem(agent, `New ${agent}`)),
-        { label: "Browse files", icon: FolderOpenIcon, onSelect: () => useApp.getState().setFilesOverlay(ref) },
+        { label: "Browse files", icon: FolderOpenIcon, onSelect: browse },
         { label: "Change folder…", icon: FolderOpenIcon, onSelect: () => a.changeFolder(ref, folder ?? suggestFolder(ws)) },
         { label: "Rename workspace…", icon: PencilIcon, onSelect: () => a.rename("Rename workspace", ws.label, (label) => call("workspace.rename", { workspace_id: ws.workspace_id, label })()) },
         { label: "Close workspace", icon: CloseIcon, onSelect: () => a.confirm("Close workspace", `Close workspace "${ws.label}" and all its panes?`, "Close", call("workspace.close", { workspace_id: ws.workspace_id })) },

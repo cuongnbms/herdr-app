@@ -116,6 +116,27 @@ describe("FilesPanel", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("combobox")));
   });
 
+  it("a focus request that also switches the Workspace focuses the tree of the new one", async () => {
+    render(<FilesPanel />);
+    expect(screen.getByText(/FILES/).textContent).toBe("FILES · app");
+    act(() => {
+      useApp.getState().select({ machine_id: "local", session: "default", pane_id: "p2" });
+      useFilesPanel.getState().focusTree();
+    });
+    expect(screen.getByText(/FILES/).textContent).toBe("FILES · other");
+    await waitFor(() => expect(document.activeElement?.closest("[role=tree]")).toBeTruthy());
+    expect(useFilesPanel.getState().focusHandled).toBe(useFilesPanel.getState().focusTick);
+  });
+
+  it("a request made with no Workspace shown does not fire when one appears later", async () => {
+    useApp.setState({ selected: null });
+    render(<FilesPanel />);
+    act(() => useFilesPanel.getState().focusTree());
+    act(() => useApp.getState().select({ machine_id: "local", session: "default", pane_id: "p1" }));
+    await screen.findByRole("tree");
+    expect(document.activeElement?.closest("[role=tree]")).toBeNull();
+  });
+
   it("dragging the splitter sets a height clamped to keep both halves", () => {
     render(
       <div style={{ height: 600 }}>

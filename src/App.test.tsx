@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue([]), Channel: class {} }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
@@ -10,7 +10,9 @@ vi.mock("./terminal/TerminalLens", async () => {
 });
 
 import App from "./App";
-import { useApp } from "./store/app";
+import { activeItem, useApp } from "./store/app";
+import { itemKey, NO_ITEMS } from "./store/openItems";
+import { useFilesPanel } from "./files/panelStore";
 import { useLensSettings } from "./settings/lens";
 import { initialSlots, useQuota } from "./quota/store";
 
@@ -72,28 +74,88 @@ describe("App shell", () => {
     expect(screen.queryByRole("dialog", { name: "Agent Dashboard" })).toBeNull();
   });
 
-  it("⌘E with no selection toasts, with a selection toggles the Files overlay", () => {
-    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: null });
+  it("has no Workspace Files entry in the sidebar", () => {
     render(<App />);
-    fireEvent.keyDown(window, { key: "e", metaKey: true });
-    expect(screen.getByText("Select a workspace first")).toBeTruthy();
-    useApp.setState({
-      machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
-        { workspace_id: "w1", label: "app", number: 1, status: "idle", tabs: [{ tab_id: "t1", label: "t", panes: [{ pane_id: "p1", cwd: "/r" }] }] },
-      ] }] } } as never,
-      selected: { machine_id: "local", session: "default", pane_id: "p1" },
-    });
-    fireEvent.keyDown(window, { key: "e", metaKey: true });
-    expect(useApp.getState().filesOverlay).toMatchObject({ workspace_id: "w1" });
-    fireEvent.keyDown(window, { key: "e", metaKey: true });
-    expect(useApp.getState().filesOverlay).toBeNull();
+    expect(screen.queryByText("Workspace Files")).toBeNull();
   });
 
-  it("⌘T closes the Files overlay", () => {
-    useApp.setState({ machines: {}, order: [], selected: null, dashboardOpen: false, filesOverlay: { machine_id: "local", session: "default", workspace_id: "w1" } });
-    render(<App />);
-    fireEvent.keyDown(window, { key: "t", metaKey: true });
-    expect(useApp.getState().filesOverlay).toBeNull();
+  describe("open files", () => {
+    const ws = { machine_id: "local", session: "default", workspace_id: "w1" };
+    const p1 = { machine_id: "local", session: "default", pane_id: "p1" };
+    beforeEach(async () => {
+      localStorage.clear();
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as any).mockImplementation((cmd: string) =>
+        Promise.resolve(cmd === "files_list_all" ? { paths: [], capped: false, refused: false } : cmd === "files_read" ? { kind: "text", text: "x", truncated: false, size: 1, mtime: 1 } : cmd === "files_watch" ? 1 : []),
+      );
+      useApp.setState({
+        machines: { local: { id: "local", label: "local", kind: "local", state: "connected", error: null, version: null, status: "idle", sessions: [{ name: "default", running: true, status: "idle", error: null, workspaces: [
+          { workspace_id: "w1", label: "app", number: 1, status: "idle", tabs: [{ tab_id: "t1", label: "t", panes: [{ pane_id: "p1", cwd: "/r", agent: "claude", title: "a", status: "idle", terminal_id: "x" }] }] },
+        ] }] } } as never,
+        order: ["local"],
+        selected: null,
+        openItems: NO_ITEMS,
+        dashboardOpen: false,
+        paletteOpen: false,
+      });
+      useFilesPanel.setState(useFilesPanel.getInitialState(), true);
+      useApp.getState().select(p1);
+    });
+
+    afterEach(async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as any).mockImplementation(() => Promise.resolve([]));
+      useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
+    });
+
+    it("shows the active file item in the main area and the lens again when it closes", async () => {
+      render(<App />);
+      act(() => useApp.getState().openFile(ws, "/r", "a.txt", { pin: false }));
+      expect(await screen.findByLabelText("Copy path")).toBeTruthy();
+      fireEvent.keyDown(window, { key: "w", metaKey: true });
+      await waitFor(() => expect(screen.queryByLabelText("Copy path")).toBeNull());
+      expect(useApp.getState().selected?.pane_id).toBe("p1");
+    });
+
+    it("keeps the strip above the empty state when no pane is selected", async () => {
+      render(<App />);
+      act(() => useApp.getState().select(null));
+      expect(screen.getByText("Select a pane")).toBeTruthy();
+      act(() => useApp.getState().openFile(ws, "/r", "a.txt", { pin: false }));
+      expect(await screen.findByLabelText("Copy path")).toBeTruthy();
+      expect(document.querySelector(".main")!.textContent).toContain("a.txt");
+      act(() => useApp.getState().closeItems(useApp.getState().openItems.active!, "one"));
+      expect(await screen.findByText("Select a pane")).toBeTruthy();
+    });
+
+    it("⌘E expands the Files panel and focuses it", () => {
+      useFilesPanel.setState({ collapsed: true });
+      render(<App />);
+      fireEvent.keyDown(window, { key: "e", metaKey: true });
+      expect(useFilesPanel.getState().collapsed).toBe(false);
+      expect(useFilesPanel.getState().focusTick).toBe(1);
+    });
+
+    it("⌘P focuses Go to file, but not while the palette is open", () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: "p", metaKey: true });
+      expect(useFilesPanel.getState().gotoTick).toBe(1);
+      act(() => useApp.getState().setPaletteOpen(true));
+      fireEvent.keyDown(window, { key: "p", metaKey: true });
+      expect(useFilesPanel.getState().gotoTick).toBe(1);
+    });
+
+    it("⌘⇧] moves to the next open item", () => {
+      render(<App />);
+      act(() => {
+        useApp.getState().pinItem(itemKey({ kind: "agent", ref: useApp.getState().selected! }));
+        useApp.getState().openFile(ws, "/r", "a.txt", { pin: true });
+      });
+      fireEvent.keyDown(window, { key: "]", code: "BracketRight", metaKey: true, shiftKey: true });
+      expect(activeItem(useApp.getState())?.kind).toBe("agent");
+      fireEvent.keyDown(window, { key: "[", code: "BracketLeft", metaKey: true, shiftKey: true });
+      expect(activeItem(useApp.getState())?.kind).toBe("file");
+    });
   });
 
   it("shows the loading overlay, not the empty state, while a new pane's agent starts before herdr reports the pane", () => {

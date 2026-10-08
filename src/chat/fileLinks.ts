@@ -1,7 +1,8 @@
 import type { PaneRef } from "../lib/types";
 import { selectedPane, useApp } from "../store/app";
 import { panelRoot } from "../files/root";
-import { filesKey, useFiles } from "../files/store";
+import { useFilesBus } from "../files/bus";
+import { itemKey } from "../store/openItems";
 import { showToast } from "../ui/Toast";
 
 /** Extensions a bare file name (no folder) must end in to read as a file: `console.log` is code. */
@@ -50,7 +51,7 @@ function fromHome(parts: string[]): string[] | null {
 }
 
 /**
- * `path` as the Files overlay's `rel` under `root`; null when it is not below it. A relative
+ * `path` as a file item's `rel` under `root`; null when it is not below it. A relative
  * `path` is read from `cwd` (the agent's folder), or from the root when the pane has none.
  */
 export function relUnderRoot(path: string, cwd: string | null, root: string): string | null {
@@ -66,8 +67,8 @@ export function relUnderRoot(path: string, cwd: string | null, root: string): st
   return parts.slice(top.parts.length).join("/");
 }
 
-/** Opens `path`, as the agent in `pane` wrote it, in its Workspace's Files overlay. */
-export function openInFiles(pane: PaneRef, path: string): void {
+/** Opens `path`, as the agent in `pane` wrote it, as a file item of its Workspace; `hash` is shown once it opens. */
+export function openInFiles(pane: PaneRef, path: string, hash?: string | null): void {
   const state = useApp.getState();
   const found = selectedPane({ machines: state.machines, selected: pane });
   if (!found) return;
@@ -78,6 +79,6 @@ export function openInFiles(pane: PaneRef, path: string): void {
     showToast(root ? `${path} is outside the workspace folder` : "This workspace has no folder");
     return;
   }
-  useFiles.getState().open(filesKey(ref, root.path), rel, { pin: false });
-  state.setFilesOverlay(ref);
+  useFilesBus.getState().setJump(hash ? { key: itemKey({ kind: "file", ws: ref, root: root.path, rel }), hash } : null);
+  state.openFile(ref, root.path, rel, { pin: false });
 }

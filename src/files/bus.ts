@@ -12,6 +12,9 @@ interface FilesBus {
   batches: Record<string, ChangeBatch>;
   /** How often a reload was asked for, by filesKey. */
   reloads: Record<string, number>;
+  /** A link's `#fragment` waiting for the viewer of file item `key` (an itemKey) to show it. */
+  jump: { key: string; hash: string } | null;
+  setJump(jump: { key: string; hash: string } | null): void;
   /** Hands watch changes of a root to whoever shows it. */
   publish(key: string, changes: FileChange[]): void;
   /** Asks everything showing the root to read it again. */
@@ -21,6 +24,8 @@ interface FilesBus {
 export const useFilesBus = create<FilesBus>((set) => ({
   batches: {},
   reloads: {},
+  jump: null,
+  setJump: (jump) => set({ jump }),
   publish: (key, changes) =>
     set((s) => ({ batches: { ...s.batches, [key]: { seq: (s.batches[key]?.seq ?? 0) + 1, changes } } })),
   reload: (key) => set((s) => ({ reloads: { ...s.reloads, [key]: (s.reloads[key] ?? 0) + 1 } })),

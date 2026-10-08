@@ -24,6 +24,12 @@ export function FilesPanel() {
   const collapsed = useFilesPanel((s) => s.collapsed);
   const height = useFilesPanel((s) => s.height);
   const section = useRef<HTMLElement>(null);
+  const focusTick = useFilesPanel((s) => s.focusTick);
+  const gotoTick = useFilesPanel((s) => s.gotoTick);
+  // With no Workspace to show there is nothing to focus, and the request must not wait for a later one.
+  useEffect(() => {
+    if (!ws) useFilesPanel.getState().handled("both");
+  }, [ws, focusTick, gotoTick]);
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -127,17 +133,19 @@ function WorkspacePanel({ wsRef: ref, section }: { wsRef: WorkspaceRef; section:
   const goto = useRef<HTMLInputElement>(null);
   const focusTick = useFilesPanel((s) => s.focusTick);
   const gotoTick = useFilesPanel((s) => s.gotoTick);
-  const focusSeen = useRef(focusTick);
+  // Compared with the store's handled ticks, not the tick at mount: a request made in the same
+  // update that switched the Workspace is for the panel that mounts with it.
   useEffect(() => {
-    if (focusTick === focusSeen.current) return;
-    focusSeen.current = focusTick;
+    const st = useFilesPanel.getState();
+    if (st.focusTick === st.focusHandled) return;
+    st.handled("tree");
     const tree = section.current?.querySelector<HTMLElement>('[role="tree"]');
     (tree?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]') ?? tree)?.focus();
   }, [focusTick]);
-  const gotoSeen = useRef(gotoTick);
   useEffect(() => {
-    if (gotoTick === gotoSeen.current) return;
-    gotoSeen.current = gotoTick;
+    const st = useFilesPanel.getState();
+    if (st.gotoTick === st.gotoHandled) return;
+    st.handled("goto");
     goto.current?.focus();
     goto.current?.select();
   }, [gotoTick]);

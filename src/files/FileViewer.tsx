@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { filesRead } from "../lib/ipc";
 import type { FileChange, FileContent } from "../lib/types";
 import { useApp } from "../store/app";
-import type { OpenItem } from "../store/openItems";
+import { itemKey, type OpenItem } from "../store/openItems";
 import { CopyIcon, FileCopyIcon, OutlineIcon } from "../ui/icons";
 import { showToast } from "../ui/Toast";
 import { useFilesBus } from "./bus";
@@ -37,8 +37,8 @@ export function FileViewer({ item }: Props) {
   const [findOpen, setFindOpen] = useState(false);
   /** Bumped by ⌘F, so an open find bar takes the focus again. */
   const [findFocus, setFindFocus] = useState(0);
-  /** The `#fragment` of the link that opened `rel`, used once when it is shown. */
-  const [jump, setJump] = useState<{ rel: string; hash: string } | null>(null);
+  /** The `#fragment` of the link that opened this file, taken from the bus when it is shown. */
+  const [jump, setJump] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [matchCase, setMatchCase] = useState(false);
   const outline = useOutline((s) => s.shown);
@@ -85,16 +85,25 @@ export function FileViewer({ item }: Props) {
     } else if (batch.changes.some(above)) load(rel);
   }, [batch, rel, load]);
 
-  // A different file starts with a fresh find, and a link's fragment applies to its own file only.
+  // A different file starts with a fresh find and without the last file's link fragment.
   useEffect(() => {
     setFindOpen(false);
     setIndex(0);
-    setJump((j) => (j && j.rel === rel ? j : null));
+    setJump(null);
   }, [rel]);
+
+  // A link's fragment waits on the bus under the key of the file it targets; this viewer takes its own.
+  const itemId = itemKey(item);
+  const pending = useFilesBus((s) => (s.jump?.key === itemId ? s.jump.hash : null));
+  useEffect(() => {
+    if (pending === null) return;
+    setJump(pending);
+    useFilesBus.getState().setJump(null);
+  }, [pending]);
 
   const onLink = useCallback(
     (to: string, hash: string | null) => {
-      setJump(hash ? { rel: to, hash } : null);
+      useFilesBus.getState().setJump(hash ? { key: itemKey({ kind: "file", ws, root, rel: to }), hash } : null);
       useApp.getState().openFile(ws, root, to, { pin: false });
     },
     [ws, root],
@@ -104,7 +113,7 @@ export function FileViewer({ item }: Props) {
   // Rendering parses on the main thread, so text past the highlight limit opens as source.
   const large = shown?.text != null && shown.text.length > HIGHLIGHT_LIMIT;
   // A `#L12` link has a line to show, which only the source view has.
-  const toLine = jump !== null && jump.rel === rel && lineOfHash(jump.hash) !== null;
+  const toLine = jump !== null && lineOfHash(jump) !== null;
   const mode: FileMode = modes[rel] ?? (large || toLine ? "source" : "render");
   const setMode = (r: string, m: FileMode) => setModes((s) => ({ ...s, [r]: m }));
   // The other view searches afresh from what it shows on screen.
@@ -234,7 +243,7 @@ export function FileViewer({ item }: Props) {
             find={findOpen && searchable && query ? { query, index, matchCase } : null}
             onFindStatus={setStatus}
             initialScroll={useFiles.getState().ws(key).scroll[rel] ?? 0}
-            hash={jump && jump.rel === rel ? jump.hash : null}
+            hash={jump}
             saveScroll={(r, top) => useFiles.getState().setScroll(key, r, top)}
             outline={outline}
             onOutline={setHasOutline}
