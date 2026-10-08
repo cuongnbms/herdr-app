@@ -31,6 +31,7 @@ const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? 
 export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const key = paneKey(pane);
   const setLensOverride = useApp((s) => s.setLensOverride);
+  const pinTab = useApp((s) => s.pinAgentTab);
   const machineState = useApp((s) => s.machines[pane.machine_id]?.state);
   const sawDown = useRef(false);
   const [state, dispatch] = useReducer(reducer, emptyChat);
@@ -348,7 +349,11 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       {view.status === "blocked" || picker.open ? (
         <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />
       ) : (
-        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} onSend={outgoing.start} />
+        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} onSend={(text, previews) => {
+          // Chatting with an agent keeps its tab.
+          pinTab(pane);
+          return outgoing.start(text, previews);
+        }} />
       )}
     </div>
     <ChatOutline entries={entries} current={current} onJump={jumpTo} />

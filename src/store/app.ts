@@ -5,6 +5,8 @@ import { pruneFolders, type WorkspaceRef } from "../workspaces/folder";
 import { shareEqual } from "./share";
 import { forgetMachine, forgetSessions, sessionKey, useLayout } from "../sidebar/groups";
 import { newAgentOnTerminal } from "../settings/lens";
+import { closeTabs, dropTabs, NO_TABS, openTab, pruneTabs, type AgentTabs } from "../agents/openAgents";
+import type { CloseScope } from "../files/store";
 
 export interface SessionRef {
   machine_id: string;
@@ -79,6 +81,12 @@ export interface AppState {
   /** When each pane's status last changed (by paneKey, ms since epoch), as seen by this app run:
    *  panes in a machine's first snapshot have none. Orders the dashboard's Idle column. Not persisted. */
   statusSince: Record<string, number>;
+  /** The agent panes opened, across machines and sessions, shown as tabs above the lens. Not persisted. */
+  agentTabs: AgentTabs;
+  /** Pins `ref`'s tab, opening it if needed: a pinned tab is not replaced by the next pane opened. */
+  pinAgentTab: (ref: PaneRef) => void;
+  /** Closes tabs relative to `ref`'s; closing the selected pane's tab selects a neighbour. */
+  closeAgentTabs: (ref: PaneRef, scope: "one" | CloseScope) => void;
   upsertMachine: (v: MachineView) => void;
   removeMachine: (id: string) => void;
   select: (ref: PaneRef | null) => void;
@@ -100,6 +108,7 @@ export const useApp = create<AppState>((set, get) => ({
   filesOverlay: null,
   doneSeen: {},
   statusSince: {},
+  agentTabs: NO_TABS,
   ...load(),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setFilesOverlay: (ref) =>
@@ -131,12 +140,14 @@ export const useApp = create<AppState>((set, get) => ({
       // The dashboard hides the selected pane, so it is not seen while the dashboard is open.
       const doneSeen = seenAfterSnapshot(s.doneSeen, shared, s.dashboardOpen ? null : s.selected);
       const statusSince = sinceAfterSnapshot(s.statusSince, s.machines[v.id], shared, Date.now());
+      const agentTabs = tabsAfterSnapshot(s.agentTabs, shared, s.selected);
       return {
         machines: s.machines[v.id] === shared ? s.machines : { ...s.machines, [v.id]: shared },
         lensOverride: agentStarted(s, shared) ? { ...s.lensOverride, [paneKey(s.selected!)]: "terminal" } : s.lensOverride,
         order: s.order.includes(v.id) ? s.order : [...s.order, v.id],
         doneSeen: sameKeys(doneSeen, s.doneSeen) ? s.doneSeen : doneSeen,
         statusSince: sameTimes(statusSince, s.statusSince) ? s.statusSince : statusSince,
+        agentTabs,
       };
     });
   },
@@ -148,6 +159,7 @@ export const useApp = create<AppState>((set, get) => ({
         machines,
         order: s.order.filter((o) => o !== id),
         selected: s.selected?.machine_id === id ? null : s.selected,
+        agentTabs: dropTabs(s.agentTabs, (t) => t.machine_id === id),
         viewed: s.viewed?.machine_id === id ? null : s.viewed,
       };
     });
@@ -160,7 +172,22 @@ export const useApp = create<AppState>((set, get) => ({
       viewed: ref ? { machine_id: ref.machine_id, session: ref.session } : s.viewed,
       lastPane: ref ? { ...s.lastPane, [sessionKey(ref.machine_id, ref.session)]: ref } : s.lastPane,
       doneSeen: ref && findPane(s.machines, ref)?.status === "done" ? { ...s.doneSeen, [paneKey(ref)]: true } : s.doneSeen,
+      agentTabs: ref && findPane(s.machines, ref)?.agent ? openTab(s.agentTabs, ref, { pin: false }) : s.agentTabs,
     })),
+  pinAgentTab: (ref) => set((s) => ({ agentTabs: openTab(s.agentTabs, ref, { pin: true }) })),
+  closeAgentTabs: (ref, scope) => {
+    const s = get();
+    const old = s.agentTabs;
+    const next = closeTabs(old, scope, ref);
+    if (next === old) return;
+    set({ agentTabs: next });
+    const sel = s.selected;
+    const has = (s: AgentTabs, r: PaneRef) => s.tabs.some((t) => paneKey(t) === paneKey(r));
+    if (!sel || !has(old, sel) || has(next, sel)) return;
+    const at = old.tabs.findIndex((t) => paneKey(t) === paneKey(sel));
+    const to = has(next, ref) ? ref : (next.tabs[at] ?? next.tabs[at - 1]);
+    if (to) s.select(to);
+  },
   // Viewing another session also opens its pane: the one last selected there, else its first.
   view: (ref) => {
     const s = get();
@@ -197,6 +224,13 @@ export const useApp = create<AppState>((set, get) => ({
     save(get());
   },
 }));
+
+/** Drops closed panes' tabs (only a connected snapshot says a pane is gone) and opens the tab of
+ *  an agent started in the selected pane. */
+function tabsAfterSnapshot(prev: AgentTabs, v: MachineView, selected: PaneRef | null): AgentTabs {
+  const next = v.state === "connected" ? pruneTabs(prev, v) : prev;
+  return selected?.machine_id === v.id && findPane({ [v.id]: v }, selected)?.agent ? openTab(next, selected, { pin: false }) : next;
+}
 
 export function findPane(machines: Record<string, MachineView>, ref: PaneRef): PaneView | undefined {
   const session = machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session);

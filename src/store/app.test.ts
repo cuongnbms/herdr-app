@@ -355,3 +355,98 @@ describe("the Files overlay and the main area", () => {
     expect(useApp.getState().dashboardOpen).toBe(true);
   });
 });
+
+describe("agent tabs", () => {
+  const ref = (pane_id: string, session = "default") => ({ machine_id: "local", session, pane_id });
+  const tabs = () => useApp.getState().agentTabs.tabs.map((t) => (t.session === "default" ? t.pane_id : `${t.session}/${t.pane_id}`));
+  const preview = () => useApp.getState().agentTabs.preview;
+  const withShell = () => {
+    const m = structuredClone(machine);
+    m.sessions[0].workspaces[0].tabs[0].panes.push({ pane_id: "w1:p3", terminal_id: "term_c", title: "zsh", cwd: "/x", agent: null, status: "idle" });
+    m.sessions.push({ ...structuredClone(machine.sessions[0]), name: "other" });
+    return m;
+  };
+  // Selects each pane and pins its tab.
+  const openPinned = (...refs: ReturnType<typeof ref>[]) => {
+    for (const r of refs) {
+      useApp.getState().select(r);
+      useApp.getState().pinAgentTab(r);
+    }
+  };
+  beforeEach(() => {
+    useApp.setState({ machines: {}, order: [], selected: null, agentTabs: { tabs: [], preview: null } });
+    useApp.getState().upsertMachine(withShell());
+  });
+
+  it("selecting an agent pane previews it, replacing the previous preview, across sessions; a shell pane gets none", () => {
+    const { select } = useApp.getState();
+    select(ref("w1:p2"));
+    expect(tabs()).toEqual(["w1:p2"]);
+    select(ref("w1:p1", "other"));
+    expect(tabs()).toEqual(["other/w1:p1"]);
+    expect(preview()).toBe(paneKey(ref("w1:p1", "other")));
+    select(ref("w1:p3"));
+    expect(tabs()).toEqual(["other/w1:p1"]);
+  });
+
+  it("a pinned tab stays when another pane is selected; pinning the preview keeps it too", () => {
+    const { select, pinAgentTab } = useApp.getState();
+    select(ref("w1:p2"));
+    pinAgentTab(ref("w1:p2"));
+    select(ref("w1:p1"));
+    select(ref("w1:p1", "other"));
+    expect(tabs()).toEqual(["w1:p2", "other/w1:p1"]);
+    select(ref("w1:p2"));
+    expect(tabs()).toEqual(["w1:p2", "other/w1:p1"]);
+    pinAgentTab(ref("w1:p1", "other"));
+    select(ref("w1:p1"));
+    expect(tabs()).toEqual(["w1:p2", "other/w1:p1", "w1:p1"]);
+    expect(preview()).toBe(paneKey(ref("w1:p1")));
+  });
+
+  it("an agent started in the selected pane opens its tab", () => {
+    useApp.getState().select(ref("w1:p3"));
+    const m = withShell();
+    m.sessions[0].workspaces[0].tabs[0].panes[2].agent = "claude";
+    useApp.getState().upsertMachine(m);
+    expect(tabs()).toEqual(["w1:p3"]);
+  });
+
+  it("a closed pane or session loses its tab; removing the machine drops them all", () => {
+    openPinned(ref("w1:p1"), ref("w1:p2"), ref("w1:p2", "other"));
+    const m = withShell();
+    m.sessions[0].workspaces[0].tabs[0].panes.splice(0, 1);
+    useApp.getState().upsertMachine(m);
+    expect(tabs()).toEqual(["w1:p2", "other/w1:p2"]);
+    m.sessions.pop();
+    useApp.getState().upsertMachine(m);
+    expect(tabs()).toEqual(["w1:p2"]);
+    useApp.getState().removeMachine("local");
+    expect(tabs()).toEqual([]);
+  });
+
+  it("closing the selected pane's tab selects its neighbour, even in another session; others keep the selection", () => {
+    const { select, closeAgentTabs } = useApp.getState();
+    openPinned(ref("w1:p1"), ref("w1:p2", "other"));
+    select(ref("w1:p3"));
+    closeAgentTabs(ref("w1:p1"), "one");
+    expect(tabs()).toEqual(["other/w1:p2"]);
+    expect(useApp.getState().selected).toEqual(ref("w1:p3"));
+    select(ref("w1:p1"));
+    closeAgentTabs(ref("w1:p1"), "one");
+    expect(tabs()).toEqual(["other/w1:p2"]);
+    expect(preview()).toBeNull();
+    expect(useApp.getState().selected).toEqual(ref("w1:p2", "other"));
+  });
+
+  it("close others selects the tab it was invoked on; close all keeps the selected pane open", () => {
+    const { closeAgentTabs } = useApp.getState();
+    openPinned(ref("w1:p1"), ref("w1:p2", "other"));
+    closeAgentTabs(ref("w1:p1"), "others");
+    expect(tabs()).toEqual(["w1:p1"]);
+    expect(useApp.getState().selected).toEqual(ref("w1:p1"));
+    closeAgentTabs(ref("w1:p1"), "all");
+    expect(tabs()).toEqual([]);
+    expect(useApp.getState().selected).toEqual(ref("w1:p1"));
+  });
+});

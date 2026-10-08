@@ -23,7 +23,8 @@ vi.mock("./chatSession", () => ({
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
 import { chatLocate, herdrCall } from "../lib/ipc";
-import type { PaneView } from "../lib/types";
+import { paneKey, type PaneView } from "../lib/types";
+import { useApp } from "../store/app";
 import { ChatLens } from "./ChatLens";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
@@ -205,6 +206,13 @@ describe("ChatLens", () => {
       expect(outgoing(container)[0].classList.contains("sending")).toBe(true);
       await act(async () => resolve({}));
       expect(outgoing(container)[0].classList.contains("sending")).toBe(false);
+    });
+
+    it("pins the pane's agent tab", () => {
+      useApp.setState({ agentTabs: { tabs: [pane], preview: paneKey(pane) } });
+      render(<ChatLens pane={pane} view={idlePi} />);
+      sendText("hello there");
+      expect(useApp.getState().agentTabs).toEqual({ tabs: [pane], preview: null });
     });
 
     it("gives way to the transcript's user item", async () => {

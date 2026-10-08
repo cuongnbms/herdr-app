@@ -56,6 +56,7 @@ function AgentCard({ machineId, session, entry, reorder, tabRow }: { machineId: 
   const ref = { machine_id: machineId, session, pane_id: pane.pane_id };
   const active = useApp((s) => s.selected !== null && paneKey(s.selected) === paneKey(ref));
   const select = useApp((s) => s.select);
+  const pin = useApp((s) => s.pinAgentTab);
   const a = useActions();
   const call = (method: string, params: unknown) => () => herdrCall(machineId, session, method, params);
   const close = call("pane.close", { pane_id: pane.pane_id });
@@ -79,6 +80,7 @@ function AgentCard({ machineId, session, entry, reorder, tabRow }: { machineId: 
         {...reorder.source(tab.tab_id)}
         className={"agent-card" + (active ? " active" : "") + (pane.status === "blocked" ? " blocked" : "")}
         onClick={() => select(ref)}
+        onDoubleClick={() => pin(ref)}
         onContextMenu={(e) => a?.menu(e, items)}
         title={pane.cwd ?? undefined}
       >

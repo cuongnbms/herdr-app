@@ -71,6 +71,13 @@ describe("AgentList", () => {
     expect(screen.getByText("Guard export").closest("button")?.className).toContain("active");
   });
 
+  it("pins the pane's tab on double click", () => {
+    useApp.setState({ agentTabs: { tabs: [], preview: null } });
+    render(<AgentList />);
+    fireEvent.doubleClick(screen.getByText("Guard export"));
+    expect(useApp.getState().agentTabs).toEqual({ tabs: [{ machine_id: "local", session: "default", pane_id: "p2" }], preview: null });
+  });
+
   it("shows a header per workspace with its folder, empty workspaces included", () => {
     setFolder({ machine_id: "local", session: "default", workspace_id: "w1" }, "/Users/me/checkout-api/");
     render(<AgentList />);
