@@ -1335,7 +1335,7 @@ button.composer-model:disabled { cursor: default; }
 /* The agent panes opened in the Session, styled like the open files. */
 .agent-tabs .files-tab-item { gap: 8px; padding-left: 10px; }
 
-.files-crumbs { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line); }
+.files-crumbs { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 16px; background: var(--surface-0); border-bottom: 1px solid var(--line); }
 .files-crumb-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); font: 12px var(--mono); }
 .files-outline-btn { margin-left: auto; width: 24px; height: 24px; }
 .files-outline-btn[aria-pressed="true"] { color: var(--accent); }
