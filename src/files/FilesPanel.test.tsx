@@ -313,6 +313,16 @@ describe("FilesPanel", () => {
       });
     });
 
+    it("keeps watching while collapsed and hands the changes to the open file", async () => {
+      useFilesPanel.getState().setCollapsed(true);
+      render(<FilesPanel />);
+      await waitFor(() => expect(watch()).toBeTruthy());
+      expect(screen.queryByRole("tree")).toBeNull();
+      expect(screen.queryByRole("combobox")).toBeNull();
+      act(() => watch().onmessage!({ type: "changes", changes: [{ path: "a.md", isDir: false, removed: false }] }));
+      expect(useFilesBus.getState().batches["local/default/w1|/r"]?.changes).toEqual([{ path: "a.md", isDir: false, removed: false }]);
+    });
+
     it("shows and clears the auto-refresh error", async () => {
       render(<FilesPanel />);
       await waitFor(() => expect(watch()).toBeTruthy());

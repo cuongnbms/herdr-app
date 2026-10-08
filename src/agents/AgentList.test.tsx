@@ -4,7 +4,8 @@ vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn().mockResolvedValue(undefined) }
 import { herdrCall } from "../lib/ipc";
 import { useFilesPanel } from "../files/panelStore";
 import { useApp } from "../store/app";
-import { NO_ITEMS } from "../store/openItems";
+import { itemKey, NO_ITEMS } from "../store/openItems";
+import { panelWorkspace } from "../files/root";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { AgentList, workspaceGroups } from "./AgentList";
 import type { MachineView, PaneView } from "../lib/types";
@@ -173,6 +174,21 @@ describe("AgentList", () => {
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Browse files" }));
     expect(useApp.getState().selected?.pane_id).toBe("p4");
+    expect(useFilesPanel.getState().focusTick).toBe(1);
+  });
+
+  it("Browse files leaves a file item of another workspace for the selected pane", () => {
+    useFilesPanel.setState(useFilesPanel.getInitialState(), true);
+    const file = { kind: "file" as const, ws: { machine_id: "local", session: "default", workspace_id: "w1" }, root: "/x", rel: "a.md" };
+    useApp.setState({
+      selected: { machine_id: "local", session: "default", pane_id: "p4" },
+      openItems: { items: [file], preview: null, active: itemKey(file) },
+    });
+    render(<AgentList />);
+    fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Browse files" }));
+    expect(useApp.getState().selected?.pane_id).toBe("p4");
+    expect(panelWorkspace(useApp.getState())).toEqual({ machine_id: "local", session: "default", workspace_id: "w2" });
     expect(useFilesPanel.getState().focusTick).toBe(1);
   });
 

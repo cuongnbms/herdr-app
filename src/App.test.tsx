@@ -115,6 +115,10 @@ describe("App shell", () => {
       fireEvent.keyDown(window, { key: "w", metaKey: true });
       await waitFor(() => expect(screen.queryByLabelText("Copy path")).toBeNull());
       expect(useApp.getState().selected?.pane_id).toBe("p1");
+      expect(useApp.getState().openItems.active).toBeNull();
+      // The selected agent with no active item: its lens, not a blank main area.
+      await waitFor(() => expect(document.querySelector(".main .chat-lens, .main .term-lens")).toBeTruthy());
+      expect(document.querySelector(".main .header")).toBeTruthy();
     });
 
     it("keeps the strip above the empty state when no pane is selected", async () => {

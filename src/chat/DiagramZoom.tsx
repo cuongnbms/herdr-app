@@ -90,7 +90,7 @@ export function DiagramZoom({ svg, onClose }: { svg: SVGSVGElement; onClose: () 
   };
 
   return createPortal(
-    // `overlay`: the Files overlay leaves Esc and its ⌘ keys alone while one is open.
+    // `overlay`: the File viewer and the Files panel leave their ⌘ keys alone while one is open.
     <div className="overlay diagram-zoom" role="dialog" aria-modal="true" aria-label="Diagram">
       <div
         className="diagram-zoom-stage"

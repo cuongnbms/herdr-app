@@ -99,6 +99,8 @@ export interface AppState {
   /** Activates an item: an agent item selects its Pane; a file item only becomes active. */
   activateItem: (key: string) => void;
   pinItem: (key: string) => void;
+  /** Keeps an agent's item: opens it pinned if closed, else pins it (and makes it active). */
+  pinAgent: (ref: PaneRef) => void;
   /** Closes relative to `key`; if the new active item is an agent, selects its Pane. */
   closeItems: (key: string, scope: "one" | CloseScope) => void;
   cycleItems: (delta: 1 | -1) => void;
@@ -200,6 +202,7 @@ export const useApp = create<AppState>((set, get) => ({
     else set((s) => ({ openItems: setActive(s.openItems, key) }));
   },
   pinItem: (key) => set((s) => ({ openItems: pinItem(s.openItems, key) })),
+  pinAgent: (ref) => set((s) => ({ openItems: openItem(s.openItems, { kind: "agent", ref }, { pin: true }) })),
   closeItems: (key, scope) => {
     const old = get().openItems;
     const next = closeItems(old, scope, key);

@@ -69,6 +69,19 @@ describe("FileViewer", () => {
     expect(screen.getByRole("heading", { name: "Big" })).toBeTruthy();
   });
 
+  it("keeps a file's Render / Source choice when another item is shown and it comes back", async () => {
+    texts["doc.md"] = "# Doc";
+    // App remounts the viewer per item, as switching tabs does.
+    const { rerender } = render(<FileViewer key="doc" item={file("doc.md")} online />);
+    expect(await screen.findByRole("heading", { name: "Doc" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Source" }));
+    rerender(<FileViewer key="other" item={file("a.txt")} online />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Source" })).toBeNull());
+    rerender(<FileViewer key="doc" item={file("doc.md")} online />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.queryByRole("heading", { name: "Doc" })).toBeNull();
+  });
+
   it("a #L link to a markdown file opens it as source", async () => {
     texts["from.md"] = "[notes](notes.md#L2)";
     texts["notes.md"] = "# Notes\n\nsecond";

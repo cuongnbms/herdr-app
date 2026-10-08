@@ -14,7 +14,6 @@ import { guardFileDrops } from "./sidebar/dnd";
 import { AgentList } from "./agents/AgentList";
 import { AgentDashboard } from "./dashboard/AgentDashboard";
 import { FilesPanel } from "./files/FilesPanel";
-import { FileViewer } from "./files/FileViewer";
 import { useFilesPanel } from "./files/panelStore";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
@@ -88,6 +87,8 @@ function EmptyMain() {
 
 const ChatLens = lazy(() => import("./chat/ChatLens").then((m) => ({ default: m.ChatLens })));
 const TerminalLens = lazy(() => import("./terminal/TerminalLens").then((m) => ({ default: m.TerminalLens })));
+// react-markdown and lowlight load with the first open file, not with the app.
+const FileViewer = lazy(() => import("./files/FileViewer").then((m) => ({ default: m.FileViewer })));
 
 export default function App() {
   const upsert = useApp((s) => s.upsertMachine);
@@ -221,7 +222,9 @@ export default function App() {
           <>
             {pane && ref ? <Header /> : <div className="titlebar" data-tauri-drag-region />}
             <OpenStrip />
-            <FileViewer key={itemKey(item)} item={item} online={online} />
+            <Suspense fallback={null}>
+              <FileViewer key={itemKey(item)} item={item} online={online} />
+            </Suspense>
           </>
         ) : pane && ref ? (
           <>

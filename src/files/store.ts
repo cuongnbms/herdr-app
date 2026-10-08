@@ -1,17 +1,20 @@
 import { create } from "zustand";
 import type { WorkspaceRef } from "../workspaces/folder";
+import type { FileMode } from "./FileView";
 
 export interface FilesWs {
   expanded: string[];
   scroll: Record<string, number>;
   /** Last opened files, newest first. */
   recent: string[];
+  /** Render or Source, as last chosen for each file. */
+  modes: Record<string, FileMode>;
 }
 
 const RECENT_MAX = 20;
 
 const recentWith = (recent: string[], rel: string) => [rel, ...recent.filter((r) => r !== rel)].slice(0, RECENT_MAX);
-const EMPTY: FilesWs = { expanded: [], scroll: {}, recent: [] };
+const EMPTY: FilesWs = { expanded: [], scroll: {}, recent: [], modes: {} };
 
 export function wsKey(ref: WorkspaceRef): string {
   return [ref.machine_id, ref.session, ref.workspace_id].join("/");
@@ -29,6 +32,7 @@ interface FilesState {
   addRecent: (key: string, rel: string) => void;
   toggleDir: (key: string, rel: string) => void;
   setScroll: (key: string, rel: string, top: number) => void;
+  setMode: (key: string, rel: string, mode: FileMode) => void;
 }
 
 export const useFiles = create<FilesState>((set, get) => {
@@ -45,5 +49,6 @@ export const useFiles = create<FilesState>((set, get) => {
         expanded: w.expanded.includes(rel) ? w.expanded.filter((d) => d !== rel) : [...w.expanded, rel],
       })),
     setScroll: (key, rel, top) => update(key, (w) => ({ ...w, scroll: { ...w.scroll, [rel]: top } })),
+    setMode: (key, rel, mode) => update(key, (w) => ({ ...w, modes: { ...w.modes, [rel]: mode } })),
   };
 });

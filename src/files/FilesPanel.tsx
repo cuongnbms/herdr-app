@@ -197,35 +197,35 @@ function WorkspacePanel({ wsRef: ref, section }: { wsRef: WorkspaceRef; section:
         )}
         <CollapseButton />
       </header>
-      {!collapsed && (
-        <>
-          {root?.source === "pane" && !rootMissing && (
-            <div className="files-set-folder-row">
-              <button type="button" className="btn btn-xs files-set-folder" onClick={() => setFolder(ref, root.path)}>
-                Set as workspace folder
-              </button>
-            </div>
-          )}
-          {!online && <div className="files-banner files-banner-offline">Machine offline</div>}
-          {root && !rootMissing ? (
-            <PanelBody
-              key={filesKey(ref, root.path)}
-              wsRef={ref}
-              root={root.path}
-              online={online}
-              showHeavy={showHeavy}
-              gotoRef={goto}
-              onMissing={() => onlineRef.current && setMissing(root.path)}
-            />
-          ) : (
-            <div className="files-empty">
-              <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
-              <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, folder ?? (ws ? suggestFolder(ws) : ""))}>
-                Change folder…
-              </button>
-            </div>
-          )}
-        </>
+      {!collapsed && root?.source === "pane" && !rootMissing && (
+        <div className="files-set-folder-row">
+          <button type="button" className="btn btn-xs files-set-folder" onClick={() => setFolder(ref, root.path)}>
+            Set as workspace folder
+          </button>
+        </div>
+      )}
+      {!collapsed && !online && <div className="files-banner files-banner-offline">Machine offline</div>}
+      {root && !rootMissing ? (
+        // Kept mounted while collapsed: its watch is what reloads the open file.
+        <PanelBody
+          key={filesKey(ref, root.path)}
+          wsRef={ref}
+          root={root.path}
+          online={online}
+          showHeavy={showHeavy}
+          hidden={collapsed}
+          gotoRef={goto}
+          onMissing={() => onlineRef.current && setMissing(root.path)}
+        />
+      ) : (
+        !collapsed && (
+          <div className="files-empty">
+            <p>{root ? "This folder no longer exists." : "This workspace has no folder."}</p>
+            <button type="button" className="btn" onClick={() => actions?.changeFolder(ref, folder ?? (ws ? suggestFolder(ws) : ""))}>
+              Change folder…
+            </button>
+          </div>
+        )
       )}
     </>
   );
@@ -236,11 +236,13 @@ interface BodyProps {
   root: string;
   online: boolean;
   showHeavy: boolean;
+  /** The panel is collapsed: nothing shows, but the listing and the watch go on. */
+  hidden: boolean;
   gotoRef: React.RefObject<HTMLInputElement | null>;
   onMissing(): void;
 }
 
-function PanelBody({ wsRef, root, online, showHeavy, gotoRef, onMissing }: BodyProps) {
+function PanelBody({ wsRef, root, online, showHeavy, hidden, gotoRef, onMissing }: BodyProps) {
   const machineId = wsRef.machine_id;
   const key = filesKey(wsRef, root);
   const recent = useFiles((s) => s.ws(key).recent);
@@ -298,7 +300,7 @@ function PanelBody({ wsRef, root, online, showHeavy, gotoRef, onMissing }: BodyP
   const onOpen = useCallback((rel: string, pin: boolean) => useApp.getState().openFile(wsRef, root, rel, { pin }), [wsRef, root]);
 
   return (
-    <div className="files-panel-body">
+    <div className="files-panel-body" hidden={hidden}>
       {online && watchError && (
         <div className="files-banner files-banner-error" role="status">
           Auto-refresh stopped: {watchError}

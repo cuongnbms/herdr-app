@@ -127,15 +127,14 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
     const r = e.currentTarget.getBoundingClientRect();
     a.menuAt(r.left, r.bottom + 4, AGENTS.map((agent) => agentItem(agent, agent)));
   };
-  // The panel follows the selected Pane, so browsing a Workspace selects its first pane unless one is already selected.
+  // The panel follows the active item, else the selected Pane: browsing a Workspace selects its selected
+  // pane again (or its first), which also leaves a file item of another Workspace.
   const browse = () => {
     const panes = ws.tabs.flatMap((t) => t.panes);
     const sel = useApp.getState().selected;
     const inWs = sel && sel.machine_id === machineId && sel.session === session && panes.some((p) => p.pane_id === sel.pane_id);
-    if (!inWs) {
-      if (!panes[0]) return;
-      useApp.getState().select({ machine_id: machineId, session, pane_id: panes[0].pane_id });
-    }
+    if (!inWs && !panes[0]) return;
+    useApp.getState().select(inWs ? sel : { machine_id: machineId, session, pane_id: panes[0].pane_id });
     useFilesPanel.getState().focusTree();
   };
   const items: MenuItem[] = a

@@ -25,7 +25,7 @@ vi.mock("./chatSession", () => ({
 import { chatLocate, herdrCall } from "../lib/ipc";
 import type { PaneView } from "../lib/types";
 import { useApp } from "../store/app";
-import { itemKey } from "../store/openItems";
+import { itemKey, NO_ITEMS } from "../store/openItems";
 import { ChatLens } from "./ChatLens";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
@@ -214,6 +214,13 @@ describe("ChatLens", () => {
       render(<ChatLens pane={pane} view={idlePi} />);
       sendText("hello there");
       expect(useApp.getState().openItems.preview).toBeNull();
+    });
+
+    it("opens the pane's agent tab pinned when it was closed", () => {
+      useApp.setState({ openItems: NO_ITEMS });
+      render(<ChatLens pane={pane} view={idlePi} />);
+      sendText("hello there");
+      expect(useApp.getState().openItems).toEqual({ items: [{ kind: "agent", ref: pane }], preview: null, active: itemKey({ kind: "agent", ref: pane }) });
     });
 
     it("gives way to the transcript's user item", async () => {

@@ -10,7 +10,7 @@ A macOS desktop client for the [herdr](https://herdr.dev) terminal multiplexer. 
 
 | Files: rendered markdown | Files: Go to file and find |
 |---|---|
-| ![Workspace Files showing rendered markdown with an outline](docs/screenshots/files-markdown.png) | ![Workspace Files with Go to file and find in a source file](docs/screenshots/files-code.png) |
+| ![The File viewer showing rendered markdown with an outline](docs/screenshots/files-markdown.png) | ![The Files panel with Go to file, and find in a source file](docs/screenshots/files-code.png) |
 
 ## Install
 

@@ -33,7 +33,6 @@ export function FileViewer({ item }: Props) {
   const [doc, setDoc] = useState<{ rel: string; content: FileContent } | null>(null);
   const [error, setError] = useState<{ rel: string; message: string } | null>(null);
   const [removed, setRemoved] = useState<string | null>(null);
-  const [modes, setModes] = useState<Record<string, FileMode>>({});
   const [findOpen, setFindOpen] = useState(false);
   /** Bumped by ⌘F, so an open find bar takes the focus again. */
   const [findFocus, setFindFocus] = useState(0);
@@ -85,13 +84,6 @@ export function FileViewer({ item }: Props) {
     } else if (batch.changes.some(above)) load(rel);
   }, [batch, rel, load]);
 
-  // A different file starts with a fresh find and without the last file's link fragment.
-  useEffect(() => {
-    setFindOpen(false);
-    setIndex(0);
-    setJump(null);
-  }, [rel]);
-
   // A link's fragment waits on the bus under the key of the file it targets; this viewer takes its own.
   const itemId = itemKey(item);
   const pending = useFilesBus((s) => (s.jump?.key === itemId ? s.jump.hash : null));
@@ -114,8 +106,10 @@ export function FileViewer({ item }: Props) {
   const large = shown?.text != null && shown.text.length > HIGHLIGHT_LIMIT;
   // A `#L12` link has a line to show, which only the source view has.
   const toLine = jump !== null && lineOfHash(jump) !== null;
-  const mode: FileMode = modes[rel] ?? (large || toLine ? "source" : "render");
-  const setMode = (r: string, m: FileMode) => setModes((s) => ({ ...s, [r]: m }));
+  // Kept in the files store, so it survives switching to another item and back.
+  const chosen = useFiles((s) => s.ws(key).modes[rel]);
+  const mode: FileMode = chosen ?? (large || toLine ? "source" : "render");
+  const setMode = (m: FileMode) => useFiles.getState().setMode(key, rel, m);
   // The other view searches afresh from what it shows on screen.
   useEffect(() => setIndex(0), [mode]);
   const md = isMarkdown(rel);
@@ -197,7 +191,7 @@ export function FileViewer({ item }: Props) {
         {md && shown?.kind === "text" && (
           <div className="files-mode" role="group" aria-label="Markdown view">
             {(["render", "source"] as const).map((m) => (
-              <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(rel, m)}>
+              <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>
                 {m === "render" ? "Render" : "Source"}
               </button>
             ))}
@@ -238,7 +232,7 @@ export function FileViewer({ item }: Props) {
             rel={rel}
             content={shown}
             mode={mode}
-            onMode={(m) => setMode(rel, m)}
+            onMode={(m) => setMode(m)}
             onOpen={onLink}
             find={findOpen && searchable && query ? { query, index, matchCase } : null}
             onFindStatus={setStatus}
