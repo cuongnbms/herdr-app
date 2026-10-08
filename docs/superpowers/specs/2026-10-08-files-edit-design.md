@@ -159,7 +159,7 @@ When the bus reports the open file changed:
   dirty Draft, a dialog lists those files with **Save All / Discard / Cancel**. A closed
   item's Draft is dropped.
 - Window close: Tauri `onCloseRequested`. ⌘Q: the menu's predefined Quit is replaced by a
-  custom "Quit herdr-app" item (⌘Q) that asks the page first, then exits through an
+  custom "Quit <app name>" item (⌘Q; e.g. "Quit Herdr") that asks the page first, then exits through an
   `app_quit` command. With dirty Drafts, the same dialog asks first. Quit from the Dock
   bypasses the menu and is not guarded.
 - Switching Workspace or Session: nothing to guard. Open items span all of them and Drafts

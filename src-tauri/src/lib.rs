@@ -139,6 +139,11 @@ pub fn run() {
         });
 }
 
+/// The Quit menu item's text, named after the app as it is installed.
+fn quit_label(app_name: &str) -> String {
+    format!("Quit {app_name}")
+}
+
 /// The default menu minus "Close Window" (with a single window its Cmd+W quit the app), and with
 /// Quit routed through the frontend so unsaved Drafts are asked about first.
 fn app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -161,7 +166,7 @@ fn app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<
                     let quit = MenuItem::with_id(
                         app,
                         "quit",
-                        "Quit herdr-app",
+                        quit_label(&app.package_info().name),
                         true,
                         Some("CmdOrCtrl+Q"),
                     )?;
@@ -191,4 +196,14 @@ fn init_logging(dir: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error
         .try_init()
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_quit_item_names_the_app() {
+        assert_eq!(quit_label("Herdr"), "Quit Herdr");
+    }
 }
