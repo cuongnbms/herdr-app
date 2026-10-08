@@ -4,6 +4,8 @@ import { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { CopyButton } from "./CopyButton";
+import { looksLikePath, openInFiles } from "./fileLinks";
+import { ChatPaneContext } from "./images";
 import { MermaidBlock } from "./MermaidBlock";
 
 /** The fenced block's language, from the `language-x` class rehype-highlight leaves on `<code>`. */
@@ -39,6 +41,28 @@ export function ExternalLink({ href, children, className, title }: { href?: stri
   );
 }
 
+/** Inline code that reads as a file path, in a Chat lens: opens the file in the Files overlay. */
+function InlineCode({ children, className }: { children?: ReactNode; className?: string }) {
+  const pane = useContext(ChatPaneContext);
+  const inLink = useContext(InLinkContext);
+  const text = typeof children === "string" ? children : null;
+  // A fenced block's text ends in a newline; inline code never does.
+  if (!pane || inLink || className || text === null || !looksLikePath(text)) return <code className={className}>{children}</code>;
+  return (
+    <a
+      href="#"
+      className="chat-file-link"
+      title="Open in Files"
+      onClick={(e) => {
+        e.preventDefault();
+        openInFiles(pane, text);
+      }}
+    >
+      <code>{text}</code>
+    </a>
+  );
+}
+
 /** True inside a markdown link, where an image must not become a second (nested) link. */
 export const InLinkContext = createContext(false);
 
@@ -57,6 +81,7 @@ export const mdComponents: Components = {
       </div>
     );
   },
+  code: InlineCode,
   a({ href, children }) {
     return (
       <InLinkContext.Provider value={true}>

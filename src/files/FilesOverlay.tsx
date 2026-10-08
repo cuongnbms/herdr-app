@@ -18,7 +18,7 @@ import { latestOnly, STALE } from "./latest";
 import { HIGHLIGHT_LIMIT } from "./limits";
 import { lineOfHash } from "./links";
 import { useOutline } from "./outlineStore";
-import { absPath, resolveRoot, type Root } from "./root";
+import { absPath, overlayRoot, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { useWatch } from "./useWatch";
 
@@ -51,15 +51,7 @@ function FilesShell({ wsRef: ref }: { wsRef: WorkspaceRef }) {
 
   // Resolved when the overlay opens, and again only when the Workspace folder is set: a cd in
   // the pane must not move the root under the open tabs.
-  const resolve = () => {
-    // The selected pane's cwd counts only when that pane belongs to this workspace.
-    const { selected } = useApp.getState();
-    let cwd: string | null = null;
-    if (selected && selected.machine_id === ref.machine_id && selected.session === ref.session && ws) {
-      cwd = ws.tabs.flatMap((t) => t.panes).find((p) => p.pane_id === selected.pane_id)?.cwd ?? null;
-    }
-    return resolveRoot(ref, ws, cwd);
-  };
+  const resolve = () => overlayRoot(ref, useApp.getState());
   const [root, setRoot] = useState<Root | null>(resolve);
   const folderSeen = useRef(folder);
   useEffect(() => {

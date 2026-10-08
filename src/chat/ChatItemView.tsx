@@ -1,11 +1,12 @@
-import { memo, useState } from "react";
+import { memo, useContext, useState } from "react";
 import Markdown from "react-markdown";
 import type { ChatItem } from "../lib/types";
 import { BrainIcon, ChevronIcon } from "../ui/icons";
 import { CopyButton } from "./CopyButton";
 import { mdComponents, rehypePlugins, remarkPlugins } from "./markdown";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
-import { ChatImages } from "./images";
+import { ChatImages, ChatPaneContext } from "./images";
+import { openInFiles } from "./fileLinks";
 import { SkillChips } from "./skills";
 import { toolIcon } from "./toolIcon";
 
@@ -58,6 +59,28 @@ function Checklist({ rows }: { rows: ChecklistRow[] }) {
   );
 }
 
+/** The call's summary; when it names the file the tool works on, a click opens that file in Files. */
+function ToolSummary({ summary, input }: { summary: string; input: Record<string, unknown> }) {
+  const pane = useContext(ChatPaneContext);
+  const file = str(input.file_path) ? input.file_path : str(input.path) ? input.path : null;
+  // The summary is the path itself, cut to 120 chars with a `…` when longer.
+  const named = !!file && (summary === file || (summary.endsWith("…") && file.startsWith(summary.slice(0, -1))));
+  if (!pane || !file || !named) return <span className="chat-tool-summary">{summary}</span>;
+  return (
+    <span
+      role="link"
+      className="chat-tool-summary chat-file-link"
+      title="Open in Files"
+      onClick={(e) => {
+        e.stopPropagation();
+        openInFiles(pane, file);
+      }}
+    >
+      {summary}
+    </span>
+  );
+}
+
 function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_call" }>; result?: ToolResult }) {
   const [open, setOpen] = useState(false);
   const input = (item.input ?? {}) as Record<string, unknown>;
@@ -91,7 +114,7 @@ function ToolCallView({ item, result }: { item: Extract<ChatItem, { kind: "tool_
         <ToolIcon className="icon chat-tool-icon" />
         <span className="chat-tool-name">{item.name}</span>
         <span className="chat-tool-sep"> · </span>
-        <span className="chat-tool-summary">{item.input_summary}</span>
+        <ToolSummary summary={item.input_summary} input={input} />
       </button>
       {open && (
         <div className="chat-tool-body">

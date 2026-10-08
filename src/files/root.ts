@@ -21,6 +21,20 @@ export function resolveRoot(ref: WorkspaceRef, ws: WorkspaceView | undefined, se
   return path ? { path, source: "pane" } : null;
 }
 
+/**
+ * The root the Files overlay opens on for `ref`: as `resolveRoot`, counting the selected pane's
+ * cwd only when that pane belongs to this Workspace.
+ */
+export function overlayRoot(ref: WorkspaceRef, state: Pick<AppState, "machines" | "selected">): Root | null {
+  const ws = state.machines[ref.machine_id]?.sessions.find((s) => s.name === ref.session)?.workspaces.find((w) => w.workspace_id === ref.workspace_id);
+  const sel = state.selected;
+  let cwd: string | null = null;
+  if (sel && ws && sel.machine_id === ref.machine_id && sel.session === ref.session) {
+    cwd = ws.tabs.flatMap((t) => t.panes).find((p) => p.pane_id === sel.pane_id)?.cwd ?? null;
+  }
+  return resolveRoot(ref, ws, cwd);
+}
+
 /** The Workspace holding the selected pane, if any. */
 export function workspaceOfSelection(state: Pick<AppState, "machines" | "selected">): WorkspaceRef | null {
   const sel = selectedPane(state);
