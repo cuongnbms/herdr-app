@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import "./fonts/fonts.css";
 import "./styles.css";
-import { machinesList, onMachine, onNotifyActivate, onPaneStatus, sessionStart } from "./lib/ipc";
+import { appQuit, machinesList, onMachine, onNotifyActivate, onQuitRequested, onPaneStatus, sessionStart } from "./lib/ipc";
 import { notifyPaneStatus } from "./notify";
 import { Palette } from "./palette/Palette";
 import { Settings } from "./settings/Settings";
@@ -20,6 +20,9 @@ import { paneKey } from "./lib/types";
 import { activeItem, chosenLens, selectedPane, useApp } from "./store/app";
 import { itemKey } from "./store/openItems";
 import { syncSeenToHerdr } from "./store/seenSync";
+import { closeItemsGuarded, settleDrafts } from "./files/closeGuard";
+import { useDrafts } from "./files/drafts";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { UnsavedDialog } from "./files/unsaved";
 import { showToast, Toasts } from "./ui/Toast";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -148,6 +151,21 @@ export default function App() {
     };
   }, []);
 
+  // Closing the window or quitting asks about unsaved Drafts first.
+  useEffect(() => {
+    const allKeys = () => Object.keys(useDrafts.getState().drafts);
+    const unlisten = [
+      getCurrentWindow().onCloseRequested(async (e) => {
+        e.preventDefault();
+        if (await settleDrafts(allKeys())) await getCurrentWindow().destroy();
+      }),
+      onQuitRequested(async () => {
+        if (await settleDrafts(allKeys())) await appQuit();
+      }),
+    ];
+    return () => unlisten.forEach((u) => void u.then((f) => f()));
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // While the dashboard is open, ⌘K focuses its search instead.
@@ -186,7 +204,7 @@ export default function App() {
         e.preventDefault();
         if (e.repeat) return;
         const active = useApp.getState().openItems.active;
-        if (active) useApp.getState().closeItems(active, "one");
+        if (active) void closeItemsGuarded(active, "one");
       } else if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
         e.preventDefault();
         useApp.getState().cycleItems(e.code === "BracketLeft" ? -1 : 1);

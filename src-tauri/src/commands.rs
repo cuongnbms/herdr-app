@@ -890,3 +890,9 @@ pub async fn files_download(
             .map_err(|e| AppError::new("io", e.to_string()))??;
     Ok(saved.to_string_lossy().into_owned())
 }
+
+/// Quits the app; the frontend calls it once unsaved Drafts are settled.
+#[tauri::command]
+pub fn app_quit(app: tauri::AppHandle) {
+    app.exit(0)
+}

@@ -1,8 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApp } from "../store/app";
 import { OpenStrip } from "./OpenStrip";
 import { itemKey, NO_ITEMS } from "../store/openItems";
+import { draftKey, useDrafts } from "../files/drafts";
+import { filesKey } from "../files/store";
+import { UnsavedDialog } from "../files/unsaved";
 import type { MachineView, PaneView } from "../lib/types";
 
 const pane = (id: string, title: string, status: PaneView["status"]): PaneView => ({
@@ -71,25 +74,25 @@ describe("OpenStrip", () => {
     expect(screen.getByRole("tab", { name: /Chat tabs/ }).className).not.toContain("preview");
   });
 
-  it("selects on click; closes on the close button and on middle click", () => {
+  it("selects on click; closes on the close button and on middle click", async () => {
     openPinned("p1", "p2", "p3");
     render(<OpenStrip />);
     fireEvent.click(screen.getByRole("tab", { name: /Mermaid diagram/ }));
     expect(useApp.getState().selected).toEqual(ref("p1"));
     fireEvent.click(screen.getByRole("button", { name: "Close Chat tabs" }));
-    expect(open()).toEqual(["p1", "p3"]);
+    await waitFor(() => expect(open()).toEqual(["p1", "p3"]));
     expect(useApp.getState().selected).toEqual(ref("p1"));
     fireEvent(screen.getByRole("tab", { name: /Bug button/ }), new MouseEvent("auxclick", { bubbles: true, button: 1 }));
-    expect(open()).toEqual(["p1"]);
+    await waitFor(() => expect(open()).toEqual(["p1"]));
   });
 
-  it("right click offers the close commands that would close something", () => {
+  it("right click offers the close commands that would close something", async () => {
     openPinned("p1", "p2");
     render(<OpenStrip />);
     fireEvent.contextMenu(screen.getByRole("tab", { name: /Chat tabs/ }));
     expect(screen.getAllByRole("menuitem").map((b) => b.textContent)).toEqual(["Close", "Close Others", "Close All"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Close Others" }));
-    expect(open()).toEqual(["p2"]);
+    await waitFor(() => expect(open()).toEqual(["p2"]));
   });
 
   it("shows a file item by basename with its place in the tooltip, and activates it on click", () => {
@@ -123,5 +126,21 @@ describe("OpenStrip", () => {
     fireEvent.drop(item(/Mermaid diagram/), { dataTransfer });
     expect(open()).toEqual(["p1", "p3", "p2"]);
     expect(item(/Mermaid diagram/).className).not.toMatch(/drop-/);
+  });
+  it("asks before closing a file with an unsaved draft", async () => {
+    const ws = { machine_id: "local", session: "default", workspace_id: "w1" };
+    useApp.getState().openFile(ws, "/r", "a.txt", { pin: true });
+    const fk = filesKey(ws, "/r");
+    useDrafts.getState().open({ fk, machineId: "local", root: "/r", rel: "a.txt" }, { text: "t", size: 1, mtime: 1, cksum: 1 });
+    const s = useDrafts.getState().drafts[draftKey(fk, "a.txt")].state;
+    useDrafts.getState().update(draftKey(fk, "a.txt"), s.update({ changes: { from: 0, insert: "!" } }).state);
+    render(<><OpenStrip /><UnsavedDialog /></>);
+    fireEvent.click(screen.getByRole("button", { name: "Close a.txt" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(useApp.getState().openItems.items).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close a.txt" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(useApp.getState().openItems.items).toHaveLength(0));
   });
 });

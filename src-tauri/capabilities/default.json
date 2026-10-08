@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
+    "core:window:allow-destroy",
     "clipboard-manager:allow-write-text",
     "notification:default",
     "opener:default",

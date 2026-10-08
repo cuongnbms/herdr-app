@@ -50,6 +50,8 @@ export const herdrCall = <T>(machineId: string, session: string, method: string,
 export const imageSaveTemp = (machineId: string, bytes: Uint8Array, ext: string) =>
   invoke<string>("image_save_temp", bytes, { headers: { "x-machine-id": machineId, "x-image-ext": ext } });
 
+export const appQuit = () => invoke<void>("app_quit");
+export const onQuitRequested = (fn: () => void): Promise<UnlistenFn> => listen("app://quit-requested", fn);
 export const onMachine = (cb: (m: MachineView) => void): Promise<UnlistenFn> =>
   listen<MachineView>("sidebar://machine", (e) => cb(e.payload));
 export const onPaneStatus = (cb: (e: PaneStatusEvent) => void): Promise<UnlistenFn> =>

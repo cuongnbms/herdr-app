@@ -3,6 +3,7 @@ import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { StatusDot } from "../sidebar/StatusDot";
+import { closeItemsGuarded } from "../files/closeGuard";
 import { useApp } from "../store/app";
 import { itemKey, type OpenItem } from "../store/openItems";
 import type { MachineView, PaneView } from "../lib/types";
@@ -56,7 +57,6 @@ export const OpenStrip = memo(function OpenStrip() {
   const { items, preview, active } = useApp((s) => s.openItems);
   const activate = useApp((s) => s.activateItem);
   const pin = useApp((s) => s.pinItem);
-  const closeItems = useApp((s) => s.closeItems);
   const moveItem = useApp((s) => s.moveItem);
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
   // The tab being dragged, and the tab and side it would land on.
@@ -65,14 +65,14 @@ export const OpenStrip = memo(function OpenStrip() {
   const tabs = entries(machines, items);
   if (tabs.length === 0) return null;
 
-  const close = (key: string) => closeItems(key, "one");
+  const close = (key: string) => void closeItemsGuarded(key, "one");
   // Commands that would close nothing are left out.
   const menuItems = (key: string): MenuItem[] => {
     const at = tabs.findIndex((e) => e.key === key);
     const list: MenuItem[] = [{ label: "Close", icon: CloseIcon, onSelect: () => close(key) }];
-    if (tabs.length > 1) list.push({ label: "Close Others", icon: CloseIcon, onSelect: () => closeItems(key, "others") });
-    if (at < tabs.length - 1) list.push({ label: "Close to the Right", icon: CloseIcon, onSelect: () => closeItems(key, "right") });
-    list.push({ label: "Close All", icon: CloseIcon, onSelect: () => closeItems(key, "all") });
+    if (tabs.length > 1) list.push({ label: "Close Others", icon: CloseIcon, onSelect: () => void closeItemsGuarded(key, "others") });
+    if (at < tabs.length - 1) list.push({ label: "Close to the Right", icon: CloseIcon, onSelect: () => void closeItemsGuarded(key, "right") });
+    list.push({ label: "Close All", icon: CloseIcon, onSelect: () => void closeItemsGuarded(key, "all") });
     return list;
   };
 
