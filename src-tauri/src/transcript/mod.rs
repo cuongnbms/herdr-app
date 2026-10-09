@@ -205,6 +205,9 @@ pub fn parser_for(agent: &str) -> Option<Box<dyn Parser>> {
 /// Closed tails kept running, so reopening skips the backlog.
 pub const PARKED_TAILS: usize = 3;
 
+/// Frozen tails kept to read on from where they stopped.
+pub const FROZEN_TAILS: usize = 8;
+
 struct Entry {
     path: String,
     /// Where `path` came from, once `set_located` recorded it.
@@ -212,21 +215,31 @@ struct Entry {
     handle: TailHandle,
 }
 
+/// A stopped tail's parser, items and offset, filling `slot`.
+struct Frozen {
+    path: String,
+    located: Option<Located>,
+    slot: FrozenSlot,
+}
+
 #[derive(Default)]
 struct Tails {
     open: HashMap<PaneRef, Entry>,
     /// Oldest first.
     parked: VecDeque<(PaneRef, Entry)>,
+    /// Oldest first, at most one per `(pane, path)`.
+    frozen: VecDeque<(PaneRef, Frozen)>,
 }
 
-/// One live transcript tail per open Pane, plus up to 3 parked ones.
+/// One live transcript tail per open Pane, plus up to 3 parked and 8 frozen ones.
 #[derive(Default)]
 pub struct ChatManager {
     tails: Mutex<Tails>,
 }
 
 impl ChatManager {
-    /// Registers `handle` for `pane`, dropping (and so killing) any previous tail of it.
+    /// Registers `handle` for `pane`: a previous tail of another path is frozen, one of
+    /// the same path dropped (and so killed).
     pub fn insert(&self, pane: PaneRef, path: String, handle: TailHandle) {
         let gone = {
             let mut t = self.tails.lock().unwrap();
@@ -234,21 +247,79 @@ impl ChatManager {
             if let Some(i) = t.parked.iter().position(|(p, _)| p == &pane) {
                 gone.extend(t.parked.remove(i).map(|(_, e)| e));
             }
+            t.frozen.retain(|(p, f)| !(p == &pane && f.path == path));
             t.open.insert(
-                pane,
+                pane.clone(),
                 Entry {
-                    path,
+                    path: path.clone(),
                     located: None,
                     handle,
                 },
             );
             gone
         };
-        drop(gone);
+        let (same, other): (Vec<Entry>, Vec<Entry>) = gone.into_iter().partition(|e| e.path == path);
+        drop(same);
+        self.freeze_all(other.into_iter().map(|e| (pane.clone(), e)).collect());
+    }
+
+    /// Freezes the entries, then keeps them frozen: one per `(pane, path)`, the oldest
+    /// past `FROZEN_TAILS` dropped.
+    fn freeze_all(&self, gone: Vec<(PaneRef, Entry)>) {
+        let frozen: Vec<(PaneRef, Frozen)> = gone
+            .into_iter()
+            .map(|(pane, e)| {
+                let (path, located) = (e.path, e.located);
+                (
+                    pane,
+                    Frozen {
+                        path,
+                        located,
+                        slot: e.handle.freeze(),
+                    },
+                )
+            })
+            .collect();
+        let dropped: Vec<(PaneRef, Frozen)> = {
+            let mut t = self.tails.lock().unwrap();
+            let mut dropped = Vec::new();
+            for (pane, f) in frozen {
+                if let Some(i) = t.frozen.iter().position(|(p, o)| p == &pane && o.path == f.path) {
+                    dropped.extend(t.frozen.remove(i));
+                }
+                t.frozen.push_back((pane, f));
+            }
+            let extra = t.frozen.len().saturating_sub(FROZEN_TAILS);
+            dropped.extend(t.frozen.drain(..extra));
+            dropped
+        };
+        drop(dropped);
+    }
+
+    /// Removes and returns the slot of the Pane's frozen tail of `path`.
+    pub fn take_frozen(&self, pane: &PaneRef, path: &str) -> Option<FrozenSlot> {
+        let mut t = self.tails.lock().unwrap();
+        let i = t.frozen.iter().position(|(p, f)| p == pane && f.path == path)?;
+        t.frozen.remove(i).map(|(_, f)| f.slot)
+    }
+
+    /// How the Pane's newest frozen tail was located, when found (not pending) and, if
+    /// `path` is given, of that path.
+    pub fn frozen_located(&self, pane: &PaneRef, path: Option<&str>) -> Option<Located> {
+        let t = self.tails.lock().unwrap();
+        t.frozen
+            .iter()
+            .rev()
+            .filter(|(p, _)| p == pane)
+            .find_map(|(_, f)| {
+                f.located
+                    .clone()
+                    .filter(|l| !l.pending && path.is_none_or(|p| p == l.path))
+            })
     }
 
     /// Reopens the Pane's tail onto `sink` if it is still tailing `path`; false if there
-    /// is none (a stale one is dropped), and the caller must spawn a fresh tail.
+    /// is none (a stale one is frozen), and the caller must spawn a fresh tail.
     pub fn reattach(&self, pane: &PaneRef, path: &str, sink: Sink) -> bool {
         let entry = {
             let mut t = self.tails.lock().unwrap();
@@ -264,7 +335,7 @@ impl ChatManager {
         };
         let Some(entry) = entry else { return false };
         if entry.path != path || !entry.handle.is_running() {
-            drop(entry);
+            self.freeze_all(vec![(pane.clone(), entry)]);
             return false;
         }
         // `attach` locks the image store, so the map lock is already released.
@@ -307,7 +378,7 @@ impl ChatManager {
         self.reattach(pane, &located.path, sink).then_some(located)
     }
 
-    /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are dropped.
+    /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are frozen.
     pub fn close(&self, pane: &PaneRef) {
         let entry = self.tails.lock().unwrap().open.remove(pane);
         let Some(entry) = entry else { return };
@@ -318,7 +389,7 @@ impl ChatManager {
             let extra = t.parked.len().saturating_sub(PARKED_TAILS);
             t.parked.drain(..extra).collect()
         };
-        drop(gone);
+        self.freeze_all(gone);
     }
 
     pub fn page(&self, pane: &PaneRef, before: usize, limit: usize) -> Option<Vec<ChatItem>> {
@@ -348,9 +419,9 @@ impl ChatManager {
             .ok_or_else(|| AppError::new("not_found", "image not available"))
     }
 
-    /// End every tail of the Machine, open or parked (it was disconnected or removed).
+    /// End every tail of the Machine, open, parked or frozen (it was disconnected or removed).
     pub fn close_machine(&self, machine_id: &str) {
-        let (open, parked) = {
+        let (open, parked, frozen): (Vec<Entry>, VecDeque<(PaneRef, Entry)>, VecDeque<(PaneRef, Frozen)>) = {
             let mut t = self.tails.lock().unwrap();
             let t = &mut *t;
             let keys: Vec<PaneRef> = t
@@ -364,9 +435,14 @@ impl ChatManager {
                 .into_iter()
                 .partition(|(p, _)| p.machine_id == machine_id);
             t.parked = kept;
-            (open, gone)
+            let frozen = std::mem::take(&mut t.frozen);
+            let (gone_frozen, kept_frozen) = frozen
+                .into_iter()
+                .partition(|(p, _)| p.machine_id == machine_id);
+            t.frozen = kept_frozen;
+            (open, gone, gone_frozen)
         };
-        drop((open, parked));
+        drop((open, parked, frozen));
     }
 }
 
@@ -685,6 +761,103 @@ mod tests {
         chats.close(&pane("p1"));
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert_eq!(chats.reattach_cached(&pane("p1"), None, sink), None);
+    }
+
+    /// Its stdin closes after 0.3 s, so the script kills `tail`, as an ssh drop ends it.
+    struct Dies;
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for Dies {
+        fn wrap(&self, argv: &[String], _: bool) -> Vec<String> {
+            let mut v: Vec<String> = vec!["sh".into(), "-c".into(), "sleep 0.3 | \"$@\"".into(), "sh".into()];
+            v.extend(argv.iter().cloned());
+            v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    const WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_fourth_park_freezes_the_oldest() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\nb\n").unwrap();
+        let path: String = f.to_string_lossy().into();
+        let chats = ChatManager::default();
+        for id in ["p1", "p2", "p3", "p4"] {
+            open(&chats, &pane(id), &f);
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            chats.close(&pane(id));
+        }
+        assert!(chats.take_frozen(&pane("p2"), &path).is_none(), "p2 is still parked");
+        let kept = chats.take_frozen(&pane("p1"), &path).expect("p1 frozen").take(WAIT).expect("kept");
+        assert_eq!((kept.offset, kept.items.len()), (4, 2));
+        assert!(chats.take_frozen(&pane("p1"), &path).is_none(), "taken once");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dead_tail_is_frozen_when_reopened() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\nb\n").unwrap();
+        let path: String = f.to_string_lossy().into();
+        let chats = ChatManager::default();
+        let (sink, _) = recorder();
+        chats.insert(pane("p1"), path.clone(), spawn_tail(Arc::new(Dies), path.clone(), Box::new(Echo), sink.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        assert!(!chats.reattach(&pane("p1"), &path, sink));
+        let kept = chats.take_frozen(&pane("p1"), &path).expect("frozen").take(WAIT).expect("kept");
+        assert_eq!((kept.offset, kept.items.len()), (4, 2));
+    }
+
+    #[tokio::test]
+    async fn another_transcript_on_the_pane_freezes_the_first_with_where_it_was_found() {
+        let d = tempfile::tempdir().unwrap();
+        let (f, g) = (d.path().join("f.jsonl"), d.path().join("g.jsonl"));
+        std::fs::write(&f, "a\n").unwrap();
+        std::fs::write(&g, "b\n").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        chats.set_located(&pane("p1"), &located(&f, false));
+        open(&chats, &pane("p1"), &g);
+        let fp: String = f.to_string_lossy().into();
+        assert_eq!(chats.frozen_located(&pane("p1"), Some(&fp)), Some(located(&f, false)));
+        assert_eq!(chats.frozen_located(&pane("p1"), None), Some(located(&f, false)));
+        assert_eq!(chats.frozen_located(&pane("p1"), Some("/other.jsonl")), None);
+        assert_eq!(chats.frozen_located(&pane("p2"), None), None);
+        assert!(chats.take_frozen(&pane("p1"), &fp).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_pending_location_is_not_reused_from_a_frozen_tail() {
+        let d = tempfile::tempdir().unwrap();
+        let (f, g) = (d.path().join("f.jsonl"), d.path().join("g.jsonl"));
+        std::fs::write(&f, "").unwrap();
+        std::fs::write(&g, "").unwrap();
+        let chats = ChatManager::default();
+        open(&chats, &pane("p1"), &f);
+        chats.set_located(&pane("p1"), &located(&f, true));
+        open(&chats, &pane("p1"), &g);
+        assert_eq!(chats.frozen_located(&pane("p1"), None), None);
+    }
+
+    #[tokio::test]
+    async fn frozen_tails_past_eight_drop_the_oldest_and_go_with_their_machine() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("t.jsonl");
+        std::fs::write(&f, "a\n").unwrap();
+        let path: String = f.to_string_lossy().into();
+        let chats = ChatManager::default();
+        // 12 closes: 3 stay parked, 9 freeze, the first of them is dropped.
+        for i in 0..12 {
+            let p = pane(&format!("p{i}"));
+            open(&chats, &p, &f);
+            chats.close(&p);
+        }
+        assert!(chats.take_frozen(&pane("p0"), &path).is_none());
+        assert!(chats.take_frozen(&pane("p1"), &path).is_some());
+        chats.close_machine("a");
+        assert!(chats.take_frozen(&pane("p2"), &path).is_none(), "close_machine clears frozen tails");
     }
 
     #[test]
