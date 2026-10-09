@@ -16,7 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 pub use locate::{locate, Located};
-pub use tail::{spawn_tail, Sink, TailHandle};
+pub use tail::{spawn_tail, FrozenSlot, Kept, Sink, TailHandle};
 
 /// An image attached to a chat item; its bytes are fetched by `reference`.
 #[derive(Clone, Debug, PartialEq, Serialize)]

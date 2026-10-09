@@ -5,7 +5,7 @@ use crate::error::AppError;
 use crate::transport::Transport;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -36,6 +36,37 @@ fn emit(link: &SharedLink, ev: ChatEvent) {
     }
 }
 
+/// What a stopped tail keeps so a later open can read on from `offset`.
+pub struct Kept {
+    pub parser: Box<dyn Parser>,
+    pub items: Vec<ChatItem>,
+    /// Bytes of whole lines consumed, header excluded.
+    pub offset: u64,
+}
+
+/// Where a tail leaves its `Kept` state when its parse thread ends.
+#[derive(Clone, Default)]
+pub struct FrozenSlot(Arc<(Mutex<Option<Kept>>, Condvar)>);
+
+impl FrozenSlot {
+    /// Fills the slot and wakes a `take` that is waiting.
+    fn put(&self, k: Kept) {
+        *self.0 .0.lock().unwrap() = Some(k);
+        self.0 .1.notify_all();
+    }
+
+    /// Waits up to `wait` for the slot to fill, then takes what it holds.
+    pub fn take(&self, wait: Duration) -> Option<Kept> {
+        let guard = self.0 .0.lock().unwrap();
+        let (mut guard, _) = self
+            .0
+             .1
+            .wait_timeout_while(guard, wait, |k| k.is_none())
+            .unwrap();
+        guard.take()
+    }
+}
+
 /// A running tail. Dropping it ends the `tail` process.
 pub struct TailHandle {
     items: Arc<Mutex<Vec<ChatItem>>>,
@@ -44,9 +75,16 @@ pub struct TailHandle {
     task: JoinHandle<()>,
     /// Set once the parse thread is gone: past that, nothing reaches a sink.
     done: Arc<AtomicBool>,
+    /// Filled by the parse thread when it ends.
+    kept: FrozenSlot,
 }
 
 impl TailHandle {
+    /// Stops the tail (as dropping does) and returns the slot its state will land in.
+    pub fn freeze(self) -> FrozenSlot {
+        self.kept.clone()
+    }
+
     /// The last `limit` items whose absolute index is `< before`.
     pub fn page(&self, before: usize, limit: usize) -> Vec<ChatItem> {
         let items = self.items.lock().unwrap();
@@ -108,6 +146,10 @@ struct State {
     consumed: u64,
     /// When the last byte arrived; None until the first.
     last_byte: Option<Instant>,
+    /// Bytes of whole lines parsed or skipped so far, header excluded.
+    offset: u64,
+    /// Receives the parser, items and offset when the parse thread ends.
+    kept: FrozenSlot,
     /// Dropped with the State, so any end of the parse thread (Eof, closed channel, panic,
     /// failed spawn) marks the tail done.
     _done: DoneOnDrop,
@@ -238,6 +280,7 @@ pub fn spawn_tail(
     let items: Arc<Mutex<Vec<ChatItem>>> = Arc::default();
     let images = Arc::new(Mutex::new(ImageStore::new(IMAGE_BUDGET)));
     let done: Arc<AtomicBool> = Arc::default();
+    let kept = FrozenSlot::default();
     let state = State {
         items: items.clone(),
         images: images.clone(),
@@ -250,6 +293,8 @@ pub fn spawn_tail(
         size: None,
         consumed: 0,
         last_byte: None,
+        offset: 0,
+        kept: kept.clone(),
         _done: DoneOnDrop(done.clone()),
     };
     let link = state.link.clone();
@@ -269,6 +314,7 @@ pub fn spawn_tail(
         link,
         task,
         done,
+        kept,
     }
 }
 
@@ -276,8 +322,10 @@ pub fn spawn_tail(
 enum Msg {
     /// The size header line, parsed.
     Header(Option<u64>),
-    /// One line, without its newline.
-    Line(Vec<u8>),
+    /// One line without its newline, and its raw length with `\r\n` or `\n`.
+    Line(Vec<u8>, usize),
+    /// A line dropped for exceeding `MAX_LINE`, with its raw length.
+    Skipped(usize),
     /// Raw bytes read after the header, sent once the chunk's lines are.
     Bytes(usize),
     Tick,
@@ -293,12 +341,14 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
                 st.size = size;
                 st.last_byte = Some(Instant::now());
             }
-            Msg::Line(mut bytes) => {
+            Msg::Line(mut bytes, raw) => {
                 if bytes.last() == Some(&b'\r') {
                     bytes.pop();
                 }
                 st.line(&String::from_utf8_lossy(&bytes));
+                st.offset += raw as u64;
             }
+            Msg::Skipped(raw) => st.offset += raw as u64,
             Msg::Bytes(n) => {
                 st.consumed += n as u64;
                 st.last_byte = Some(Instant::now());
@@ -312,10 +362,16 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
                         error: AppError::new("io", "transcript tail exited"),
                     },
                 );
-                return;
+                break;
             }
         }
     }
+    let kept = Kept {
+        parser: st.parser,
+        items: std::mem::take(&mut *st.items.lock().unwrap()),
+        offset: st.offset,
+    };
+    st.kept.put(kept);
 }
 
 async fn read(
@@ -352,6 +408,8 @@ async fn read(
     let mut buf: Vec<u8> = Vec::new();
     let mut dropping = false;
     let mut header = true;
+    // Raw bytes of the line being read, which may span chunks.
+    let mut line_raw = 0usize;
     loop {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
@@ -371,6 +429,7 @@ async fn read(
                         continue;
                     }
                     raw += part.len();
+                    line_raw += part.len();
                     if !dropping {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
                         if buf.len() > MAX_LINE {
@@ -379,10 +438,14 @@ async fn read(
                         }
                     }
                     if complete {
-                        if !dropping && tx.send(Msg::Line(std::mem::take(&mut buf))).await.is_err() {
-                            return;
-                        }
+                        let sent = if dropping {
+                            tx.send(Msg::Skipped(line_raw)).await
+                        } else {
+                            tx.send(Msg::Line(std::mem::take(&mut buf), line_raw)).await
+                        };
+                        if sent.is_err() { return; }
                         dropping = false;
+                        line_raw = 0;
                         buf.clear();
                     }
                 }
@@ -717,8 +780,65 @@ mod tests {
             size: None,
             consumed: 0,
             last_byte: None,
+            offset: 0,
+            kept: FrozenSlot::default(),
             _done: DoneOnDrop(Arc::default()),
         }
+    }
+
+    #[test]
+    fn skipped_lines_count_toward_the_offset() {
+        let st = state(Box::new(Lines));
+        let slot = st.kept.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        tx.blocking_send(Msg::Line(b"a".to_vec(), 2)).unwrap();
+        tx.blocking_send(Msg::Skipped(40)).unwrap();
+        tx.blocking_send(Msg::Line(b"b".to_vec(), 3)).unwrap();
+        drop(tx);
+        parse_loop(st, rx);
+        let kept = slot
+            .take(Duration::from_millis(10))
+            .expect("the slot is filled when the channel closes");
+        assert_eq!(kept.offset, 45);
+        assert_eq!(kept.items.len(), 2);
+    }
+
+    #[test]
+    fn an_eof_fills_the_slot_too() {
+        let st = state(Box::new(Lines));
+        let slot = st.kept.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.blocking_send(Msg::Line(b"a".to_vec(), 2)).unwrap();
+        tx.blocking_send(Msg::Eof).unwrap();
+        parse_loop(st, rx);
+        assert_eq!(
+            slot.take(Duration::from_millis(10)).map(|k| k.offset),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn an_empty_slot_gives_up_after_the_wait() {
+        let start = Instant::now();
+        assert!(FrozenSlot::default()
+            .take(Duration::from_millis(50))
+            .is_none());
+        assert!(start.elapsed() >= Duration::from_millis(50));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_frozen_tail_keeps_its_items_and_the_offset_of_its_last_whole_line() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\nbb\r\nhalf").unwrap();
+        let (h, _got) = collect(Arc::new(crate::transport::local::LocalTransport), &p);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let kept = h.freeze().take(Duration::from_millis(500)).expect("kept");
+        assert_eq!(
+            kept.offset, 6,
+            "a\\n and bb\\r\\n; the half line is not counted"
+        );
+        assert_eq!(kept.items.len(), 2);
     }
 
     #[test]
@@ -746,6 +866,7 @@ mod tests {
             link: Arc::new(Mutex::new(Link { sink: None, pending: None })),
             task: tokio::spawn(std::future::pending()),
             done: done.clone(),
+            kept: FrozenSlot::default(),
         };
         assert!(h.is_running());
         done.store(true, Ordering::Release);
