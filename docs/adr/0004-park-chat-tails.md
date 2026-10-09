@@ -38,3 +38,10 @@ start-near-end could only do for Claude.
 | Start Claude tails near the end of the file | Does not help pi, and older pages would need byte-range reads on the Machine. |
 | Keep killing tails, rely on a faster first Reset | Every switch still re-downloads and re-parses the whole Transcript. |
 | Park 5 tails | More idle ssh channels and remote processes, and more image memory, for switches between more than 3 panes, which are rare. |
+
+## Updates
+
+### 2026-10-09: Dropped tails are frozen
+
+A parked tail pushed out past the 3, or one whose process died, is no longer simply dropped: it is
+kept as a Frozen tail and read on from its offset when reopened (ADR [0008](./0008-freeze-dropped-chat-tails.md)).

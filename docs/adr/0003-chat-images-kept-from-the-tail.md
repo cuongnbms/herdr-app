@@ -50,3 +50,9 @@ Closed tails are now parked rather than killed (ADR [0004](./0004-park-chat-tail
 is no longer freed when the lens closes. A parked tail's budget drops to 16 MiB, evicting oldest
 images first, and returns to 64 MiB when the lens reopens. Reopening no longer re-reads the
 Transcript, so an evicted image stays unavailable until the tail is dropped and a new one starts.
+
+### 2026-10-09: Frozen tails keep no images
+
+A Frozen tail (ADR [0008](./0008-freeze-dropped-chat-tails.md)) keeps no image store. After it
+resumes, images older than its offset show "Image unavailable"; images from the offset on are
+decoded again as their lines arrive.

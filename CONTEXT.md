@@ -88,6 +88,14 @@ _Avoid_: history, log
 The live reading of a Transcript kept after its Chat lens closed, so reopening that Chat lens resumes it instead of reading the Transcript again.
 _Avoid_: cached chat, background tail
 
+**Frozen tail**:
+What is kept of a Transcript's reading after it stopped (pushed out of the Parked tails, or cut by a dropped connection), so reopening that Chat lens reads on from where it stopped instead of from the start.
+_Avoid_: dead tail, snapshot
+
+**Reading position**:
+Where the user was in a Chat lens's Transcript when it closed; reopening it returns there unless they were at the latest message.
+_Avoid_: scroll position, bookmark
+
 **Provider**:
 The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
 _Avoid_: vendor, model
