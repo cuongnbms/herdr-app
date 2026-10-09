@@ -22,11 +22,12 @@ vi.mock("./chatSession", () => ({
   onOpenFailure: () => "error",
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
-import { chatLocate, herdrCall } from "../lib/ipc";
-import type { PaneView } from "../lib/types";
+import { chatLocate, chatPage, herdrCall } from "../lib/ipc";
+import { paneKey, type PaneView } from "../lib/types";
 import { useApp } from "../store/app";
 import { itemKey, NO_ITEMS } from "../store/openItems";
 import { ChatLens } from "./ChatLens";
+import { savedPosition, savePosition } from "./readingPosition";
 
 const pane = { machine_id: "devtuf", session: "default", pane_id: "w1:p1" };
 const idlePi = { status: "idle", agent: "pi", title: "pi" } as PaneView;
@@ -264,6 +265,56 @@ describe("ChatLens", () => {
       expect(outgoing(container)).toHaveLength(1);
       rerender(<ChatLens pane={{ ...pane, pane_id: "w1:p2" }} view={idlePi} />);
       expect(outgoing(container)).toHaveLength(0);
+    });
+  });
+
+  describe("the reading position", () => {
+    const at = { agent: "claude", path: "/h/a.jsonl", ambiguous: false, candidates: ["/h/a.jsonl"], pending: false };
+    const window = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => ({ kind: "user", text: `m${from + i}` }));
+    const reset = (from: number, total: number) =>
+      act(() => channels[channels.length - 1].onmessage({ type: "reset", items: window(from, total), total }));
+    beforeEach(() => vi.mocked(chatPage).mockClear());
+
+    it("pages older items in to reach a row read before the window", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 100, delta: 0, total: 1000 });
+      opened = Promise.resolve(at);
+      render(<ChatLens pane={pane} view={idlePi} />);
+      reset(500, 1000);
+      await waitFor(() => expect(chatPage).toHaveBeenCalledWith(pane, 500));
+    });
+
+    it("waits for the path when the reset comes first", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 100, delta: 0, total: 1000 });
+      let resolve!: (l: unknown) => void;
+      opened = new Promise((r) => (resolve = r));
+      render(<ChatLens pane={pane} view={idlePi} />);
+      reset(500, 1000);
+      expect(chatPage).not.toHaveBeenCalled();
+      await act(async () => resolve(at));
+      await waitFor(() => expect(chatPage).toHaveBeenCalledWith(pane, 500));
+    });
+
+    it("says there are new messages when the transcript grew while away", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 600, delta: 0, total: 900 });
+      opened = Promise.resolve(at);
+      render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => {});
+      reset(500, 1000);
+      expect(await screen.findByText("New messages")).toBeTruthy();
+      expect(chatPage).not.toHaveBeenCalled();
+    });
+
+    it("stays at the bottom for a reader who left from there, and remembers that on leaving", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: true, item: 0, delta: 0, total: 900 });
+      opened = Promise.resolve(at);
+      const { unmount } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => {});
+      reset(500, 1000);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByText("New messages")).toBeNull();
+      expect(chatPage).not.toHaveBeenCalled();
+      unmount();
+      expect(savedPosition(paneKey(pane), at.path)).toMatchObject({ atBottom: true, total: 1000 });
     });
   });
 });

@@ -20,6 +20,7 @@ import { usePiModelPicker } from "./usePiModelPicker";
 import { usePendingTranscript } from "./pendingTranscript";
 import { useOutgoing } from "./outgoing";
 import { ArrowDownIcon } from "../ui/icons";
+import { restoreTarget, rowForItem, savedPosition, savePosition, topVisible } from "./readingPosition";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
 /** How long an open that has not answered yet may go without saying the transcript is loading. */
@@ -48,6 +49,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const forceBottom = useRef(true);
   const generation = useRef(0);
   const handle = useRef<{ close: () => void } | null>(null);
+  // The open's Transcript path, once known: the reading position is kept under it.
+  const pathRef = useRef<string | null>(null);
+  // A restore is owed until the first Reset of an open has been placed (or given up on).
+  const restoreArmed = useRef(false);
+  const restorePages = useRef(0);
+  const saveReadingRef = useRef(() => {});
   // Bumped on each `reset`: thumbnails that failed while the tail was gone ask again.
   const [opened, setOpened] = useState(0);
   // The first Reset waits for the whole backlog (seconds over a slow ssh): say so meanwhile.
@@ -73,6 +80,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   // `known`: where `path` was located, when the caller already knows (kept over what opening returns).
   const open = useCallback(
     (path: string | null, known?: Located) => {
+      saveReadingRef.current();
+      pathRef.current = null;
+      restoreArmed.current = true;
+      restorePages.current = 0;
       const gen = ++generation.current;
       setOpenError(null);
       setLoaded(false);
@@ -99,6 +110,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       h.opened
         .then((l) => {
           if (gen !== generation.current || !l) return;
+          pathRef.current = (known ?? l).path;
           setLocated(known ?? l);
           clearTimeout(loadingTimer.current);
           if (!l.cached) setLoadingShown(true);
@@ -151,6 +163,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     outgoing.clear();
     open(rememberedTranscript(key));
     return () => {
+      saveReadingRef.current();
       generation.current++;
       handle.current?.close();
       handle.current = null;
@@ -186,6 +199,20 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     getItemKey: (i) => rows[i].key,
   });
 
+  // Where the reader is, kept for the next time this transcript is opened.
+  const loadedRef = useRef(false);
+  loadedRef.current = loaded;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  saveReadingRef.current = () => {
+    const path = pathRef.current;
+    if (!path || !loadedRef.current) return;
+    const total = latest.current.total;
+    if (atBottom.current) return savePosition(key, path, { atBottom: true, item: 0, delta: 0, total });
+    const top = topVisible(rowsRef.current, virt.getVirtualItems(), virt.scrollOffset ?? 0);
+    if (top) savePosition(key, path, { atBottom: false, ...top, total });
+  };
+
   const prevRows = useRef(0);
   const prevItems = useRef(0);
   useLayoutEffect(() => {
@@ -209,6 +236,51 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     prevRows.current = rows.length;
     prevItems.current = state.items.length;
   }, [rows.length, state.items.length, virt]);
+
+  // The first Reset of an open lands on the saved row, paging older items in when it lies before the window.
+  useLayoutEffect(() => {
+    const path = pathRef.current;
+    if (!restoreArmed.current || !loaded || !path || located?.pending) return;
+    const total = state.total;
+    const target = restoreTarget(savedPosition(key, path), total, total - state.items.length, restorePages.current);
+    if (target.kind === "bottom") {
+      restoreArmed.current = false;
+    } else if (target.kind === "page") {
+      if (loadingOlder.current) return;
+      loadingOlder.current = true;
+      const gen = generation.current;
+      const before = target.before;
+      chatPage(pane, before)
+        .then((older) => {
+          loadingOlder.current = false;
+          if (gen !== generation.current) return;
+          if (older.length === 0) {
+            restoreArmed.current = false;
+            return;
+          }
+          const now = latest.current;
+          if (now.total - now.items.length !== before) return;
+          restorePages.current++;
+          dispatch({ type: "prepend", items: older, before });
+        })
+        .catch((e) => {
+          loadingOlder.current = false;
+          if (gen === generation.current) restoreArmed.current = false;
+          console.error("chat_page failed", e);
+        });
+    } else {
+      restoreArmed.current = false;
+      forceBottom.current = false;
+      atBottom.current = false;
+      const place = () => {
+        virt.scrollToIndex(rowForItem(rows, target.item), { align: "start" });
+        if (scrollRef.current) scrollRef.current.scrollTop += target.delta;
+      };
+      place();
+      requestAnimationFrame(place);
+      if (target.unseen) setUnseen(true);
+    }
+  }, [loaded, located?.path, rows.length, state.items.length]);
 
   // Rows measure taller than their estimate after the jump, and the working indicator
   // shrinks the viewport: neither fires a scroll event, so stay pinned while at the bottom.
