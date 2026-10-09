@@ -316,5 +316,41 @@ describe("ChatLens", () => {
       unmount();
       expect(savedPosition(paneKey(pane), at.path)).toMatchObject({ atBottom: true, total: 1000 });
     });
+    it("keeps the saved row when left while older items are still being paged in", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 100, delta: 0, total: 1000 });
+      opened = Promise.resolve(at);
+      vi.mocked(chatPage).mockReturnValueOnce(new Promise(() => {}));
+      const { unmount } = render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => {});
+      reset(500, 1000);
+      await waitFor(() => expect(chatPage).toHaveBeenCalledTimes(1));
+      unmount();
+      expect(savedPosition(paneKey(pane), at.path)).toMatchObject({ atBottom: false, item: 100 });
+    });
+
+    it("does not restore for a later Reset of the same open", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 100, delta: 0, total: 1000 });
+      opened = Promise.resolve(at);
+      let page!: (items: unknown[]) => void;
+      vi.mocked(chatPage).mockReturnValueOnce(new Promise((r) => (page = r)) as never);
+      render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => {});
+      reset(500, 1000);
+      await waitFor(() => expect(chatPage).toHaveBeenCalledTimes(1));
+      reset(500, 1000);
+      await act(async () => page(window(300, 500)));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(chatPage).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops at the earliest loaded row when a page comes back empty", async () => {
+      savePosition(paneKey(pane), at.path, { atBottom: false, item: 100, delta: 0, total: 900 });
+      opened = Promise.resolve(at);
+      render(<ChatLens pane={pane} view={idlePi} />);
+      await act(async () => {});
+      reset(500, 1000);
+      expect(await screen.findByText("New messages")).toBeTruthy();
+      expect(chatPage).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -20,7 +20,7 @@ import { usePiModelPicker } from "./usePiModelPicker";
 import { usePendingTranscript } from "./pendingTranscript";
 import { useOutgoing } from "./outgoing";
 import { ArrowDownIcon } from "../ui/icons";
-import { restoreTarget, rowForItem, savedPosition, savePosition, topVisible } from "./readingPosition";
+import { RESTORE_PAGES, restoreTarget, rowForItem, savedPosition, savePosition, topVisible } from "./readingPosition";
 import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptPicker } from "./TranscriptPicker";
 
 /** How long an open that has not answered yet may go without saying the transcript is loading. */
@@ -54,6 +54,9 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   // A restore is owed until the first Reset of an open has been placed (or given up on).
   const restoreArmed = useRef(false);
   const restorePages = useRef(0);
+  const resets = useRef(0);
+  // Bumped when the restore may proceed (the path became known, paging gave up): the effect re-runs.
+  const [restoreTick, setRestoreTick] = useState(0);
   const saveReadingRef = useRef(() => {});
   // Bumped on each `reset`: thumbnails that failed while the tail was gone ask again.
   const [opened, setOpened] = useState(0);
@@ -84,6 +87,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       pathRef.current = null;
       restoreArmed.current = true;
       restorePages.current = 0;
+      resets.current = 0;
       const gen = ++generation.current;
       setOpenError(null);
       setLoaded(false);
@@ -99,6 +103,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
         // A reset may come after a send (a slow first load, pi's branch switch): keep what it does not echo.
         if (ev.type === "append" || ev.type === "reset") outgoing.seen(ev.items);
         if (ev.type === "reset") {
+          // Only the open's first Reset is restored; a later one (a branch switch) goes to the bottom.
+          if (resets.current++ > 0) restoreArmed.current = false;
           forceBottom.current = true;
           setOpened((n) => n + 1);
         }
@@ -112,6 +118,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
           if (gen !== generation.current || !l) return;
           pathRef.current = (known ?? l).path;
           setLocated(known ?? l);
+          setRestoreTick((n) => n + 1);
           clearTimeout(loadingTimer.current);
           if (!l.cached) setLoadingShown(true);
           // Reopened on the running tail without locating: the agent may since have moved on to
@@ -206,7 +213,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   rowsRef.current = rows;
   saveReadingRef.current = () => {
     const path = pathRef.current;
-    if (!path || !loadedRef.current) return;
+    // Mid-restore the view sits at the bottom: that is not where the reader was.
+    if (!path || !loadedRef.current || restoreArmed.current) return;
     const total = latest.current.total;
     if (atBottom.current) return savePosition(key, path, { atBottom: true, item: 0, delta: 0, total });
     const top = topVisible(rowsRef.current, virt.getVirtualItems(), virt.scrollOffset ?? 0);
@@ -250,22 +258,30 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       loadingOlder.current = true;
       const gen = generation.current;
       const before = target.before;
+      // Stop paging: the next pass lands on the earliest loaded item.
+      const giveUp = () => {
+        restorePages.current = RESTORE_PAGES;
+        setRestoreTick((n) => n + 1);
+      };
       chatPage(pane, before)
         .then((older) => {
           loadingOlder.current = false;
           if (gen !== generation.current) return;
-          if (older.length === 0) {
+          const now = latest.current;
+          if (now.total - now.items.length !== before) {
             restoreArmed.current = false;
             return;
           }
-          const now = latest.current;
-          if (now.total - now.items.length !== before) return;
+          if (older.length === 0) {
+            giveUp();
+            return;
+          }
           restorePages.current++;
           dispatch({ type: "prepend", items: older, before });
         })
         .catch((e) => {
           loadingOlder.current = false;
-          if (gen === generation.current) restoreArmed.current = false;
+          if (gen === generation.current) giveUp();
           console.error("chat_page failed", e);
         });
     } else {
@@ -273,14 +289,14 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       forceBottom.current = false;
       atBottom.current = false;
       const place = () => {
-        virt.scrollToIndex(rowForItem(rows, target.item), { align: "start" });
-        if (scrollRef.current) scrollRef.current.scrollTop += target.delta;
+        const [start] = virt.getOffsetForIndex(rowForItem(rows, target.item), "start") ?? [0];
+        virt.scrollToOffset(start + target.delta);
       };
       place();
       requestAnimationFrame(place);
       if (target.unseen) setUnseen(true);
     }
-  }, [loaded, located?.path, rows.length, state.items.length]);
+  }, [loaded, located?.path, rows.length, state.items.length, restoreTick]);
 
   // Rows measure taller than their estimate after the jump, and the working indicator
   // shrinks the viewport: neither fires a scroll event, so stay pinned while at the bottom.
