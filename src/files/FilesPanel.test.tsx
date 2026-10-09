@@ -109,6 +109,18 @@ describe("FilesPanel", () => {
     await waitFor(() => expect(document.activeElement?.closest("[role=tree]")).toBeTruthy());
   });
 
+  it("clicking the header toggles the panel; its buttons keep their own action", async () => {
+    render(<FilesPanel />);
+    fireEvent.click(screen.getByText("FILES · app"));
+    expect(useFilesPanel.getState().collapsed).toBe(true);
+    fireEvent.click(screen.getByText("FILES · app"));
+    expect(useFilesPanel.getState().collapsed).toBe(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    expect(useFilesPanel.getState().collapsed).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse files" }));
+    expect(useFilesPanel.getState().collapsed).toBe(true);
+  });
+
   it("focusGoto expands the panel and focuses Go to file", async () => {
     useFilesPanel.getState().setCollapsed(true);
     render(<FilesPanel />);

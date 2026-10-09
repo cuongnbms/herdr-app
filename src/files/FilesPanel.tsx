@@ -62,7 +62,7 @@ export function FilesPanel() {
           </ActionsProvider>
         ) : (
           <>
-            <header className="files-panel-head">
+            <header className="files-panel-head" onClick={toggleFromHead}>
               <span className="files-title">FILES</span>
               <span className="files-head-spacer" />
               <CollapseButton />
@@ -73,6 +73,13 @@ export function FilesPanel() {
       </section>
     </>
   );
+}
+
+/** A click on the header toggles the panel, except on the header's own buttons. */
+function toggleFromHead(e: React.MouseEvent) {
+  if ((e.target as Element).closest("button")) return;
+  const panel = useFilesPanel.getState();
+  panel.setCollapsed(!panel.collapsed);
 }
 
 function CollapseButton() {
@@ -172,7 +179,7 @@ function WorkspacePanel({ wsRef: ref, section }: { wsRef: WorkspaceRef; section:
   const label = ws?.label ?? ref.workspace_id;
   return (
     <>
-      <header className="files-panel-head">
+      <header className="files-panel-head" onClick={toggleFromHead}>
         <span className="files-title" title={root?.path}>
           {`FILES · ${label}`}
         </span>
