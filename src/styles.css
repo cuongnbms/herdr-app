@@ -280,7 +280,6 @@ kbd {
 .machine > .row .label { font-weight: 600; flex: 1; min-width: 0; }
 .machine > .row .dot { margin-right: 2px; }
 .label, .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title, .mono { font-family: var(--mono); font-size: 12px; }
 .agent { margin-left: auto; color: var(--fg-3); font-size: 11px; }
 .machine.offline > .row, .machine.offline > .row .label { color: var(--fg-3); }
 .session.offline .row { color: var(--fg-3); opacity: .5; cursor: default; }

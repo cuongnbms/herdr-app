@@ -63,7 +63,7 @@ export function Palette({ onClose }: { onClose: () => void }) {
             <li key={`${h.ref.machine_id}/${h.ref.session}/${h.ref.pane_id}`} role="option" aria-selected={i === active}>
               <button className={"hit" + (i === active ? " active" : "")} onClick={() => choose(i)}>
                 <StatusDot status={h.status} />
-                <span className="title mono">{h.title}</span>
+                <span className="title">{h.title}</span>
                 {h.agent && <span className="agent">{h.agent}</span>}
                 <span className="subtitle">{h.subtitle}</span>
               </button>
