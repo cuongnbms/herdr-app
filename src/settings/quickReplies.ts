@@ -46,6 +46,20 @@ export function quickReplyButtons(replies: string[]): string[] {
   return replies.filter((r) => r.trim() !== "");
 }
 
+/**
+ * The list with the reply at `from` moved to one side of the reply at `target`; null when that
+ * would leave it where it is, or either index is outside the list.
+ */
+export function moveReply(replies: string[], from: number, target: number, side: "before" | "after"): string[] | null {
+  if (from < 0 || from >= replies.length || target < 0 || target >= replies.length) return null;
+  const gap = target + (side === "after" ? 1 : 0);
+  if (gap === from || gap === from + 1) return null;
+  const next = [...replies];
+  const [moved] = next.splice(from, 1);
+  next.splice(gap > from ? gap - 1 : gap, 0, moved);
+  return next;
+}
+
 export function loadQuickReplies(): QuickReplies {
   const raw = readRaw();
   return {

@@ -1,11 +1,12 @@
-import { type CSSProperties, memo, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type DragEvent, memo, useEffect, useRef, useState } from "react";
 import { notificationsEnabled, setNotificationsEnabled } from "../notify";
-import { CloseIcon, GearIcon } from "../ui/icons";
+import { CloseIcon, GearIcon, GripIcon } from "../ui/icons";
 import { FontPicker } from "./FontPicker";
 import { NEW_AGENT_LENSES, useLensSettings } from "./lens";
 import { useNewTab } from "./newTab";
 import { AGENTS } from "../agents/openAgentTab";
-import { DEFAULT_QUICK_REPLIES, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
+import { DEFAULT_QUICK_REPLIES, moveReply, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, useQuickReplies } from "./quickReplies";
+import { dropZone } from "../sidebar/dnd";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
 
@@ -128,17 +129,35 @@ function FontSettings() {
   );
 }
 
+/** What a Quick reply row drag carries; WebKit starts a drag only when it carries data. */
+const QUICK_REPLY_TYPE = "application/x-herdr-quick-reply";
+
+type Side = "before" | "after";
+const sideOf = (e: DragEvent) => dropZone(e.currentTarget.getBoundingClientRect(), e.clientY, "session") as Side;
+
 function ChatSettings() {
   const q = useQuickReplies();
   const lens = useLensSettings();
   const list = useRef<HTMLDivElement>(null);
   const added = useRef(false);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<{ i: number; side: Side } | null>(null);
   // Focus the row just added, so typing goes straight into it.
   useEffect(() => {
     if (!added.current) return;
     added.current = false;
     list.current?.querySelector<HTMLInputElement>(".quick-reply-row:last-child input")?.focus();
   }, [q.replies.length]);
+  const endDrag = () => {
+    setDragging(null);
+    setOver(null);
+  };
+  /** True when the reply moved. */
+  const move = (from: number, target: number, side: Side) => {
+    const next = moveReply(q.replies, from, target, side);
+    if (next) q.setReplies(next);
+    return next !== null;
+  };
   const isDefault = q.replies.length === DEFAULT_QUICK_REPLIES.length && q.replies.every((r, i) => r === DEFAULT_QUICK_REPLIES[i]);
   return (
     <>
@@ -163,25 +182,85 @@ function ChatSettings() {
         <span>Quick replies</span>
         <input type="checkbox" role="switch" checked={q.show} onChange={(e) => q.setShow(e.target.checked)} />
       </label>
-      <p className="note">Buttons above the message box that send a short reply in one click.</p>
+      <p className="note">Buttons above the message box that send a short reply in one click. Drag a handle to reorder, or press ⌥↑ / ⌥↓ in a reply.</p>
       <div className="quick-reply-list" ref={list}>
-        {q.replies.map((r, i) => (
-          <div key={i} className="quick-reply-row">
-            <input
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              aria-label={`Quick reply ${i + 1}`}
-              value={r}
-              maxLength={QUICK_REPLY_MAX_CHARS}
-              placeholder="Reply text"
-              onChange={(e) => q.setReplies(q.replies.map((x, j) => (j === i ? e.target.value : x)))}
-            />
-            <button className="icon-btn" aria-label={`Remove quick reply ${i + 1}`} onClick={() => q.setReplies(q.replies.filter((_, j) => j !== i))}>
-              <CloseIcon />
-            </button>
-          </div>
-        ))}
+        {q.replies.map((r, i) => {
+          const onDragOver = (e: DragEvent) => {
+            if (dragging === null) return;
+            const side = sideOf(e);
+            if (!moveReply(q.replies, dragging, i, side)) {
+              e.dataTransfer.dropEffect = "none";
+              setOver((p) => (p?.i === i ? null : p));
+              return;
+            }
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setOver((p) => (p?.i === i && p.side === side ? p : { i, side }));
+          };
+          const drop = over?.i === i ? ` drop-${over.side}` : "";
+          return (
+            <div
+              key={i}
+              className={`quick-reply-row${dragging === i ? " dragging" : ""}${drop}`}
+              onDragEnter={onDragOver}
+              onDragOver={onDragOver}
+              onDragLeave={(e) => {
+                // By the pointer, not `relatedTarget`, which WebKit may leave null.
+                const b = e.currentTarget.getBoundingClientRect();
+                if (e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom) return;
+                setOver((p) => (p?.i === i ? null : p));
+              }}
+              onDrop={(e) => {
+                const from = dragging;
+                endDrag();
+                if (from === null) return;
+                e.preventDefault();
+                move(from, i, sideOf(e));
+              }}
+            >
+              {/* Only the grip drags, so selecting text in the field still works. */}
+              <span
+                className="quick-reply-grip"
+                title="Drag to reorder"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(QUICK_REPLY_TYPE, String(i));
+                  e.dataTransfer.effectAllowed = "move";
+                  const rowEl = e.currentTarget.closest<HTMLElement>(".quick-reply-row");
+                  if (rowEl) {
+                    const b = rowEl.getBoundingClientRect();
+                    e.dataTransfer.setDragImage(rowEl, e.clientX - b.left, e.clientY - b.top);
+                  }
+                  setDragging(i);
+                }}
+                onDragEnd={endDrag}
+              >
+                <GripIcon />
+              </span>
+              <input
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                aria-label={`Quick reply ${i + 1}`}
+                value={r}
+                maxLength={QUICK_REPLY_MAX_CHARS}
+                placeholder="Reply text"
+                onChange={(e) => q.setReplies(q.replies.map((x, j) => (j === i ? e.target.value : x)))}
+                onKeyDown={(e) => {
+                  if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+                  e.preventDefault();
+                  const up = e.key === "ArrowUp";
+                  const to = up ? i - 1 : i + 1;
+                  // Rows are keyed by index, so the moved reply now shows in the field at `to`.
+                  if (move(i, to, up ? "before" : "after")) list.current?.querySelectorAll<HTMLInputElement>(".quick-reply-row input")[to]?.focus();
+                }}
+              />
+              <button className="icon-btn" aria-label={`Remove quick reply ${i + 1}`} onClick={() => q.setReplies(q.replies.filter((_, j) => j !== i))}>
+                <CloseIcon />
+              </button>
+            </div>
+          );
+        })}
       </div>
       <div className="settings-foot">
         <button

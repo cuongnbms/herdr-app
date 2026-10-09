@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_QUICK_REPLIES,
   loadQuickReplies,
+  moveReply,
   normalizeReplies,
   QUICK_REPLIES_MAX,
   QUICK_REPLY_MAX_CHARS,
@@ -46,5 +47,23 @@ describe("quick replies", () => {
     useQuickReplies.getState().reset();
     expect(useQuickReplies.getState().replies).toEqual(DEFAULT_QUICK_REPLIES);
     expect(loadQuickReplies().replies).toEqual(DEFAULT_QUICK_REPLIES);
+  });
+
+  it("moves a reply to the side of another it is dropped on", () => {
+    const list = ["a", "b", "c", "d"];
+    expect(moveReply(list, 0, 2, "after")).toEqual(["b", "c", "a", "d"]);
+    expect(moveReply(list, 0, 2, "before")).toEqual(["b", "a", "c", "d"]);
+    expect(moveReply(list, 3, 1, "before")).toEqual(["a", "d", "b", "c"]);
+    expect(moveReply(list, 3, 0, "after")).toEqual(["a", "d", "b", "c"]);
+    expect(list).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("gives null for a move that would leave the reply where it is, or point past the list", () => {
+    const list = ["a", "b", "c"];
+    expect(moveReply(list, 1, 1, "before")).toBeNull();
+    expect(moveReply(list, 1, 0, "after")).toBeNull();
+    expect(moveReply(list, 1, 2, "before")).toBeNull();
+    expect(moveReply(list, 0, -1, "before")).toBeNull();
+    expect(moveReply(list, 2, 3, "after")).toBeNull();
   });
 });

@@ -107,6 +107,13 @@ export const LayersIcon = (p: SVGProps<SVGSVGElement>) => (
   </Icon>
 );
 export const CloseIcon = (p: SVGProps<SVGSVGElement>) => <Icon {...p}><path d="M18 6L6 18M6 6l12 12" /></Icon>;
+export const GripIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" />
+    <circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" />
+    <circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" />
+  </Icon>
+);
 export const DashboardIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <rect x="3" y="3" width="7" height="9" rx="1" />
