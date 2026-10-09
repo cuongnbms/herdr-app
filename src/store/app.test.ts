@@ -374,11 +374,13 @@ describe("open items", () => {
     expect(s.preview).toBe(key("w2:p2"));
   });
 
-  it("selecting a shell pane opens nothing and clears the active item", () => {
+  it("selecting a shell pane opens its item as the active preview", () => {
     useApp.getState().select(ref("w2:p2"));
     useApp.getState().select(ref("w2:p4"));
-    expect(useApp.getState().openItems.items).toHaveLength(1);
-    expect(useApp.getState().openItems.active).toBeNull();
+    const s = useApp.getState().openItems;
+    expect(s.items).toEqual([{ kind: "agent", ref: ref("w2:p4") }]);
+    expect(s.active).toBe(key("w2:p4"));
+    expect(s.preview).toBe(key("w2:p4"));
   });
 
   it("opening a file keeps the selected pane and makes the file active, and records it as recent", () => {
@@ -443,10 +445,23 @@ describe("open items", () => {
 
   it("an agent started in the selected pane opens its item", () => {
     useApp.getState().select(ref("w2:p4"));
+    useApp.getState().closeItems(key("w2:p4"), "one");
     const m = withW2();
     m.sessions[0].workspaces[1].tabs[0].panes[2].agent = "claude";
     useApp.getState().upsertMachine(m);
     expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: ref("w2:p4") }]);
+  });
+
+  it("an agent started in a shell pane keeps its one item", () => {
+    useApp.getState().select(ref("w2:p4"));
+    useApp.getState().pinItem(key("w2:p4"));
+    const m = withW2();
+    m.sessions[0].workspaces[1].tabs[0].panes[2].agent = "claude";
+    useApp.getState().upsertMachine(m);
+    const s = useApp.getState().openItems;
+    expect(s.items).toEqual([{ kind: "agent", ref: ref("w2:p4") }]);
+    expect(s.active).toBe(key("w2:p4"));
+    expect(s.preview).toBeNull();
   });
 
   it("an open agent item activates after its agent exits", () => {

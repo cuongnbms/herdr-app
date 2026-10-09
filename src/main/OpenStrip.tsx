@@ -20,7 +20,7 @@ interface Entry {
   project: string;
   /** Hover text: where the item lives, then what it is. */
   title: string;
-  /** Set for an agent item; a file item shows an icon instead. */
+  /** Set for a pane item (an agent or a terminal); a file item shows an icon instead. */
   pane?: PaneView;
 }
 
@@ -47,7 +47,7 @@ function placeOf(machines: Record<string, MachineView>, machine_id: string, sess
   return w ? { where: `${machine.label}/${session} · ${w.label}`, project: w.label } : null;
 }
 
-/** The agents and files opened in any session, like an editor's open files. */
+/** The panes and files opened in any session, like an editor's open files. */
 type Side = "before" | "after";
 
 /** Which half of the tab under the pointer: the dragged tab lands on that side of it. */
