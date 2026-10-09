@@ -368,7 +368,7 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
     }
     let kept = Kept {
         parser: st.parser,
-        items: std::mem::take(&mut *st.items.lock().unwrap()),
+        items: st.items.lock().unwrap().clone(),
         offset: st.offset,
     };
     st.kept.put(kept);
@@ -815,6 +815,17 @@ mod tests {
             slot.take(Duration::from_millis(10)).map(|k| k.offset),
             Some(2)
         );
+    }
+
+    #[test]
+    fn an_eof_leaves_the_shared_items_for_page() {
+        let st = state(Box::new(Lines));
+        let items = st.items.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.blocking_send(Msg::Line(b"a".to_vec(), 2)).unwrap();
+        tx.blocking_send(Msg::Eof).unwrap();
+        parse_loop(st, rx);
+        assert_eq!(items.lock().unwrap().len(), 1);
     }
 
     #[test]
