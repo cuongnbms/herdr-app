@@ -775,9 +775,11 @@ kbd {
 .chat-images { display: flex; flex-wrap: wrap; gap: 6px; }
 .chat-user .chat-images { justify-content: flex-end; }
 /* A sent message the transcript has not echoed yet: dimmed while the send is on its way. */
-.chat-outgoing { transition: opacity 0.15s ease; }
+.chat-outgoing { transition: opacity 0.15s ease; animation: rise-in var(--t) var(--ease); }
 .chat-outgoing.sending { opacity: 0.5; }
 .chat-outgoing .chat-image { cursor: default; }
+/* A row an append brought; `translate`, as its virtualizer row is placed with `transform`. */
+.chat-enter { animation: rise-in var(--t) var(--ease); }
 .skill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .skill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 12px; color: var(--fg-2); }
 .skill-chip svg { width: 12px; height: 12px; }
@@ -1108,6 +1110,7 @@ button.composer-model:disabled { cursor: default; }
 /* ---------- Motion ---------- */
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } }
+@keyframes rise-in { from { opacity: 0; translate: 0 6px; } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.97); } }
 @keyframes slide-in { from { opacity: 0; transform: translateX(16px); } }
 

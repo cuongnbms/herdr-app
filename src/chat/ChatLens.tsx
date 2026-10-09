@@ -25,6 +25,10 @@ import { forgetTranscript, rememberedTranscript, rememberTranscript, TranscriptP
 
 /** How long an open that has not answered yet may go without saying the transcript is loading. */
 const LOADING_DELAY = 150;
+/** How long a row an append brought eases in (the CSS --t): a row remounted later shows at once. */
+const ENTER_MS = 180;
+/** The share of the way to the end the follow scroll covers each frame. */
+const FOLLOW_STEP = 0.3;
 
 type Action = (ChatEvent & { atBottom?: boolean }) | { type: "prepend"; items: ChatItem[]; before: number };
 const reducer = (s: ChatState, a: Action): ChatState => (a.type === "prepend" ? prepend(s, a.items, a.before) : reduce(s, a, a.atBottom));
@@ -79,6 +83,13 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const outgoing = useOutgoing();
   const outgoingRef = useRef(0);
   outgoingRef.current = outgoing.list.length;
+  // The first absolute index the appends since the last render brought, and whether a sent
+  // message was shown meanwhile: its echo takes its place rather than coming in.
+  const enterFrom = useRef<{ at: number; echo: boolean } | null>(null);
+  // The open's item total as its events have told it.
+  const heard = useRef(0);
+  // Rows easing in, by key, until when.
+  const entering = useRef(new Map<string, number>());
 
   // `known`: where `path` was located, when the caller already knows (kept over what opening returns).
   const open = useCallback(
@@ -100,6 +111,16 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       channel.onmessage = (ev) => {
         if (gen !== generation.current) return;
         if (ev.type === "reset" || ev.type === "error") setLoaded(true);
+        // Counted here, not read off the last render: a reset and an append may land before it.
+        if (ev.type === "append") {
+          const at = heard.current;
+          heard.current += ev.items.length;
+          enterFrom.current = { at: Math.min(at, enterFrom.current?.at ?? at), echo: !!enterFrom.current?.echo || outgoingRef.current > 0 };
+        }
+        if (ev.type === "reset") {
+          heard.current = ev.total;
+          enterFrom.current = null;
+        }
         // A reset may come after a send (a slow first load, pi's branch switch): keep what it does not echo.
         if (ev.type === "append" || ev.type === "reset") outgoing.seen(ev.items);
         if (ev.type === "reset") {
@@ -193,6 +214,19 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   // Tool results render inside their call; each turn's work folds into one row.
   const { rows, results } = useMemo(() => buildRows(state.items, state.total - state.items.length), [state.items, state.total]);
   const asked = useMemo(() => pendingQuestions(state.items), [state.items]);
+  useMemo(() => {
+    const from = enterFrom.current;
+    if (!from) return;
+    enterFrom.current = null;
+    const until = performance.now() + ENTER_MS;
+    for (const r of rows) {
+      if (r.at < from.at || entering.current.has(r.key)) continue;
+      if (from.echo && r.kind === "item" && r.item.kind === "user") continue;
+      entering.current.set(r.key, until);
+    }
+  }, [rows]);
+  const now = performance.now();
+  for (const [k, until] of entering.current) if (until <= now) entering.current.delete(k);
   const toggle = useCallback((id: string, wasOpen: boolean) => {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
@@ -221,6 +255,50 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     if (top) savePosition(key, path, { atBottom: false, ...top, total });
   };
 
+  // The frame of the scroll easing down to the end, while it runs.
+  const following = useRef(0);
+  const stopFollow = () => {
+    cancelAnimationFrame(following.current);
+    following.current = 0;
+  };
+  // A hidden window gets no frames: a follow there would stall short of the end, so it lands at once.
+  const landFollow = () => {
+    if (!following.current) return;
+    stopFollow();
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  };
+  useEffect(() => {
+    const hide = () => {
+      if (document.hidden) landFollow();
+    };
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      document.removeEventListener("visibilitychange", hide);
+      stopFollow();
+    };
+  }, []);
+  // Eases down to the end, chasing it as rows measure and more come in.
+  const follow = () => {
+    const el = scrollRef.current;
+    if (!el || following.current) return;
+    if (document.hidden || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const step = () => {
+      const left = el.scrollHeight - el.clientHeight - el.scrollTop;
+      const was = el.scrollTop;
+      el.scrollTop = left > 1 ? was + Math.ceil(left * FOLLOW_STEP) : el.scrollHeight;
+      // At the end, or held where it is: done.
+      if (left <= 1 || el.scrollTop === was) {
+        following.current = 0;
+        return;
+      }
+      following.current = requestAnimationFrame(step);
+    };
+    following.current = requestAnimationFrame(step);
+  };
+
   const prevRows = useRef(0);
   const prevItems = useRef(0);
   useLayoutEffect(() => {
@@ -232,9 +310,14 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       virt.scrollToIndex(Math.max(0, added), { align: "start" });
       anchor.current = null;
     } else if (forceBottom.current || (grew && atBottom.current)) {
-      if (rows.length > 0) virt.scrollToIndex(rows.length - 1, { align: "end" });
-      // Sent messages sit below the rows: the end is past the last row.
-      if (outgoingRef.current > 0 && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (forceBottom.current) {
+        stopFollow();
+        if (rows.length > 0) virt.scrollToIndex(rows.length - 1, { align: "end" });
+        // Sent messages sit below the rows: the end is past the last row.
+        if (outgoingRef.current > 0 && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      } else {
+        follow();
+      }
       forceBottom.current = rows.length === 0;
       atBottom.current = true;
       setUnseen(false);
@@ -310,7 +393,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     if (!content || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       viewHeight.current = el.clientHeight;
-      if (atBottom.current && anchor.current === null) el.scrollTop = el.scrollHeight;
+      // A follow under way chases the new end itself.
+      if (atBottom.current && anchor.current === null && !following.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(el);
     ro.observe(content);
@@ -322,6 +406,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     if (!el) return;
     const resized = el.clientHeight !== viewHeight.current;
     viewHeight.current = el.clientHeight;
+    // Its own scroll, short of the end until the last frame.
+    if (following.current) return;
     // The prompt card giving way to the composer grows the area, and WebKit clamps the scroll
     // to a layout in between, short of the end: that is not the reader leaving it.
     if (resized && atBottom.current) el.scrollTop = el.scrollHeight;
@@ -359,10 +445,11 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     if (!el || !grew) return;
     atBottom.current = true;
     setUnseen(false);
-    el.scrollTop = el.scrollHeight;
+    follow();
   }, [sendCount]);
 
   const jumpBottom = () => {
+    stopFollow();
     if (rows.length > 0) virt.scrollToIndex(rows.length - 1, { align: "end" });
     atBottom.current = true;
     setUnseen(false);
@@ -375,9 +462,14 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const atEnd = rows.length > 0 && scrollTop + (virt.scrollRect?.height ?? 0) >= virt.getTotalSize() - 40;
   const pickedAt = picked === null ? -1 : entries.findIndex((e) => e.key === picked);
   const current = pickedAt >= 0 ? pickedAt : currentEntry(entries, topRow, atEnd);
-  const unpick = () => setPicked(null);
+  // The reader taking the scroll stops the follow; where they leave it decides whether it resumes.
+  const unpick = () => {
+    stopFollow();
+    setPicked(null);
+  };
   // Off the bottom before the scroll lands: an append meanwhile would pull the view back down.
   const jumpTo = (row: number) => {
+    stopFollow();
     atBottom.current = false;
     setPicked(entries.find((e) => e.row === row)?.key ?? null);
     virt.scrollToIndex(row, { align: "start" });
@@ -402,6 +494,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
             return (
               <div
                 key={v.key}
+                className={entering.current.has(row.key) ? "chat-enter" : undefined}
                 data-index={v.index}
                 ref={virt.measureElement}
                 style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${v.start}px)` }}

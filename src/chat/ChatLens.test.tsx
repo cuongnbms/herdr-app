@@ -299,6 +299,108 @@ describe("ChatLens", () => {
       expect(screen.queryByText("New messages")).toBeNull();
     });
 
+    describe("rows coming in", () => {
+      // The virtualizer renders rows only into a scroll area with a height.
+      beforeEach(() => {
+        vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(600);
+        vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+        return () => vi.restoreAllMocks();
+      });
+      const entering = (c: HTMLElement) => [...c.querySelectorAll(".chat-enter")].map((e) => e.textContent);
+
+      it("eases in the rows an append brings, not those a reset loaded", () => {
+        const { container } = render(<ChatLens pane={pane} view={claude} />);
+        send({ type: "reset", items: [{ kind: "user", text: "first" }, { kind: "assistant_text", markdown: "loaded" }], total: 2 });
+        expect(container.querySelectorAll("[data-index]").length).toBe(2);
+        expect(entering(container)).toEqual([]);
+        send({ type: "append", items: [{ kind: "user", text: "second" }, { kind: "assistant_text", markdown: "fresh" }] });
+        expect(entering(container)).toEqual(["second", "fresh"]);
+      });
+
+      it("does not ease in the transcript's echo of a message already shown as sent", async () => {
+        const { container } = render(<ChatLens pane={pane} view={idlePi} />);
+        send({ type: "reset", items: [], total: 0 });
+        const box = screen.getByRole("textbox");
+        fireEvent.change(box, { target: { value: "hello there" } });
+        await act(async () => fireEvent.keyDown(box, { key: "Enter" }));
+        send({ type: "append", items: [{ kind: "user", text: "hello there" }, { kind: "assistant_text", markdown: "hi" }] });
+        expect(entering(container)).toEqual(["hi"]);
+      });
+
+      it("does not ease in again once it has come in", async () => {
+        const { container } = render(<ChatLens pane={pane} view={claude} />);
+        send({ type: "reset", items: [], total: 0 });
+        send({ type: "append", items: [{ kind: "assistant_text", markdown: "fresh" }] });
+        expect(entering(container)).toEqual(["fresh"]);
+        await act(() => new Promise((r) => setTimeout(r, 400)));
+        send({ type: "append", items: [{ kind: "assistant_text", markdown: "later" }] });
+        expect(entering(container)).toEqual(["later"]);
+      });
+    });
+
+    const frame = () => act(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
+
+    it("eases down to the end after an append", async () => {
+      const { el, g } = setup();
+      await frame();
+      g.top = 700;
+      g.height = 1300;
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      await frame();
+      expect(g.top).toBeGreaterThan(700);
+      expect(g.top).toBeLessThan(1000);
+      for (let i = 0; i < 40 && g.top < 1000; i++) await frame();
+      expect(g.top).toBe(1000);
+      fireEvent.scroll(el);
+      expect(screen.queryByText("New messages")).toBeNull();
+    });
+
+    it("keeps following while its own scroll is still short of the end", async () => {
+      const { el, g } = setup();
+      g.height = 1300;
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      await frame();
+      fireEvent.scroll(el);
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "more" }] });
+      expect(screen.queryByText("New messages")).toBeNull();
+    });
+
+    it("lands at the end at once while the window is hidden, which gets no frames", () => {
+      const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+      const { g } = setup();
+      g.height = 1300;
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      expect(g.top).toBe(1000);
+      hidden.mockRestore();
+    });
+
+    it("lands a follow under way when the window is hidden", async () => {
+      const { g } = setup();
+      g.height = 1300;
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      await frame();
+      expect(g.top).toBeLessThan(1000);
+      const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+      fireEvent(document, new Event("visibilitychange"));
+      expect(g.top).toBe(1000);
+      hidden.mockRestore();
+    });
+
+    it("lets the reader's wheel stop the scroll to the end", async () => {
+      const { el, g } = setup();
+      g.height = 1300;
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      await frame();
+      fireEvent.wheel(el);
+      const at = g.top;
+      await frame();
+      await frame();
+      expect(g.top).toBe(at);
+      fireEvent.scroll(el);
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "more" }] });
+      expect(screen.getByText("New messages")).toBeTruthy();
+    });
+
     it("stops following once the reader scrolls up", () => {
       const { el, g } = setup();
       g.top = 300;
