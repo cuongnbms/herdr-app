@@ -10,7 +10,7 @@ import type { WorkspaceRef } from "../workspaces/folder";
 import { useFilesBus } from "./bus";
 import { FileTree } from "./FileTree";
 import { GoToFile } from "./GoToFile";
-import { useFilesPanel } from "./panelStore";
+import { filesHidden, useFilesPanel } from "./panelStore";
 import { panelRoot, panelWorkspace, type Root } from "./root";
 import { filesKey, useFiles, wsKey } from "./store";
 import { useWatch } from "./useWatch";
@@ -21,7 +21,8 @@ const HALF_MIN = 120;
 /** The file tree of the active item's Workspace (else the selected Pane's), under the agent list. */
 export function FilesPanel() {
   const ws = useApp(useShallow(panelWorkspace));
-  const collapsed = useFilesPanel((s) => s.collapsed);
+  const view = useFilesPanel((s) => s.view);
+  const collapsed = useFilesPanel(filesHidden);
   const height = useFilesPanel((s) => s.height);
   const section = useRef<HTMLElement>(null);
   const focusTick = useFilesPanel((s) => s.focusTick);
@@ -49,12 +50,14 @@ export function FilesPanel() {
 
   return (
     <>
-      {!collapsed && <div className="files-split" role="separator" aria-orientation="horizontal" onMouseDown={startDrag} />}
+      {view === "split" && !collapsed && <div className="files-split" role="separator" aria-orientation="horizontal" onMouseDown={startDrag} />}
+      {/* Kept mounted in the agents view: its watch is what reloads the open file. */}
       <section
         ref={section}
-        className={"files-panel" + (collapsed ? " collapsed" : "")}
+        className={"files-panel" + (view === "files" ? " full" : collapsed ? " collapsed" : "")}
         aria-label="Files"
-        style={!collapsed ? { flexBasis: height === null ? "50%" : `${height}px` } : undefined}
+        hidden={view === "agents"}
+        style={view === "split" && !collapsed ? { flexBasis: height === null ? "50%" : `${height}px` } : undefined}
       >
         {ws ? (
           <ActionsProvider>
@@ -75,15 +78,18 @@ export function FilesPanel() {
   );
 }
 
-/** A click on the header toggles the panel, except on the header's own buttons. */
+/** In the split view a click on the header toggles the panel, except on the header's own buttons. */
 function toggleFromHead(e: React.MouseEvent) {
   if ((e.target as Element).closest("button")) return;
   const panel = useFilesPanel.getState();
-  panel.setCollapsed(!panel.collapsed);
+  if (panel.view === "split") panel.setCollapsed(!panel.collapsed);
 }
 
+/** Only the split view collapses: the files view is the panel alone. */
 function CollapseButton() {
   const collapsed = useFilesPanel((s) => s.collapsed);
+  const split = useFilesPanel((s) => s.view === "split");
+  if (!split) return null;
   return (
     <button
       type="button"
@@ -99,7 +105,7 @@ function CollapseButton() {
 
 function WorkspacePanel({ wsRef: ref, section }: { wsRef: WorkspaceRef; section: React.RefObject<HTMLElement | null> }) {
   const [reloadKey, setReloadKey] = useState(0);
-  const collapsed = useFilesPanel((s) => s.collapsed);
+  const collapsed = useFilesPanel(filesHidden);
   const machine = useApp((s) => s.machines[ref.machine_id]);
   const actions = useActions();
   const folder = useFolder(ref);
@@ -213,7 +219,7 @@ function WorkspacePanel({ wsRef: ref, section }: { wsRef: WorkspaceRef; section:
       )}
       {!collapsed && !online && <div className="files-banner files-banner-offline">Machine offline</div>}
       {root && !rootMissing ? (
-        // Kept mounted while collapsed: its watch is what reloads the open file.
+        // Kept mounted while collapsed or hidden: its watch is what reloads the open file.
         <PanelBody
           key={filesKey(ref, root.path)}
           wsRef={ref}

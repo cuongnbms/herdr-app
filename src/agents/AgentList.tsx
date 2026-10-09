@@ -1,8 +1,8 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { herdrCall } from "../lib/ipc";
 import { paneKey } from "../lib/types";
 import type { AgentStatus, PaneView, SessionView, TabView, WorkspaceView } from "../lib/types";
-import { useFilesPanel } from "../files/panelStore";
+import { useFilesPanel, type SidebarView } from "../files/panelStore";
 import { useApp } from "../store/app";
 import { itemKey } from "../store/openItems";
 import type { MenuItem } from "../sidebar/ContextMenu";
@@ -183,26 +183,57 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
   );
 }
 
+/** Closes the list: a row of its own, so it does not read as one more workspace's New agent. */
 function NewWorkspaceButton({ machineId, session }: { machineId: string; session: string }) {
   const a = useActions();
   return (
-    <button className="ws-add" aria-label="New workspace" title="New workspace" onClick={() => a?.newWorkspace(machineId, session)}>
+    <button className="ws-new" aria-label="New workspace" onClick={() => a?.newWorkspace(machineId, session)}>
       <PlusIcon />
+      <span>New workspace</span>
     </button>
+  );
+}
+
+const VIEWS: { view: SidebarView; label: string; Icon: typeof BotIcon }[] = [
+  { view: "agents", label: "Agents", Icon: BotIcon },
+  { view: "files", label: "Files", Icon: FolderIcon },
+  { view: "split", label: "Split", Icon: SplitDownIcon },
+];
+
+/** What the column shows: the agent list, the Files panel, or both. */
+function ViewSwitch() {
+  const view = useFilesPanel((s) => s.view);
+  return (
+    <div
+      className="seg seg-n view-switch"
+      role="group"
+      aria-label="Sidebar view"
+      style={{ "--n": VIEWS.length, "--i": VIEWS.findIndex((v) => v.view === view) } as CSSProperties}
+    >
+      <span className="seg-thumb" />
+      {VIEWS.map(({ view: v, label, Icon }) => (
+        <button key={v} aria-label={label} title={label} aria-pressed={v === view} onClick={() => useFilesPanel.getState().setView(v)}>
+          <Icon />
+        </button>
+      ))}
+    </div>
   );
 }
 
 // Takes no props: memo keeps it out of App's re-renders; it reads the store itself.
 export const AgentList = memo(function AgentList() {
   const viewed = useApp((s) => s.viewed);
+  const listHidden = useFilesPanel((s) => s.view === "files");
   const session = useApp((s) =>
     s.viewed ? s.machines[s.viewed.machine_id]?.sessions.find((x) => x.name === s.viewed!.session) : undefined,
   );
   if (!viewed || !session)
     return (
       <>
-        <div className="agents-head" data-tauri-drag-region />
-        <p className="agents-empty">Select a session</p>
+        <div className="agents-head" data-tauri-drag-region>
+          <ViewSwitch />
+        </div>
+        {!listHidden && <p className="agents-empty">Select a session</p>}
       </>
     );
   const groups = workspaceGroups(session);
@@ -212,11 +243,12 @@ export const AgentList = memo(function AgentList() {
       <div className="agents-head" data-tauri-drag-region>
         <span className="agents-title">{session.name}</span>
         <span className="count">{total}</span>
-        {session.running && <NewWorkspaceButton machineId={viewed.machine_id} session={session.name} />}
+        <ViewSwitch />
       </div>
       {/* Only the list scrolls, so the head needs no background of its own: a second layer of the
           translucent chrome would darken it against the column. */}
-      <div className="agents-list">
+      {/* Hidden rather than unmounted in the files view, so the list keeps its scroll. */}
+      <div className="agents-list" hidden={listHidden}>
         {groups.length === 0 ? (
           <p className="agents-empty">{session.running ? "No panes" : "Session stopped"}</p>
         ) : (
@@ -224,6 +256,7 @@ export const AgentList = memo(function AgentList() {
             <WorkspaceGroup key={g.workspace.workspace_id} machineId={viewed.machine_id} session={session.name} workspace={g.workspace} entries={g.entries} />
           ))
         )}
+        {session.running && <NewWorkspaceButton machineId={viewed.machine_id} session={session.name} />}
       </div>
     </ActionsProvider>
   );

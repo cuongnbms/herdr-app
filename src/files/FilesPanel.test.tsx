@@ -54,6 +54,26 @@ describe("FilesPanel", () => {
     expect(screen.getByRole("button", { name: "Set as workspace folder" })).toBeTruthy();
   });
 
+  it("hides the panel in the agents view but keeps it mounted", () => {
+    useFilesPanel.setState({ view: "agents" });
+    const { container } = render(<FilesPanel />);
+    expect((container.querySelector("section.files-panel") as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector(".files-split")).toBeNull();
+    expect(container.querySelector(".files-panel-body")).toBeTruthy();
+  });
+
+  it("fills the column in the files view, with no divider or collapse", () => {
+    useFilesPanel.setState({ view: "files", collapsed: true });
+    const { container } = render(<FilesPanel />);
+    const section = screen.getByRole("region", { name: "Files" });
+    expect(section.classList.contains("full")).toBe(true);
+    expect(container.querySelector(".files-split")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Collapse files|Expand files/ })).toBeNull();
+    expect((container.querySelector(".files-panel-body") as HTMLElement).hidden).toBe(false);
+    fireEvent.click(screen.getByText(/FILES/));
+    expect((container.querySelector(".files-panel-body") as HTMLElement).hidden).toBe(false);
+  });
+
   it("toggles heavy folders in the tree, hidden by default", async () => {
     render(<FilesPanel />);
     const btn = screen.getByRole("button", { name: "Show heavy folders" });

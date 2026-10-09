@@ -142,6 +142,28 @@ describe("AgentList", () => {
     expect(screen.getByText("New workspace in default", { selector: "h3" })).toBeTruthy();
   });
 
+  it("puts the new workspace button after the last workspace, not in the header", () => {
+    const { container } = render(<AgentList />);
+    const btn = screen.getByRole("button", { name: "New workspace" });
+    expect(container.querySelector(".agents-head")!.contains(btn)).toBe(false);
+    const groups = container.querySelectorAll(".ws-group");
+    expect(groups[groups.length - 1].compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("switches the column between agents, files and both from the header", () => {
+    useFilesPanel.setState({ view: "split" });
+    const { container } = render(<AgentList />);
+    const view = screen.getByRole("group", { name: "Sidebar view" });
+    expect(within(view).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Agents", "Files", "Split"]);
+    expect(within(view).getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(view).getByRole("button", { name: "Files" }));
+    expect(useFilesPanel.getState().view).toBe("files");
+    expect(within(view).getByRole("button", { name: "Files" }).getAttribute("aria-pressed")).toBe("true");
+    expect((container.querySelector(".agents-list") as HTMLElement).hidden).toBe(true);
+    fireEvent.click(within(view).getByRole("button", { name: "Agents" }));
+    expect((container.querySelector(".agents-list") as HTMLElement).hidden).toBe(false);
+  });
+
   it("offers no new workspace button on a stopped session", () => {
     useApp.setState({ machines: { local: { ...m, sessions: [{ ...m.sessions[0], running: false }] } } });
     render(<AgentList />);

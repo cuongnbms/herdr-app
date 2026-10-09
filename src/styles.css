@@ -348,6 +348,18 @@ kbd {
   border-bottom: 1px solid var(--line);
 }
 .agents-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.agents-list[hidden] { display: none; }
+.view-switch { margin-left: auto; }
+.view-switch button { height: 22px; padding: 0 7px; }
+.ws-new {
+  flex: none; display: flex; align-items: center; gap: 7px; margin: 10px 6px 12px; padding: 7px 8px;
+  border: 1px dashed var(--line-2); border-radius: var(--r-md); background: none;
+  color: var(--fg-3); font-size: 12px; text-align: left; cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.ws-new:hover { color: var(--fg); background: var(--hover); border-color: var(--line-2); border-style: solid; }
+.ws-new:focus-visible { outline: none; box-shadow: var(--ring); }
+.ws-new svg { flex: none; width: 14px; height: 14px; }
 .agents-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .count {
   flex: none; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; display: grid; place-items: center;
@@ -1277,6 +1289,9 @@ button.composer-model:disabled { cursor: default; }
 .files-split:hover { background: var(--accent-line); }
 .files-panel { flex: 0 0 50%; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .files-panel.collapsed { flex: none; }
+.files-panel.full { flex: 1 1 auto; border-top: 0; }
+.files-panel.full .files-panel-head { cursor: default; }
+.files-panel[hidden] { display: none; }
 .files-panel-head { flex: none; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 16px; box-sizing: border-box; cursor: pointer; user-select: none; }
 .files-panel-head .files-title { font-weight: 600; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; letter-spacing: 0.06em; color: var(--fg-3); pointer-events: auto; }
 .files-panel-head .icon-btn { width: 22px; height: 22px; }
