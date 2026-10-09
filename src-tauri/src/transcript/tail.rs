@@ -16,6 +16,8 @@ const RESET_ITEMS: usize = 500;
 /// Silence that ends the first backlog when the size header is unreadable.
 const QUIET: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2) };
 const MAX_LINE: usize = 32 * 1024 * 1024;
+/// Lines a transport may print before the header, such as a login banner.
+const BEFORE_HEADER: usize = 64;
 
 pub type Sink = Arc<dyn Fn(ChatEvent) + Send + Sync>;
 
@@ -165,9 +167,12 @@ impl Drop for DoneOnDrop {
     }
 }
 
-/// The header line is `<size> <start>`: the file's size and the byte the stream starts at.
+/// The header line is `herdr-tail <size> <start>`: the file's size and the byte the stream starts at.
 fn parse_header(line: &[u8]) -> Option<(u64, u64)> {
     let mut parts = std::str::from_utf8(line).ok()?.split_whitespace();
+    if parts.next()? != "herdr-tail" {
+        return None;
+    }
     let size = parts.next()?.parse().ok()?;
     let start = parts.next()?.parse().ok()?;
     Some((size, start))
@@ -350,7 +355,7 @@ fn start(
 
 /// What the reader tells the parse thread.
 enum Msg {
-    /// The `<size> <start>` header line, parsed.
+    /// The `herdr-tail <size> <start>` header line, parsed; None when none came.
     Header(Option<(u64, u64)>),
     /// One line without its newline, and its raw length with `\r\n` or `\n`.
     Line(Vec<u8>, usize),
@@ -368,11 +373,8 @@ fn parse_loop(mut st: State, mut rx: tokio::sync::mpsc::Receiver<Msg>) {
         st.adopt_pending();
         match m {
             Msg::Header(h) => {
-                let stale = match h {
-                    Some((_, start)) => start < st.offset,
-                    None => st.offset > 0,
-                };
-                if stale {
+                // Without a header the stream's start is unknown: a resumed tail keeps what it read.
+                if h.is_some_and(|(_, start)| start < st.offset) {
                     if let Some(p) = st.fresh.take() {
                         st.parser = p;
                     }
@@ -424,10 +426,10 @@ async fn read(
 ) {
     // The remote command ends (and kills tail) when its stdin reaches EOF, i.e. when the
     // handle drops: closing stdin is the only reliable cleanup over ssh without a tty.
-    // The header is `<size> <start>`: a file shorter than `offset` is read from byte 0.
+    // The header is `herdr-tail <size> <start>`: a file shorter than `offset` is read from byte 0.
     let script = r#"s=$(wc -c < "$1" 2>/dev/null | tr -d ' '); [ -n "$s" ] || s=0
 if [ "$s" -ge "$2" ]; then o=$2; else o=0; fi
-echo "$s $o"; tail -c +$((o+1)) -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
+echo "herdr-tail $s $o"; tail -c +$((o+1)) -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null"#;
     let argv = t.wrap(
         &["sh".into(), "-c".into(), script.into(), "sh".into(), path, offset.to_string()],
         false,
@@ -453,23 +455,37 @@ echo "$s $o"; tail -c +$((o+1)) -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/n
     let mut buf: Vec<u8> = Vec::new();
     let mut dropping = false;
     let mut header = true;
+    // Whole lines read before the header, read as the file's if none comes.
+    let mut before: Vec<(Vec<u8>, usize)> = Vec::new();
+    let mut last_read: Option<Instant> = None;
     // Raw bytes of the line being read, which may span chunks.
     let mut line_raw = 0usize;
     loop {
         tokio::select! {
             n = stdout.read(&mut chunk) => {
                 let n = match n { Ok(0) | Err(_) => break, Ok(n) => n };
-                // Header bytes are not counted: they are not part of the file.
+                last_read = Some(Instant::now());
+                // Header bytes and lines before it are not counted: they are not part of the file.
                 let mut raw = 0usize;
                 for part in chunk[..n].split_inclusive(|b| *b == b'\n') {
                     let complete = part.ends_with(b"\n");
                     if header {
                         buf.extend_from_slice(part.strip_suffix(b"\n").unwrap_or(part));
+                        line_raw += part.len();
                         if complete {
-                            let head = parse_header(&buf);
-                            buf.clear();
+                            let whole = std::mem::take(&mut line_raw);
+                            if let Some(head) = parse_header(&buf) {
+                                buf.clear();
+                                before.clear();
+                                header = false;
+                                if tx.send(Msg::Header(Some(head))).await.is_err() { return; }
+                            } else {
+                                before.push((std::mem::take(&mut buf), whole));
+                            }
+                        }
+                        if before.len() >= BEFORE_HEADER || buf.len() > MAX_LINE {
                             header = false;
-                            if tx.send(Msg::Header(head)).await.is_err() { return; }
+                            if !headerless(&tx, &mut before).await { return; }
                         }
                         continue;
                     }
@@ -498,11 +514,31 @@ echo "$s $o"; tail -c +$((o+1)) -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/n
                 if tx.send(Msg::Bytes(raw)).await.is_err() { return; }
             }
             _ = tick.tick() => {
+                if header && last_read.is_some_and(|t| t.elapsed() >= QUIET) {
+                    header = false;
+                    if !headerless(&tx, &mut before).await { return; }
+                }
                 if tx.send(Msg::Tick).await.is_err() { return; }
             }
         }
     }
+    if header && !headerless(&tx, &mut before).await {
+        return;
+    }
     let _ = tx.send(Msg::Eof).await;
+}
+
+/// Gives up on the header: the lines read before it are sent as the file's.
+async fn headerless(tx: &tokio::sync::mpsc::Sender<Msg>, before: &mut Vec<(Vec<u8>, usize)>) -> bool {
+    if tx.send(Msg::Header(None)).await.is_err() {
+        return false;
+    }
+    for (bytes, raw) in before.drain(..) {
+        if tx.send(Msg::Line(bytes, raw)).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -793,7 +829,7 @@ mod tests {
         async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
         async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
     }
-    /// Prints a junk first line before the command: the size header is unreadable.
+    /// Prints a junk line before the command, like a login banner.
     struct Junk;
     #[async_trait::async_trait]
     impl crate::transport::Transport for Junk {
@@ -801,6 +837,16 @@ mod tests {
             let mut v: Vec<String> = vec!["sh".into(), "-c".into(), "echo ' junk'; exec \"$@\"".into(), "sh".into()];
             v.extend(argv.iter().cloned());
             v
+        }
+        async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
+        async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
+    }
+    /// Runs the script with its header's marker removed: no header line is recognised.
+    struct NoMarker;
+    #[async_trait::async_trait]
+    impl crate::transport::Transport for NoMarker {
+        fn wrap(&self, argv: &[String], _tty: bool) -> Vec<String> {
+            argv.iter().map(|a| a.replace("herdr-tail ", "")).collect()
         }
         async fn local_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<std::path::PathBuf> { unreachable!() }
         async fn release_socket(&self, _: &crate::transport::SessionEntry) -> crate::error::AppResult<()> { unreachable!() }
@@ -944,9 +990,10 @@ mod tests {
 
     #[test]
     fn reads_the_size_and_start_header() {
-        assert_eq!(parse_header(b"1234 0"), Some((1234, 0)));
-        assert_eq!(parse_header(b"  77 12"), Some((77, 12)));
-        assert_eq!(parse_header(b"1234"), None);
+        assert_eq!(parse_header(b"herdr-tail 1234 0"), Some((1234, 0)));
+        assert_eq!(parse_header(b"herdr-tail   77 12\r"), Some((77, 12)));
+        assert_eq!(parse_header(b"herdr-tail 1234"), None);
+        assert_eq!(parse_header(b"1234 0"), None, "a banner line of two numbers is not the header");
         assert_eq!(parse_header(b" junk"), None);
     }
 
@@ -964,22 +1011,29 @@ mod tests {
     }
 
     async fn frozen(p: &std::path::Path) -> Kept {
-        let (h, _) = collect(Arc::new(crate::transport::local::LocalTransport), p);
+        frozen_via(Arc::new(crate::transport::local::LocalTransport), p, Box::new(Lines)).await
+    }
+
+    async fn frozen_via(t: Arc<dyn crate::transport::Transport>, p: &std::path::Path, parser: Box<dyn Parser>) -> Kept {
+        let h = spawn_tail(t, p.to_string_lossy().into(), parser, Arc::new(|_| {}));
         tokio::time::sleep(Duration::from_millis(400)).await;
         h.freeze().take(Duration::from_millis(500)).expect("kept")
     }
 
     fn resume(p: &std::path::Path, kept: Kept) -> (TailHandle, Arc<Mutex<Vec<ChatEvent>>>) {
+        resume_via(Arc::new(crate::transport::local::LocalTransport), p, kept, Box::new(Lines))
+    }
+
+    fn resume_via(t: Arc<dyn crate::transport::Transport>, p: &std::path::Path, kept: Kept, fresh: Box<dyn Parser>) -> (TailHandle, Arc<Mutex<Vec<ChatEvent>>>) {
         let got: Arc<Mutex<Vec<ChatEvent>>> = Arc::default();
         let g = got.clone();
-        let h = resume_tail(
-            Arc::new(crate::transport::local::LocalTransport),
-            p.to_string_lossy().into(),
-            kept,
-            Box::new(Lines),
-            Arc::new(move |e| g.lock().unwrap().push(e)),
-        );
+        let h = resume_tail(t, p.to_string_lossy().into(), kept, fresh, Arc::new(move |e| g.lock().unwrap().push(e)));
         (h, got)
+    }
+
+    fn append(p: &std::path::Path, bytes: &[u8]) {
+        use std::io::Write;
+        std::fs::OpenOptions::new().append(true).open(p).unwrap().write_all(bytes).unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1055,15 +1109,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unreadable_header_falls_back_to_quiet() {
+    async fn a_line_before_the_header_is_not_read_as_the_file() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("t.jsonl");
         std::fs::write(&p, "a\n").unwrap();
         let (_h, got) = collect(Arc::new(Junk), &p);
+        // Well before QUIET: the header's size, not the quiet rule, sent this Reset.
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        let ev = got.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { total: 1, .. }), "{ev:?}");
+        assert_eq!(texts(&ev[0]), ["a"]);
+    }
+
+    #[tokio::test]
+    async fn no_header_falls_back_to_quiet() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\n").unwrap();
+        let (_h, got) = collect(Arc::new(NoMarker), &p);
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         assert!(got.lock().unwrap().is_empty(), "sent before QUIET");
-        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-        // The real size line becomes an item: only the quiet rule could have sent this Reset.
-        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+        // The unmarked size line is read as the file: only the quiet rule could have sent this Reset.
+        let ev = got.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { total: 2, .. }), "{ev:?}");
+        assert_eq!(texts(&ev[0]), ["2 0", "a"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_line_before_the_header_loses_nothing_on_a_resume() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        std::fs::write(&p, "a\nb\n").unwrap();
+        let kept = frozen_via(Arc::new(Junk), &p, Box::new(Lines)).await;
+        assert_eq!((kept.offset, kept.items.len()), (4, 2));
+        append(&p, b"c\nd\ne\n");
+        let (h, got) = resume_via(Arc::new(Junk), &p, kept, Box::new(Lines));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        {
+            let ev = got.lock().unwrap();
+            assert!(matches!(&ev[0], ChatEvent::Reset { total: 5, .. }), "{ev:?}");
+            assert_eq!(texts(&ev[0]), ["a", "b", "c", "d", "e"]);
+        }
+        let kept = h.freeze().take(Duration::from_millis(500)).expect("kept");
+        assert_eq!((kept.offset, kept.items.len()), (10, 5));
+    }
+
+    #[test]
+    fn a_resumed_tail_without_a_header_keeps_what_it_read() {
+        let mut st = state(Box::new(Lines));
+        st.items.lock().unwrap().push(ChatItem::User { text: "a".into(), ts: None, images: vec![], skills: vec![] });
+        st.offset = 2;
+        st.fresh = Some(Box::new(Lines));
+        let slot = st.kept.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tx.blocking_send(Msg::Header(None)).unwrap();
+        tx.blocking_send(Msg::Line(b"b".to_vec(), 2)).unwrap();
+        drop(tx);
+        parse_loop(st, rx);
+        let kept = slot.take(Duration::from_millis(10)).expect("kept");
+        assert_eq!((kept.offset, kept.items.len()), (4, 2));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pi_an_entry_appended_after_a_resume_attaches_to_its_parent_from_before_the_freeze() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.jsonl");
+        let entry = |id: &str, parent: Option<&str>, text: &str| {
+            format!("{}\n", serde_json::json!({"type":"message","id":id,"parentId":parent,"message":{"role":"user","content":text}}))
+        };
+        std::fs::write(&p, entry("a", None, "A") + &entry("b", Some("a"), "B")).unwrap();
+        let t: Arc<dyn crate::transport::Transport> = Arc::new(crate::transport::local::LocalTransport);
+        let kept = frozen_via(t.clone(), &p, Box::new(crate::transcript::pi::PiParser::default())).await;
+        append(&p, entry("c", Some("a"), "C").as_bytes());
+        let (_h, got) = resume_via(t, &p, kept, Box::new(crate::transcript::pi::PiParser::default()));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let ev = got.lock().unwrap();
+        assert_eq!(texts(&ev[0]), ["A", "C"], "{ev:?}");
     }
 }
