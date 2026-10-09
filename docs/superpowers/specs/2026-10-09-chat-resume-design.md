@@ -94,8 +94,8 @@ tail -c +$((o+1)) -F "$1" & p=$!; cat >/dev/null; kill $p 2>/dev/null
 - `start == offset`: the parser and items carry on. The backlog for the first `Reset` is
   `size - start` bytes, so `caught_up` compares `consumed >= size - start`.
 - `start == 0` while `offset > 0`: the file shrank (truncated or replaced). The items are
-  cleared and the parser is replaced by a fresh `parser_for(agent)`; reading goes on from byte 0.
-  `spawn_tail` therefore takes the agent, not a built parser, when resuming.
+  cleared and the parser is replaced by a fresh one; reading goes on from byte 0.
+  `resume_tail` therefore also takes a fresh parser, built by `chat_open` as for a new tail.
 - A header that does not parse as two numbers counts as unknown size and `start = 0`, and a
   resumed tail then reads from byte 0 with a fresh parser, as for a shrunk file.
 
@@ -116,8 +116,8 @@ interface ReadingPosition { atBottom: boolean; item: number; delta: number; tota
 // key: `${paneKey(pane)}\n${path}`, at most 50 entries, oldest dropped first.
 ```
 
-- `item`: the absolute index of the first item of the top visible row. An item row's key is
-  `i:<abs>`; a work row uses `block.start`, already absolute.
+- `item`: the absolute index of the first item of the top visible row. Rows get an `at` field
+  for it (`block.start` is a timestamp, not an index).
 - `delta`: pixels from that row's top to the viewport's top (≥ 0).
 - `total`: `state.total` when saved.
 
@@ -138,7 +138,7 @@ function restoreTarget(saved: ReadingPosition | undefined, total: number, window
   `bottom`, as today.
 - `item >= windowStart`: `row`. `unseen` is `total > saved.total`.
 - `item < windowStart`: `page` with `before = windowStart`. After the prepend, decide again. At
-  most **10** pages (5000 items); past that, `row` at `windowStart`.
+  most **10** pages (2000 items at `CHAT_PAGE = 200`); past that, `row` at `windowStart`.
 
 For `row`, `ChatLens` clears `forceBottom`, sets `atBottom.current = false`, scrolls the row's
 index to `align: "start"`, adds `delta` to `scrollTop`, and repeats once on the next animation
