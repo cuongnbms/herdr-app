@@ -639,12 +639,16 @@ mod tests {
         open_via(&chats, &pane("p1"), &f).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         open_via(&chats, &pane("p1"), &g).await; // freezes f
-        use std::io::Write;
-        std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"c\n").unwrap();
+        // Same length, so a read from the kept offset sees `c` and a read from byte 0 sees `x`, `y`.
+        std::fs::write(&f, "x\ny\nc\n").unwrap();
         let got = open_via(&chats, &pane("p1"), &f).await;
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         let ev = got.lock().unwrap();
-        assert!(matches!(&ev[0], ChatEvent::Reset { total: 3, .. }), "{ev:?}");
+        let ChatEvent::Reset { items, total: 3 } = &ev[0] else { panic!("{ev:?}") };
+        let texts: Vec<&str> = items.iter().map(|i| match i { ChatItem::User { text, .. } => text.as_str(), _ => "" }).collect();
+        assert_eq!(texts, ["a", "b", "c"], "{ev:?}");
+        drop(ev);
+        assert!(chats.take_frozen(&pane("p1"), &f.to_string_lossy()).is_none(), "f's slot was taken");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
