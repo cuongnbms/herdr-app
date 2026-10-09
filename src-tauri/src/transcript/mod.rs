@@ -8,12 +8,14 @@ mod skill_prompt;
 pub mod tail;
 
 use crate::error::AppError;
+use crate::transport::Transport;
 use crate::view::PaneRef;
 use images::ImageSink;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub use locate::{locate, Located};
 pub use tail::{resume_tail, spawn_tail, FrozenSlot, Kept, Sink, TailHandle};
@@ -208,6 +210,9 @@ pub const PARKED_TAILS: usize = 3;
 /// Frozen tails kept to read on from where they stopped.
 pub const FROZEN_TAILS: usize = 8;
 
+/// How long a resume waits for a frozen tail's parse thread to hand over its state.
+pub const FREEZE_WAIT: Duration = Duration::from_millis(500);
+
 struct Entry {
     path: String,
     /// Where `path` came from, once `set_located` recorded it.
@@ -376,6 +381,22 @@ impl ChatManager {
                 .filter(|l| !l.pending && path.is_none_or(|p| p == l.path))?
         };
         self.reattach(pane, &located.path, sink).then_some(located)
+    }
+
+    /// Opens a tail of `path` onto `sink`: reattaches the Pane's, else resumes its frozen
+    /// one from where it stopped, else spawns a fresh one with `parser`.
+    pub async fn open_tail(&self, pane: &PaneRef, path: &str, t: Arc<dyn Transport>, parser: Box<dyn Parser>, sink: Sink) {
+        if !self.reattach(pane, path, sink.clone()) {
+            let kept = match self.take_frozen(pane, path) {
+                Some(slot) => tokio::task::spawn_blocking(move || slot.take(FREEZE_WAIT)).await.ok().flatten(),
+                None => None,
+            };
+            let handle = match kept {
+                Some(kept) => resume_tail(t, path.to_string(), kept, parser, sink),
+                None => spawn_tail(t, path.to_string(), parser, sink),
+            };
+            self.insert(pane.clone(), path.to_string(), handle);
+        }
     }
 
     /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are frozen.
@@ -599,6 +620,47 @@ mod tests {
             chats.insert(p.clone(), path.clone(), spawn_tail(Arc::new(crate::transport::local::LocalTransport), path, Box::new(Echo), sink));
         }
         got
+    }
+
+    async fn open_via(chats: &ChatManager, p: &PaneRef, path: &std::path::Path) -> Arc<std::sync::Mutex<Vec<ChatEvent>>> {
+        let (sink, got) = recorder();
+        let t: Arc<dyn crate::transport::Transport> = Arc::new(crate::transport::local::LocalTransport);
+        chats.open_tail(p, &path.to_string_lossy(), t, Box::new(Echo), sink).await;
+        got
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reopening_a_frozen_tail_reads_only_what_was_added() {
+        let d = tempfile::tempdir().unwrap();
+        let (f, g) = (d.path().join("f.jsonl"), d.path().join("g.jsonl"));
+        std::fs::write(&f, "a\nb\n").unwrap();
+        std::fs::write(&g, "").unwrap();
+        let chats = ChatManager::default();
+        open_via(&chats, &pane("p1"), &f).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        open_via(&chats, &pane("p1"), &g).await; // freezes f
+        use std::io::Write;
+        std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"c\n").unwrap();
+        let got = open_via(&chats, &pane("p1"), &f).await;
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let ev = got.lock().unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Reset { total: 3, .. }), "{ev:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_empty_slot_falls_back_to_a_fresh_tail() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("f.jsonl");
+        std::fs::write(&f, "a\nb\n").unwrap();
+        let chats = ChatManager::default();
+        let path: String = f.to_string_lossy().into();
+        // A slot nobody fills: its parse thread panicked.
+        chats.tails.lock().unwrap().frozen.push_back((pane("p1"), Frozen { path: path.clone(), located: None, slot: FrozenSlot::default() }));
+        let start = std::time::Instant::now();
+        let got = open_via(&chats, &pane("p1"), &f).await;
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
     }
 
     #[tokio::test]

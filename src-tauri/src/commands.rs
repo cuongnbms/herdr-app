@@ -576,7 +576,10 @@ pub async fn chat_open(
     if let Some(l) = chats.reattach_cached(&pane_ref, path.as_deref(), sink.clone()) {
         return Ok(Located { cached: true, ..l });
     }
-    let located = locate_pane(&mgr, &pane_ref, path).await?;
+    let (located, cached) = match chats.frozen_located(&pane_ref, path.as_deref()) {
+        Some(l) => (l, true),
+        None => (locate_pane(&mgr, &pane_ref, path).await?, false),
+    };
     let transport = mgr.transport(&machine_id)?;
     let parser = transcript::parser_for(&located.agent).ok_or_else(|| {
         AppError::new(
@@ -584,15 +587,11 @@ pub async fn chat_open(
             format!("no transcript parser for agent '{}'", located.agent),
         )
     })?;
-    if !chats.reattach(&pane_ref, &located.path, sink.clone()) {
-        chats.insert(
-            pane_ref.clone(),
-            located.path.clone(),
-            transcript::spawn_tail(transport, located.path.clone(), parser, sink),
-        );
-    }
+    chats
+        .open_tail(&pane_ref, &located.path, transport, parser, sink)
+        .await;
     chats.set_located(&pane_ref, &located);
-    Ok(located)
+    Ok(Located { cached, ..located })
 }
 
 #[tauri::command]
