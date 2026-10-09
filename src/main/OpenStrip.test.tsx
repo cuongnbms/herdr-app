@@ -74,6 +74,17 @@ describe("OpenStrip", () => {
     expect(item.closest(".agent-tabs")?.className).toContain("tabs-one-line");
   });
 
+  it("shows a terminal pane's tab with a prompt icon", () => {
+    const withShell = structuredClone(m);
+    withShell.sessions[0].workspaces[0].tabs[0].panes.push({ ...pane("p4", "zsh", "unknown"), agent: null });
+    useApp.getState().upsertMachine(withShell);
+    useApp.getState().select(ref("p4"));
+    render(<OpenStrip />);
+    const tab = screen.getByRole("tab", { name: "zsh, remora" });
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect(within(tab.closest(".files-tab-item") as HTMLElement).getByRole("img", { name: "no agent" })).toBeTruthy();
+  });
+
   it("puts the Workspace under the title when tabs use two lines", () => {
     useTabLayout.setState({ layout: "two-lines" });
     openPinned("p3");

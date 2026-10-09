@@ -200,7 +200,7 @@ export const useApp = create<AppState>((set, get) => ({
         ? s.openItems
         : findItem(s.openItems, itemKey({ kind: "agent", ref }))
           ? setActive(s.openItems, itemKey({ kind: "agent", ref }))
-          : findPane(s.machines, ref)?.agent
+          : findPane(s.machines, ref)
             ? openItem(s.openItems, { kind: "agent", ref }, { pin: false })
             : setActive(s.openItems, null),
     })),

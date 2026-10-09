@@ -4,7 +4,7 @@ import type { WorkspaceRef } from "../workspaces/folder";
 
 export type CloseScope = "others" | "right" | "all";
 
-/** An agent pane or a file the user has opened. */
+/** A pane (an agent or a plain terminal) or a file the user has opened. */
 export type OpenItem = { kind: "agent"; ref: PaneRef } | { kind: "file"; ws: WorkspaceRef; root: string; rel: string };
 
 /** Everything the user has opened, across machines and workspaces, in the order opened. */
