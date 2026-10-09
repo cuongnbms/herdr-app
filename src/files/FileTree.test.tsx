@@ -96,7 +96,7 @@ describe("FileTree", () => {
     expect(lib.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("double-clicking a folder toggles it once", async () => {
+  it("every click toggles a folder, however quick", async () => {
     vi.mocked(invoke).mockReset();
     vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
       args.rel === "" ? [{ name: "src", kind: "dir" }] : [{ name: "x.ts", kind: "file" }],
@@ -104,9 +104,25 @@ describe("FileTree", () => {
     render(<FileTree machineId="local" root="/r" filesKey="local/default/w6" onOpen={() => {}} reloadKey={0} />);
     const src = (await screen.findByText("src")).closest("[role=treeitem]") as HTMLElement;
     fireEvent.click(src, { detail: 1 });
+    expect(src.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(src, { detail: 2 });
     fireEvent.doubleClick(src);
-    expect(src.getAttribute("aria-expanded")).toBe("true");
+    expect(src.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("a quick click on another folder still toggles it", async () => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (_cmd, args: any) =>
+      args.rel === "" ? [{ name: "docs", kind: "dir" }, { name: "infra", kind: "dir" }] : [],
+    );
+    render(<FileTree machineId="local" root="/r" filesKey="local/default/w6b" onOpen={() => {}} reloadKey={0} />);
+    const infra = (await screen.findByText("infra")).closest("[role=treeitem]") as HTMLElement;
+    const docs = screen.getByText("docs").closest("[role=treeitem]") as HTMLElement;
+    // macOS counts clicks by time, not by row: the click on docs arrives as the second of a double click.
+    fireEvent.click(infra, { detail: 1 });
+    fireEvent.click(docs, { detail: 2 });
+    expect(infra.getAttribute("aria-expanded")).toBe("true");
+    expect(docs.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("has one tab stop: the first item, then the last focused one", async () => {

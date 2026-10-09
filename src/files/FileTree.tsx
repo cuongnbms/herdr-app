@@ -352,11 +352,10 @@ export function FileTree({ machineId, root, filesKey, onOpen, onMoved, reloadKey
             data-kind={ent.kind}
             className={`files-tree-row ${kindClass(ent.kind)}${open ? " open" : ""}`}
             style={{ paddingLeft: 8 + depth * 14 }}
-            onClick={(e) => {
-              // The second click of a double click would collapse what the first expanded.
-              if (isDir) {
-                if (e.detail <= 1) toggleDir(filesKey, rel);
-              } else onOpen(rel, false);
+            onClick={() => {
+              // Every click toggles a folder, however quick: a fast second click closes it again.
+              if (isDir) toggleDir(filesKey, rel);
+              else onOpen(rel, false);
             }}
             onDoubleClick={() => {
               if (!isDir) onOpen(rel, true);
