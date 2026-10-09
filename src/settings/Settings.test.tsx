@@ -9,6 +9,7 @@ import { DEFAULT_QUICK_REPLIES, loadQuickReplies, QUICK_REPLIES_MAX, useQuickRep
 import { Settings } from "./Settings";
 import { DEFAULTS, loadFonts, useSettings } from "./store";
 import { useTheme } from "./theme";
+import { loadTabLayout, useTabLayout } from "./tabLayout";
 
 beforeEach(() => {
   localStorage.clear();
@@ -32,6 +33,24 @@ describe("Settings dialog", () => {
     expect(useTheme.getState()).toMatchObject({ pref: "light", theme: "light" });
     expect(screen.getByRole("button", { name: "Light" }).getAttribute("aria-pressed")).toBe("true");
     expect(JSON.parse(localStorage.getItem("herdr-app:settings")!).theme).toBe("light");
+  });
+
+  it("switches the tab layout from the Appearance section and keeps it", () => {
+    useTabLayout.setState({ layout: "one-line" });
+    render(<Settings />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Appearance" }));
+    expect(screen.getByRole("button", { name: "One line" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Two lines" }));
+    expect(useTabLayout.getState().layout).toBe("two-lines");
+    expect(screen.getByRole("button", { name: "Two lines" }).getAttribute("aria-pressed")).toBe("true");
+    expect(loadTabLayout()).toBe("two-lines");
+  });
+
+  it("reads one line when no tab layout or an unknown one is saved", () => {
+    expect(loadTabLayout()).toBe("one-line");
+    localStorage.setItem("herdr-app:settings", JSON.stringify({ tabLayout: "three-lines" }));
+    expect(loadTabLayout()).toBe("one-line");
   });
 
   it("opens as a dialog on the General section and switches sections", () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApp } from "../store/app";
 import { OpenStrip } from "./OpenStrip";
@@ -6,6 +6,7 @@ import { itemKey, NO_ITEMS } from "../store/openItems";
 import { draftKey, useDrafts } from "../files/drafts";
 import { filesKey } from "../files/store";
 import { UnsavedDialog } from "../files/unsaved";
+import { useTabLayout } from "../settings/tabLayout";
 import type { MachineView, PaneView } from "../lib/types";
 
 const pane = (id: string, title: string, status: PaneView["status"]): PaneView => ({
@@ -39,6 +40,7 @@ describe("OpenStrip", () => {
   beforeEach(() => {
     useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
     useApp.getState().upsertMachine(m);
+    useTabLayout.setState({ layout: "one-line" });
   });
 
   it("shows nothing until an agent is opened", () => {
@@ -53,13 +55,35 @@ describe("OpenStrip", () => {
     useApp.getState().select(ref("p3"));
     render(<OpenStrip />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["Mermaid diagram", "Webhook retry", "Bug button"]);
+    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["Mermaid diagram, remora", "Webhook retry, bot", "Bug button, herdr-app"]);
     expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["false", "false", "true"]);
     expect(screen.getByRole("img", { name: "status blocked" })).toBeTruthy();
     expect(tabs[0].closest("[title]")?.getAttribute("title")).toBe("local/default · remora · Mermaid diagram");
     expect(tabs[1].closest("[title]")?.getAttribute("title")).toBe("local/pegabot · bot · Webhook retry");
     fireEvent.click(tabs[1]);
     expect(useApp.getState().selected).toEqual(ref("p1", "pegabot"));
+  });
+
+  it("shows the agent's icon with its status, and the Workspace before the title on one line", () => {
+    openPinned("p3");
+    render(<OpenStrip />);
+    const item = screen.getByRole("tab", { name: /Bug button/ }).closest(".files-tab-item") as HTMLElement;
+    expect(within(item).getByRole("img", { name: "claude" })).toBeTruthy();
+    expect(within(item).getByRole("img", { name: "status blocked" })).toBeTruthy();
+    expect([...item.querySelectorAll(".tab-project, .files-tab-name")].map((e) => e.textContent)).toEqual(["herdr-app", "Bug button"]);
+    expect(item.closest(".agent-tabs")?.className).toContain("tabs-one-line");
+  });
+
+  it("puts the Workspace under the title when tabs use two lines", () => {
+    useTabLayout.setState({ layout: "two-lines" });
+    openPinned("p3");
+    useApp.getState().openFile({ machine_id: "local", session: "default", workspace_id: "w1" }, "/r", "README.md", { pin: true });
+    render(<OpenStrip />);
+    const item = (name: RegExp) => screen.getByRole("tab", { name }).closest(".files-tab-item") as HTMLElement;
+    const texts = (e: HTMLElement) => [...e.querySelectorAll(".files-tab-name, .tab-project")].map((x) => x.textContent);
+    expect(texts(item(/Bug button/))).toEqual(["Bug button", "herdr-app"]);
+    expect(texts(item(/README/))).toEqual(["README.md", "remora"]);
+    expect(item(/Bug button/).closest(".agent-tabs")?.className).toContain("tabs-two-lines");
   });
 
   it("italicises the preview tab and pins it on double click", () => {
@@ -100,7 +124,7 @@ describe("OpenStrip", () => {
     useApp.getState().openFile({ machine_id: "local", session: "default", workspace_id: "w2" }, "/r", "src/main.ts", { pin: true });
     useApp.getState().select(ref("p1"));
     render(<OpenStrip />);
-    const tab = screen.getByRole("tab", { name: "main.ts" });
+    const tab = screen.getByRole("tab", { name: "main.ts, herdr-app" });
     expect(tab.closest(".files-tab-item")?.getAttribute("title")).toBe("local/default · herdr-app · src/main.ts");
     fireEvent.click(tab);
     expect(useApp.getState().openItems.active).toBe("file:local/default/w2|/r|src/main.ts");
@@ -111,8 +135,8 @@ describe("OpenStrip", () => {
     openPinned("p1");
     useApp.getState().openFile({ machine_id: "local", session: "default", workspace_id: "w2" }, "/r", "a.md", { pin: true });
     render(<OpenStrip />);
-    expect(screen.getByRole("tab", { name: "a.md" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: "Mermaid diagram" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "a.md, herdr-app" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Mermaid diagram, remora" }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("drags a tab onto another to move it there", () => {

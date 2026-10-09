@@ -3,6 +3,8 @@ import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { ContextMenu, type MenuItem } from "../sidebar/ContextMenu";
 import { StatusDot } from "../sidebar/StatusDot";
+import { AgentIcon } from "../agents/AgentIcon";
+import { useTabLayout } from "../settings/tabLayout";
 import { closeItemsGuarded } from "../files/closeGuard";
 import { useShallow } from "zustand/react/shallow";
 import { useDrafts } from "../files/drafts";
@@ -14,6 +16,8 @@ import { CloseIcon, FileIcon } from "../ui/icons";
 interface Entry {
   key: string;
   label: string;
+  /** The Workspace's label, shown with the title. */
+  project: string;
   /** Hover text: where the item lives, then what it is. */
   title: string;
   /** Set for an agent item; a file item shows an icon instead. */
@@ -25,22 +29,22 @@ function entries(machines: Record<string, MachineView>, items: OpenItem[]): Entr
     const key = itemKey(item);
     if (item.kind === "file") {
       const place = placeOf(machines, item.ws.machine_id, item.ws.session, item.ws.workspace_id);
-      return place ? [{ key, label: item.rel.split("/").pop() ?? item.rel, title: `${place} · ${item.rel}` }] : [];
+      return place ? [{ key, label: item.rel.split("/").pop() ?? item.rel, project: place.project, title: `${place.where} · ${item.rel}` }] : [];
     }
     const { machine_id, session, pane_id } = item.ref;
     const machine = machines[machine_id];
     for (const w of machine?.sessions.find((s) => s.name === session)?.workspaces ?? [])
       for (const t of w.tabs)
         for (const pane of t.panes)
-          if (pane.pane_id === pane_id) return [{ key, label: pane.title, title: `${machine.label}/${session} · ${w.label} · ${pane.title}`, pane }];
+          if (pane.pane_id === pane_id) return [{ key, label: pane.title, project: w.label, title: `${machine.label}/${session} · ${w.label} · ${pane.title}`, pane }];
     return [];
   });
 }
 
-function placeOf(machines: Record<string, MachineView>, machine_id: string, session: string, workspace_id: string): string | null {
+function placeOf(machines: Record<string, MachineView>, machine_id: string, session: string, workspace_id: string): { where: string; project: string } | null {
   const machine = machines[machine_id];
   const w = machine?.sessions.find((s) => s.name === session)?.workspaces.find((x) => x.workspace_id === workspace_id);
-  return w ? `${machine.label}/${session} · ${w.label}` : null;
+  return w ? { where: `${machine.label}/${session} · ${w.label}`, project: w.label } : null;
 }
 
 /** The agents and files opened in any session, like an editor's open files. */
@@ -60,6 +64,7 @@ export const OpenStrip = memo(function OpenStrip() {
   const activate = useApp((s) => s.activateItem);
   const pin = useApp((s) => s.pinItem);
   const moveItem = useApp((s) => s.moveItem);
+  const layout = useTabLayout((s) => s.layout);
   // Keys of the dirty Drafts: unchanged by keystrokes once a Draft is dirty.
   const dirty = useDrafts(useShallow((s) => Object.entries(s.drafts).filter(([, d]) => d.dirty).map(([k]) => k)));
   const [menu, setMenu] = useState<{ x: number; y: number; key: string } | null>(null);
@@ -81,8 +86,8 @@ export const OpenStrip = memo(function OpenStrip() {
   };
 
   return (
-    <div className="files-tabs agent-tabs" role="tablist" aria-label="Open items">
-      {tabs.map(({ key, label, title, pane }) => {
+    <div className={`files-tabs agent-tabs tabs-${layout}`} role="tablist" aria-label="Open items">
+      {tabs.map(({ key, label, project, title, pane }) => {
         const isActive = key === active;
         const unsaved = dirty.includes(key);
         const state = `${isActive ? " active" : ""}${key === preview ? " preview" : ""}`;
@@ -141,9 +146,19 @@ export const OpenStrip = memo(function OpenStrip() {
               }
             }}
           >
-            {pane ? <StatusDot status={pane.status} /> : <FileIcon aria-hidden="true" />}
+            <span className="tab-lead">
+              {pane ? (
+                <>
+                  <AgentIcon agent={pane.agent} />
+                  <StatusDot status={pane.status} />
+                </>
+              ) : (
+                <FileIcon aria-hidden="true" />
+              )}
+            </span>
             <span
               role="tab"
+              aria-label={`${label}, ${project}`}
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
               className={`files-tab${state}`}
@@ -154,7 +169,18 @@ export const OpenStrip = memo(function OpenStrip() {
                 }
               }}
             >
-              <span className="files-tab-name">{label}</span>
+              {layout === "two-lines" ? (
+                <>
+                  <span className="files-tab-name">{label}</span>
+                  <span className="tab-project">{project}</span>
+                </>
+              ) : (
+                <>
+                  <span className="tab-project">{project}</span>
+                  <span className="tab-sep" aria-hidden="true">›</span>
+                  <span className="files-tab-name">{label}</span>
+                </>
+              )}
             </span>
             <button
               type="button"

@@ -9,6 +9,7 @@ import { DEFAULT_QUICK_REPLIES, moveReply, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CH
 import { dropZone } from "../sidebar/dnd";
 import { CHAT_SIZE, DEFAULTS, TERM_SIZE, useSettings } from "./store";
 import { THEME_PREFS, useTheme } from "./theme";
+import { TAB_LAYOUTS, useTabLayout } from "./tabLayout";
 
 /** How far one press of − or + moves a font size, in px. */
 const SIZE_STEP = 0.5;
@@ -85,6 +86,8 @@ function AppearanceSettings() {
   const pref = useTheme((s) => s.pref);
   const setPref = useTheme((s) => s.setPref);
   const i = THEME_PREFS.findIndex((t) => t.id === pref);
+  const layout = useTabLayout((s) => s.layout);
+  const setLayout = useTabLayout((s) => s.setLayout);
   return (
     <>
       <div className="setting-row">
@@ -104,6 +107,23 @@ function AppearanceSettings() {
         </div>
       </div>
       <p className="note">System follows the macOS appearance.</p>
+      <div className="setting-row">
+        <span id="tab-layout-label">Tabs</span>
+        <div
+          className="seg seg-n"
+          role="group"
+          aria-labelledby="tab-layout-label"
+          style={{ "--n": TAB_LAYOUTS.length, "--i": TAB_LAYOUTS.findIndex((l) => l.id === layout) } as CSSProperties}
+        >
+          <span className="seg-thumb" />
+          {TAB_LAYOUTS.map((l) => (
+            <button key={l.id} aria-pressed={l.id === layout} onClick={() => setLayout(l.id)}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="note">Each open tab shows its agent and workspace; two lines put the workspace under the title.</p>
     </>
   );
 }
