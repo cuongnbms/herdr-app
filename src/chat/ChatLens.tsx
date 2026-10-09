@@ -298,13 +298,18 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     }
   }, [loaded, located?.path, rows.length, state.items.length, restoreTick]);
 
+  // The scroll area's height when last seen: a scroll that comes with a new height is the layout's.
+  const viewHeight = useRef(0);
   // Rows measure taller than their estimate after the jump, and the working indicator
   // shrinks the viewport: neither fires a scroll event, so stay pinned while at the bottom.
   useEffect(() => {
     const el = scrollRef.current;
     const content = contentRef.current;
-    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    if (!el) return;
+    viewHeight.current = el.clientHeight;
+    if (!content || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
+      viewHeight.current = el.clientHeight;
       if (atBottom.current && anchor.current === null) el.scrollTop = el.scrollHeight;
     });
     ro.observe(el);
@@ -315,7 +320,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+    const resized = el.clientHeight !== viewHeight.current;
+    viewHeight.current = el.clientHeight;
+    // The prompt card giving way to the composer grows the area, and WebKit clamps the scroll
+    // to a layout in between, short of the end: that is not the reader leaving it.
+    if (resized && atBottom.current) el.scrollTop = el.scrollHeight;
+    else atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
     if (atBottom.current) setUnseen(false);
     if (el.scrollTop <= 0 && !loadingOlder.current) {
       const before = state.total - state.items.length;

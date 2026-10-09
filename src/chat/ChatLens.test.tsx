@@ -268,6 +268,46 @@ describe("ChatLens", () => {
     });
   });
 
+  describe("following the end", () => {
+    const claude = { status: "working", agent: "claude", title: "claude" } as PaneView;
+    const send = (ev: unknown) => act(() => channels[channels.length - 1].onmessage(ev));
+    // jsdom lays nothing out: the scroll area's geometry is set by hand.
+    const geometry = (el: HTMLElement) => {
+      const g = { top: 0, height: 1000, view: 300 };
+      Object.defineProperty(el, "scrollTop", { configurable: true, get: () => g.top, set: (v: number) => (g.top = Math.min(v, g.height - g.view)) });
+      Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => g.height });
+      Object.defineProperty(el, "clientHeight", { configurable: true, get: () => g.view });
+      return g;
+    };
+    const setup = () => {
+      const { container } = render(<ChatLens pane={pane} view={claude} />);
+      send({ type: "reset", items: [{ kind: "user", text: "a" }], total: 1 });
+      const el = container.querySelector(".chat-scroll") as HTMLElement;
+      const g = geometry(el);
+      g.top = 700;
+      fireEvent.scroll(el);
+      return { el, g };
+    };
+
+    it("keeps following when the scroll area grows and the browser scrolls it off the end", () => {
+      // The prompt card gives way to the composer: WebKit clamps the scroll to a layout in between.
+      const { el, g } = setup();
+      g.view = 531;
+      g.top = 300;
+      fireEvent.scroll(el);
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      expect(screen.queryByText("New messages")).toBeNull();
+    });
+
+    it("stops following once the reader scrolls up", () => {
+      const { el, g } = setup();
+      g.top = 300;
+      fireEvent.scroll(el);
+      send({ type: "append", items: [{ kind: "assistant_text", markdown: "next" }] });
+      expect(screen.getByText("New messages")).toBeTruthy();
+    });
+  });
+
   describe("the reading position", () => {
     const at = { agent: "claude", path: "/h/a.jsonl", ambiguous: false, candidates: ["/h/a.jsonl"], pending: false };
     const window = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => ({ kind: "user", text: `m${from + i}` }));
