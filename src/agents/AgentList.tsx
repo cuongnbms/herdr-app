@@ -7,6 +7,8 @@ import { useApp } from "../store/app";
 import { itemKey } from "../store/openItems";
 import type { MenuItem } from "../sidebar/ContextMenu";
 import { ActionsProvider, useActions } from "../sidebar/actions";
+import { Chevron } from "../sidebar/Sidebar";
+import { StatusDot } from "../sidebar/StatusDot";
 import { BotIcon, CloseIcon, FolderIcon, FolderOpenIcon, PencilIcon, PlusIcon, SplitDownIcon, SplitRightIcon, TabPlusIcon, TerminalIcon } from "../ui/icons";
 import { folderName, setFolder, suggestFolder, useFolder } from "../workspaces/folder";
 import { AgentIcon } from "./AgentIcon";
@@ -102,9 +104,21 @@ function AgentCard({ machineId, session, entry, reorder, tabRow }: { machineId: 
   );
 }
 
+/** What a collapsed workspace still shows: a pane waiting for input outranks one working. */
+function urgentStatus(entries: PaneEntry[]): AgentStatus | null {
+  for (const status of ["blocked", "working"] as const) if (entries.some((e) => e.pane.status === status)) return status;
+  return null;
+}
+
 function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machineId: string; session: string; workspace: WorkspaceView; entries: PaneEntry[] }) {
   const a = useActions();
   const ref = { machine_id: machineId, session, workspace_id: ws.workspace_id };
+  const openKey = `ws:${machineId}/${session}/${ws.workspace_id}`;
+  const open = useApp((s) => s.expanded[openKey] ?? true);
+  const toggle = useApp((s) => s.toggle);
+  // Collapsed, the header stands in for its panes, so it carries the selection.
+  const holdsSelected = useApp((s) => s.selected !== null && entries.some((e) => paneKey(s.selected!) === paneKey({ machine_id: machineId, session, pane_id: e.pane.pane_id })));
+  const urgent = open ? null : urgentStatus(entries);
   const folder = useFolder(ref);
   // A folder named like the Workspace only repeats the label; its path stays in the tooltip.
   const folderText = folder ? folderName(folder) : "no folder";
@@ -148,15 +162,24 @@ function WorkspaceGroup({ machineId, session, workspace: ws, entries }: { machin
     : [];
   return (
     <section role="group" aria-label={ws.label} className="ws-group">
-      <div className="ws-head" title={folder ?? "no folder"} onContextMenu={(e) => a?.menu(e, items)}>
-        <FolderIcon className="ws-icon" />
-        <span className="ws-label">{ws.label}</span>
-        {folderText !== ws.label && <span className="ws-folder">{folderText}</span>}
+      <div className={"ws-head" + (!open && holdsSelected ? " has-active" : "")} title={folder ?? "no folder"} onContextMenu={(e) => a?.menu(e, items)}>
+        <button className="ws-toggle" aria-label={ws.label} aria-expanded={open} onClick={() => toggle(openKey, open)}>
+          <Chevron open={open} />
+          <FolderIcon className="ws-icon" />
+          <span className="ws-label">{ws.label}</span>
+          {folderText !== ws.label && <span className="ws-folder">{folderText}</span>}
+          {!open && (
+            <span className="ws-sum">
+              {urgent && <StatusDot status={urgent} />}
+              <span className="ws-count">{entries.length}</span>
+            </span>
+          )}
+        </button>
         <button className="ws-add" aria-label={`New agent in ${ws.label}`} onClick={add}>
           <PlusIcon />
         </button>
       </div>
-      {entries.length > 0 && (
+      {open && entries.length > 0 && (
         <ul className="agent-cards">
           {tabRuns(entries).map((run) =>
             run.length > 1 ? (

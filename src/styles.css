@@ -367,17 +367,31 @@ kbd {
 }
 .agents-empty { margin: 0; padding: 24px 16px; color: var(--fg-3); text-align: center; }
 .agent-cards { list-style: none; margin: 0; padding: 2px 6px; display: flex; flex-direction: column; gap: 1px; }
+/* A workspace's panes hang under its header like a sidebar group's children. */
+.ws-group > .agent-cards { margin: 0 8px 4px 21px; padding: 2px 0 2px 6px; border-left: 1px solid var(--line); }
 .tab-group {
   margin: 2px 0; border: 1px solid var(--line); border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
 .tab-group > .agent-cards { padding: 2px; }
-.ws-group + .ws-group { margin-top: 8px; }
-.ws-head { display: flex; align-items: center; gap: 7px; padding: 12px 14px 4px; min-width: 0; }
-.ws-icon { flex: none; width: 14px; height: 14px; color: var(--fg-2); }
+.ws-group + .ws-group { margin-top: 2px; }
+/* Same row as a sidebar group: chevron, folder, bold label. */
+.ws-head {
+  display: flex; align-items: center; gap: 4px; height: 28px; margin: 1px 8px; padding-right: 3px; min-width: 0;
+  border-radius: var(--r-sm); transition: background var(--t-fast);
+}
+.ws-group:first-child > .ws-head { margin-top: 8px; }
+.ws-head:hover { background: var(--hover); }
+.ws-head.has-active { background: var(--active); }
+.ws-toggle {
+  flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 0 0 8px;
+  border: 0; background: none; color: var(--fg); text-align: left; cursor: pointer;
+}
+.ws-icon { flex: none; width: 14px; height: 14px; color: var(--fg-3); }
 .ws-label { flex: 0 1 auto; min-width: 0; max-width: 60%; color: var(--fg); font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-label:has(+ .ws-add) { max-width: none; } /* no folder text beside it */
+.ws-label:not(:has(+ .ws-folder)) { max-width: none; } /* no folder text beside it */
 .ws-folder { flex: 1; min-width: 0; color: var(--fg-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-sum { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 7px; color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .ws-add {
   flex: none; margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; padding: 0;
   border: none; border-radius: var(--r-md); background: none; color: var(--fg-3); cursor: pointer;
@@ -393,6 +407,7 @@ kbd {
 /* Hover on the row, not the card: the close button sits outside the card. :where keeps
    this below .active/.blocked so their backgrounds still win. */
 :where(.agent-card-item:hover) > .agent-card { background: var(--hover); }
+:where(.agent-card-item:hover) > .agent-card .agent-card-title, .agent-card.active .agent-card-title { color: var(--fg); }
 .agent-card.active { background: var(--accent-soft); border-color: var(--accent-line); }
 .agent-card.active::before {
   content: ""; position: absolute; left: -1px; top: 7px; bottom: 7px; width: 3px;
@@ -405,7 +420,8 @@ kbd {
 }
 .agent-card.blocked.active { background: color-mix(in srgb, var(--amber) 12%, var(--surface-3)); }
 .agent-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.agent-card-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Lighter than the workspace label above it; full strength once hovered or selected. */
+.agent-card-title { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .agent-card-meta .badge { margin-left: 0; }
 .agent-card-item { position: relative; }

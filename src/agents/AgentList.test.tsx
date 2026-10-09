@@ -45,7 +45,7 @@ describe("AgentList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    useApp.setState({ machines: { local: m }, order: ["local"], selected: null, viewed: { machine_id: "local", session: "default" } });
+    useApp.setState({ machines: { local: m }, order: ["local"], selected: null, expanded: {}, viewed: { machine_id: "local", session: "default" } });
   });
 
   it("lists every pane of the viewed session with agent icon and status badge", () => {
@@ -94,6 +94,48 @@ describe("AgentList", () => {
     expect(within(screen.getByRole("group", { name: "web" })).getAllByRole("listitem")).toHaveLength(3);
     expect(within(screen.getByRole("group", { name: "empty" })).getByText("no folder")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New agent in empty" })).toBeTruthy();
+  });
+
+  it("collapses a workspace from its header and remembers it", () => {
+    const { unmount } = render(<AgentList />);
+    const web = screen.getByRole("group", { name: "web" });
+    const toggle = within(web).getByRole("button", { name: "web", expanded: true });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(web).queryByText("Guard export")).toBeNull();
+    // The other workspaces stay open, and the add button stays on the collapsed header.
+    expect(screen.getByText("Idempotent payments")).toBeTruthy();
+    expect(within(web).getByRole("button", { name: "New agent in web" })).toBeTruthy();
+    unmount();
+    render(<AgentList />);
+    expect(within(screen.getByRole("group", { name: "web" })).queryByText("Guard export")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "web", expanded: false }));
+    expect(screen.getByText("Guard export")).toBeTruthy();
+  });
+
+  it("sums up a collapsed workspace: its pane count and its most urgent status", () => {
+    render(<AgentList />);
+    fireEvent.click(screen.getByRole("button", { name: "web" }));
+    fireEvent.click(screen.getByRole("button", { name: "checkout-api" }));
+    const web = screen.getByRole("group", { name: "web" });
+    expect(web.querySelector(".ws-count")?.textContent).toBe("3");
+    expect(within(web).getByRole("img", { name: "status blocked" })).toBeTruthy();
+    // Nothing waiting or running: only the count.
+    const api = screen.getByRole("group", { name: "checkout-api" });
+    expect(api.querySelector(".ws-count")?.textContent).toBe("1");
+    expect(within(api).queryByRole("img", { name: /^status/ })).toBeNull();
+    // Open workspaces show their panes instead.
+    expect(screen.getByRole("group", { name: "empty" }).querySelector(".ws-count")).toBeNull();
+  });
+
+  it("marks a collapsed workspace that holds the selected pane", () => {
+    useApp.setState({ selected: { machine_id: "local", session: "default", pane_id: "p3" } });
+    render(<AgentList />);
+    const web = screen.getByRole("group", { name: "web" });
+    fireEvent.click(screen.getByRole("button", { name: "web" }));
+    expect(web.querySelector(".ws-head")?.className).toContain("has-active");
+    fireEvent.click(screen.getByRole("button", { name: "checkout-api" }));
+    expect(screen.getByRole("group", { name: "checkout-api" }).querySelector(".ws-head")?.className).not.toContain("has-active");
   });
 
   it("boxes the panes of a multi-pane tab together, leaving single-pane tabs bare", () => {
@@ -263,7 +305,7 @@ describe("AgentList tab reordering", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    useApp.setState({ machines: { local: m }, order: ["local"], selected: null, viewed: { machine_id: "local", session: "default" } });
+    useApp.setState({ machines: { local: m }, order: ["local"], selected: null, expanded: {}, viewed: { machine_id: "local", session: "default" } });
   });
 
   it("moves a tab after the tab it is dropped on", () => {
