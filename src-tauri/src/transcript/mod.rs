@@ -384,19 +384,22 @@ impl ChatManager {
     }
 
     /// Opens a tail of `path` onto `sink`: reattaches the Pane's, else resumes its frozen
-    /// one from where it stopped, else spawns a fresh one with `parser`.
-    pub async fn open_tail(&self, pane: &PaneRef, path: &str, t: Arc<dyn Transport>, parser: Box<dyn Parser>, sink: Sink) {
-        if !self.reattach(pane, path, sink.clone()) {
-            let kept = match self.take_frozen(pane, path) {
-                Some(slot) => tokio::task::spawn_blocking(move || slot.take(FREEZE_WAIT)).await.ok().flatten(),
-                None => None,
-            };
-            let handle = match kept {
-                Some(kept) => resume_tail(t, path.to_string(), kept, parser, sink),
-                None => spawn_tail(t, path.to_string(), parser, sink),
-            };
-            self.insert(pane.clone(), path.to_string(), handle);
+    /// one from where it stopped, else spawns a fresh one with `parser`. False when it spawned.
+    pub async fn open_tail(&self, pane: &PaneRef, path: &str, t: Arc<dyn Transport>, parser: Box<dyn Parser>, sink: Sink) -> bool {
+        if self.reattach(pane, path, sink.clone()) {
+            return true;
         }
+        let kept = match self.take_frozen(pane, path) {
+            Some(slot) => tokio::task::spawn_blocking(move || slot.take(FREEZE_WAIT)).await.ok().flatten(),
+            None => None,
+        };
+        let resumed = kept.is_some();
+        let handle = match kept {
+            Some(kept) => resume_tail(t, path.to_string(), kept, parser, sink),
+            None => spawn_tail(t, path.to_string(), parser, sink),
+        };
+        self.insert(pane.clone(), path.to_string(), handle);
+        resumed
     }
 
     /// Parks the Pane's tail; the oldest parked ones past `PARKED_TAILS` are frozen.
@@ -622,11 +625,11 @@ mod tests {
         got
     }
 
-    async fn open_via(chats: &ChatManager, p: &PaneRef, path: &std::path::Path) -> Arc<std::sync::Mutex<Vec<ChatEvent>>> {
+    async fn open_via(chats: &ChatManager, p: &PaneRef, path: &std::path::Path) -> (bool, Arc<std::sync::Mutex<Vec<ChatEvent>>>) {
         let (sink, got) = recorder();
         let t: Arc<dyn crate::transport::Transport> = Arc::new(crate::transport::local::LocalTransport);
-        chats.open_tail(p, &path.to_string_lossy(), t, Box::new(Echo), sink).await;
-        got
+        let kept = chats.open_tail(p, &path.to_string_lossy(), t, Box::new(Echo), sink).await;
+        (kept, got)
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -636,12 +639,13 @@ mod tests {
         std::fs::write(&f, "a\nb\n").unwrap();
         std::fs::write(&g, "").unwrap();
         let chats = ChatManager::default();
-        open_via(&chats, &pane("p1"), &f).await;
+        assert!(!open_via(&chats, &pane("p1"), &f).await.0, "spawned");
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         open_via(&chats, &pane("p1"), &g).await; // freezes f
         // Same length, so a read from the kept offset sees `c` and a read from byte 0 sees `x`, `y`.
         std::fs::write(&f, "x\ny\nc\n").unwrap();
-        let got = open_via(&chats, &pane("p1"), &f).await;
+        let (resumed, got) = open_via(&chats, &pane("p1"), &f).await;
+        assert!(resumed);
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         let ev = got.lock().unwrap();
         let ChatEvent::Reset { items, total: 3 } = &ev[0] else { panic!("{ev:?}") };
@@ -661,8 +665,9 @@ mod tests {
         // A slot nobody fills: its parse thread panicked.
         chats.tails.lock().unwrap().frozen.push_back((pane("p1"), Frozen { path: path.clone(), located: None, slot: FrozenSlot::default() }));
         let start = std::time::Instant::now();
-        let got = open_via(&chats, &pane("p1"), &f).await;
+        let (resumed, got) = open_via(&chats, &pane("p1"), &f).await;
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        assert!(!resumed, "a fresh tail re-reads the file: not cached");
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(matches!(&got.lock().unwrap()[0], ChatEvent::Reset { total: 2, .. }));
     }

@@ -576,7 +576,7 @@ pub async fn chat_open(
     if let Some(l) = chats.reattach_cached(&pane_ref, path.as_deref(), sink.clone()) {
         return Ok(Located { cached: true, ..l });
     }
-    let (located, cached) = match chats.frozen_located(&pane_ref, path.as_deref()) {
+    let (located, frozen) = match chats.frozen_located(&pane_ref, path.as_deref()) {
         Some(l) => (l, true),
         None => (locate_pane(&mgr, &pane_ref, path).await?, false),
     };
@@ -587,9 +587,11 @@ pub async fn chat_open(
             format!("no transcript parser for agent '{}'", located.agent),
         )
     })?;
-    chats
+    // A frozen tail whose state never arrived is read afresh: not cached.
+    let kept = chats
         .open_tail(&pane_ref, &located.path, transport, parser, sink)
         .await;
+    let cached = frozen && kept;
     chats.set_located(&pane_ref, &located);
     Ok(Located { cached, ..located })
 }
