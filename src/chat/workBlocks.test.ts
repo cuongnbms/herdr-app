@@ -23,6 +23,11 @@ function shape(rows: ChatRow[]): string[] {
 }
 
 describe("buildRows", () => {
+  it("gives each row the absolute index of its first item", () => {
+    const rows = buildRows([user("1", "t1"), think("hm"), call("a"), say("done")], 5).rows;
+    expect(rows.map((r) => [r.key, r.at])).toEqual([["i:5", 5], ["w:turn:t1", 6], ["i:8", 8]]);
+  });
+
   it("keys rows by block id or absolute item index, stable across a prepend", () => {
     const newer = [user("2", "t2"), call("b"), say("y")];
     const after = buildRows(newer, 10).rows.map((r) => r.key);

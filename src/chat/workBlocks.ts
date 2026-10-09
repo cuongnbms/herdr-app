@@ -20,8 +20,8 @@ export interface WorkBlock {
 }
 
 export type ChatRow =
-  | { kind: "item"; key: string; item: ChatItem }
-  | { kind: "work"; key: string; block: WorkBlock; /** in the newest turn */ last: boolean };
+  | { kind: "item"; key: string; /** absolute index of the row's first item */ at: number; item: ChatItem }
+  | { kind: "work"; key: string; at: number; block: WorkBlock; /** in the newest turn */ last: boolean };
 
 function blockId(items: ChatItem[]): string {
   for (const it of items) {
@@ -64,9 +64,9 @@ export function buildRows(items: ChatItem[], offset = 0): { rows: ChatRow[]; res
       // By turn when its opener is loaded, so a live block keeps its id as its first call lands.
       const id = opener?.ts ? `turn:${opener.ts}` : blockId(shown);
       lastBlock = rows.length;
-      rows.push({ kind: "work", key: `w:${id}`, block: { id, items: shown, start, end }, last: false });
+      rows.push({ kind: "work", key: `w:${id}`, at: bodyAt[body.indexOf(shown[0])], block: { id, items: shown, start, end }, last: false });
     }
-    for (let i = lastAction + 1; i < body.length; i++) rows.push({ kind: "item", key: `i:${bodyAt[i]}`, item: body[i] });
+    for (let i = lastAction + 1; i < body.length; i++) rows.push({ kind: "item", key: `i:${bodyAt[i]}`, at: bodyAt[i], item: body[i] });
     body = [];
     bodyAt = [];
   };
@@ -75,7 +75,7 @@ export function buildRows(items: ChatItem[], offset = 0): { rows: ChatRow[]; res
       flush();
       lastBlock = -1;
       opener = it;
-      rows.push({ kind: "item", key: `i:${offset + index}`, item: it });
+      rows.push({ kind: "item", key: `i:${offset + index}`, at: offset + index, item: it });
     } else {
       body.push(it);
       bodyAt.push(offset + index);
