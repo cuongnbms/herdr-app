@@ -91,16 +91,36 @@ fn add_parallel_tool_results(
             .collect()
     };
     let type_of = |i: usize| parsed[i].1.as_ref().and_then(|v| v["type"].as_str());
-    let tool_uses: HashSet<String> = kept
+    let mut added: HashSet<usize> = kept.iter().copied().collect();
+    // One API response is written as several assistant lines sharing a `message.id`.
+    let message_id = |i: usize| {
+        parsed[i]
+            .1
+            .as_ref()
+            .and_then(|v| v["message"]["id"].as_str())
+    };
+    let responses: HashSet<&str> = kept
         .iter()
         .filter(|&&i| type_of(i) == Some("assistant"))
+        .filter_map(|&i| message_id(i))
+        .collect();
+    for i in 0..entry_at {
+        if type_of(i) == Some("assistant") && message_id(i).is_some_and(|m| responses.contains(m)) {
+            added.insert(i);
+        }
+    }
+    let assistants: Vec<usize> = added
+        .iter()
+        .copied()
+        .filter(|&i| type_of(i) == Some("assistant"))
+        .collect();
+    let tool_uses: HashSet<String> = assistants
+        .iter()
         .flat_map(|&i| block_ids(i, "tool_use", "id"))
         .collect();
-    let mut added: HashSet<usize> = kept.iter().copied().collect();
     // Attachments hang off kept assistant lines and off the results added below.
-    let mut uuids: HashSet<String> = kept
+    let mut uuids: HashSet<String> = assistants
         .iter()
-        .filter(|&&i| type_of(i) == Some("assistant"))
         .filter_map(|&i| parsed[i].1.as_ref()?["uuid"].as_str().map(str::to_string))
         .collect();
     for i in 0..entry_at {
@@ -381,6 +401,43 @@ mod tests {
         assert_eq!(
             ids,
             ["root", "P", "A1", "A2", "AT2", "R1", "X1", "X2", "R2", "AR2"]
+        );
+    }
+
+    #[test]
+    fn claude_keeps_every_block_of_a_response_with_out_of_order_results() {
+        let t = concat!(
+            r#"{"type":"user","uuid":"P","parentUuid":null,"sessionId":"old","message":{"content":"p"}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"TH","parentUuid":"P","sessionId":"old","message":{"id":"M","content":[{"type":"thinking"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"U1","parentUuid":"TH","sessionId":"old","message":{"id":"M","content":[{"type":"tool_use","id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"U2","parentUuid":"U1","sessionId":"old","message":{"id":"M","content":[{"type":"tool_use","id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"AU2","parentUuid":"U2","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R2","parentUuid":"U2","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"XR2a","parentUuid":"R2","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"XR2b","parentUuid":"XR2a","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R1","parentUuid":"U1","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"XR1","parentUuid":"R1","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"F","parentUuid":"XR1","sessionId":"old","message":{"content":"next"}}"#,
+            "\n",
+        );
+        let cut = cut_claude(t, "F", "new").unwrap().unwrap();
+        let ids: Vec<String> = lines(&cut.text)
+            .iter()
+            .map(|v| v["uuid"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            ["P", "TH", "U1", "U2", "AU2", "R2", "XR2a", "XR2b", "R1", "XR1"]
         );
     }
 
