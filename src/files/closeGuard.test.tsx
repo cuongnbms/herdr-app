@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./save", () => ({ saveDraft: vi.fn(async () => true) }));
 vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { itemKey } from "../store/openItems";
 import { closeItemsGuarded, settleDrafts } from "./closeGuard";
 import { draftKey, useDrafts } from "./drafts";
@@ -89,7 +89,7 @@ describe("settleDrafts", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Save All" }));
       expect(await p).toBe(false);
       expect(vi.mocked(showToast).mock.calls).toEqual([[`Cannot save a.txt: ${why}`]]);
-      expect(useApp.getState().openItems.active).toBe(draftKey(fk, "a.txt"));
+      expect(viewedItems(useApp.getState()).active).toBe(draftKey(fk, "a.txt"));
       expect(useDrafts.getState().drafts[draftKey(fk, "a.txt")]).toBeTruthy();
     }
   });
@@ -129,10 +129,10 @@ describe("settleDrafts", () => {
     const p = closeItemsGuarded(key, "one");
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await act(() => p);
-    expect(useApp.getState().openItems.items).toHaveLength(1);
+    expect(viewedItems(useApp.getState()).items).toHaveLength(1);
     const q = closeItemsGuarded(key, "one");
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     await act(() => q);
-    expect(useApp.getState().openItems.items).toHaveLength(0);
+    expect(viewedItems(useApp.getState()).items).toHaveLength(0);
   });
 });

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ chatImage: vi.fn().mockResolvedValue(new Uint8Array([1]).buffer) }));
 import { ChatItemView } from "./ChatItemView";
 import { ChatPaneContext } from "./images";
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { useFiles } from "../files/store";
 describe("ChatItemView", () => {
   it("renders markdown", () => {
@@ -141,7 +141,7 @@ describe("file paths open in Files", () => {
   it("opens inline code that reads as a path", () => {
     inPane(<ChatItemView item={{ kind: "assistant_text", markdown: "Wrote `docs/a.md` and `/point`." }} />);
     fireEvent.click(screen.getByRole("link", { name: "docs/a.md" }));
-    expect(useApp.getState().openItems.active).toBe("file:local/default/w1|/w/app|docs/a.md");
+    expect(viewedItems(useApp.getState()).active).toBe("file:local/default/w1|/w/app|docs/a.md");
     expect(useApp.getState().selected).toEqual(pane);
     expect(screen.queryByRole("link", { name: "/point" })).toBeNull();
   });
@@ -154,14 +154,14 @@ describe("file paths open in Files", () => {
   it("opens a tool call's file without toggling the call", () => {
     inPane(<ChatItemView item={{ kind: "tool_call", id: "t1", name: "Write", input_summary: "/w/app/src/x.ts", input: { file_path: "/w/app/src/x.ts", content: "x" } }} />);
     fireEvent.click(screen.getByRole("link", { name: "/w/app/src/x.ts" }));
-    expect(useApp.getState().openItems.active).toBe("file:local/default/w1|/w/app|src/x.ts");
+    expect(viewedItems(useApp.getState()).active).toBe("file:local/default/w1|/w/app|src/x.ts");
     expect(screen.getByRole("button", { name: /Write/ }).getAttribute("aria-expanded")).toBe("false");
   });
   it("says so when the file is outside the workspace folder", () => {
     inPane(<ChatItemView item={{ kind: "assistant_text", markdown: "`/etc/x.conf`" }} />);
-    const before = useApp.getState().openItems.items;
+    const before = viewedItems(useApp.getState()).items;
     fireEvent.click(screen.getByRole("link", { name: "/etc/x.conf" }));
-    expect(useApp.getState().openItems.items).toBe(before);
+    expect(viewedItems(useApp.getState()).items).toBe(before);
   });
 });
 
@@ -179,6 +179,6 @@ describe("a long tool path", () => {
       </ChatPaneContext.Provider>,
     );
     fireEvent.click(screen.getByRole("link"));
-    expect(useApp.getState().openItems.active).toMatch(/^file:local\/default\/w1\|\/w\/app\|d\/d\//);
+    expect(viewedItems(useApp.getState()).active).toMatch(/^file:local\/default\/w1\|\/w\/app\|d\/d\//);
   });
 });

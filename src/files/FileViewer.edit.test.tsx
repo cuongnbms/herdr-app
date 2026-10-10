@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
 vi.mock("../ui/Toast", () => ({ showToast: vi.fn(), showProgressToast: vi.fn(() => 1), updateToast: vi.fn() }));
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { itemKey } from "../store/openItems";
 import { useFilesBus } from "./bus";
 import { useDrafts } from "./drafts";
@@ -60,9 +60,9 @@ describe("FileViewer edit mode", () => {
     useApp.getState().openFile(ws, "/r", "a.txt", { pin: false });
     render(<><FileViewer item={item} online /><UnsavedDialog /></>);
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    expect(useApp.getState().openItems.preview).toBeNull();
+    expect(viewedItems(useApp.getState()).preview).toBeNull();
     act(() => useApp.getState().openFile(ws, "/r", "b.txt", { pin: false }));
-    expect(useApp.getState().openItems.items.map(itemKey)).toEqual([key, itemKey({ ...item, rel: "b.txt" })]);
+    expect(viewedItems(useApp.getState()).items.map(itemKey)).toEqual([key, itemKey({ ...item, rel: "b.txt" })]);
   });
 
   it("⌘⇧E enters, Esc with unsaved changes asks, Cancel stays", async () => {

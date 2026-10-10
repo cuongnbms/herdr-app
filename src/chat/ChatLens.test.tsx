@@ -24,8 +24,9 @@ vi.mock("./chatSession", () => ({
 }));
 import { chatLocate, chatPage, herdrCall } from "../lib/ipc";
 import { paneKey, type PaneView } from "../lib/types";
-import { useApp } from "../store/app";
-import { itemKey, NO_ITEMS } from "../store/openItems";
+import { useApp, viewedItems } from "../store/app";
+import { itemKey } from "../store/openItems";
+import { sessionKey } from "../sidebar/groups";
 import { ChatLens } from "./ChatLens";
 import { savedPosition, savePosition } from "./readingPosition";
 
@@ -211,17 +212,17 @@ describe("ChatLens", () => {
     });
 
     it("pins the pane's agent tab", () => {
-      useApp.setState({ openItems: { items: [{ kind: "agent", ref: pane }], preview: itemKey({ kind: "agent", ref: pane }), active: null } });
+      useApp.setState({ viewed: pane, tabs: { [sessionKey(pane.machine_id, pane.session)]: { items: [{ kind: "agent", ref: pane }], preview: itemKey({ kind: "agent", ref: pane }), active: null } } });
       render(<ChatLens pane={pane} view={idlePi} />);
       sendText("hello there");
-      expect(useApp.getState().openItems.preview).toBeNull();
+      expect(viewedItems(useApp.getState()).preview).toBeNull();
     });
 
     it("opens the pane's agent tab pinned when it was closed", () => {
-      useApp.setState({ openItems: NO_ITEMS });
+      useApp.setState({ tabs: {}, viewed: null });
       render(<ChatLens pane={pane} view={idlePi} />);
       sendText("hello there");
-      expect(useApp.getState().openItems).toEqual({ items: [{ kind: "agent", ref: pane }], preview: null, active: itemKey({ kind: "agent", ref: pane }) });
+      expect(viewedItems(useApp.getState())).toEqual({ items: [{ kind: "agent", ref: pane }], preview: null, active: itemKey({ kind: "agent", ref: pane }) });
     });
 
     it("gives way to the transcript's user item", async () => {

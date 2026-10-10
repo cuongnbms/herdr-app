@@ -17,7 +17,7 @@ import { FilesPanel } from "./files/FilesPanel";
 import { useFilesPanel } from "./files/panelStore";
 import { openNewTabHere } from "./agents/newTabShortcut";
 import { paneKey } from "./lib/types";
-import { activeItem, chosenLens, selectedPane, useApp } from "./store/app";
+import { activeItem, chosenLens, selectedPane, useApp, viewedItems } from "./store/app";
 import { itemKey } from "./store/openItems";
 import { syncSeenToHerdr } from "./store/seenSync";
 import { closeItemsGuarded, settleDrafts } from "./files/closeGuard";
@@ -203,7 +203,7 @@ export default function App() {
       } else if (plain && k === "w") {
         e.preventDefault();
         if (e.repeat) return;
-        const active = useApp.getState().openItems.active;
+        const active = viewedItems(useApp.getState()).active;
         if (active) void closeItemsGuarded(active, "one");
       } else if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
         e.preventDefault();

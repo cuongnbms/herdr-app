@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { OpenStrip } from "./OpenStrip";
-import { itemKey, NO_ITEMS } from "../store/openItems";
+import { itemKey } from "../store/openItems";
 import { draftKey, useDrafts } from "../files/drafts";
 import { filesKey } from "../files/store";
 import { UnsavedDialog } from "../files/unsaved";
@@ -27,7 +27,7 @@ const m: MachineView = {
 };
 
 const ref = (pane_id: string, session = "default") => ({ machine_id: "local", session, pane_id });
-const open = () => useApp.getState().openItems.items.map((i) => (i.kind === "agent" ? i.ref.pane_id : i.rel));
+const open = () => viewedItems(useApp.getState()).items.map((i) => (i.kind === "agent" ? i.ref.pane_id : i.rel));
 // Selects each pane and pins its tab.
 const openPinned = (...ids: string[]) => {
   for (const id of ids) {
@@ -38,7 +38,7 @@ const openPinned = (...ids: string[]) => {
 
 describe("OpenStrip", () => {
   beforeEach(() => {
-    useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
+    useApp.setState({ machines: {}, order: [], selected: null, tabs: {}, viewed: null });
     useApp.getState().upsertMachine(m);
     useTabLayout.setState({ layout: "one-line" });
   });
@@ -48,20 +48,28 @@ describe("OpenStrip", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("lists the opened agents across workspaces and sessions, marking the selected one", () => {
+  it("lists the viewed session's opened agents across its workspaces, marking the selected one", () => {
     openPinned("p1");
     useApp.getState().select(ref("p1", "pegabot"));
     useApp.getState().pinItem(itemKey({ kind: "agent", ref: ref("p1", "pegabot") }));
     useApp.getState().select(ref("p3"));
     render(<OpenStrip />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["Mermaid diagram, remora", "Webhook retry, bot", "Bug button, herdr-app"]);
-    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["false", "false", "true"]);
+    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["Mermaid diagram, remora", "Bug button, herdr-app"]);
+    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["false", "true"]);
     expect(screen.getByRole("img", { name: "status blocked" })).toBeTruthy();
     expect(tabs[0].closest("[title]")?.getAttribute("title")).toBe("local/default · remora · Mermaid diagram");
-    expect(tabs[1].closest("[title]")?.getAttribute("title")).toBe("local/pegabot · bot · Webhook retry");
-    fireEvent.click(tabs[1]);
-    expect(useApp.getState().selected).toEqual(ref("p1", "pegabot"));
+    fireEvent.click(tabs[0]);
+    expect(useApp.getState().selected).toEqual(ref("p1"));
+  });
+
+  it("shows another session's own tabs once it is viewed", () => {
+    openPinned("p1");
+    useApp.getState().select(ref("p1", "pegabot"));
+    render(<OpenStrip />);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.getAttribute("aria-label"))).toEqual(["Webhook retry, bot"]);
+    expect(tabs[0].closest("[title]")?.getAttribute("title")).toBe("local/pegabot · bot · Webhook retry");
   });
 
   it("shows the agent's icon with its status, and the Workspace before the title on one line", () => {
@@ -105,7 +113,7 @@ describe("OpenStrip", () => {
     expect(tab.className).toContain("preview");
     expect(screen.getByRole("tab", { name: /Mermaid diagram/ }).className).not.toContain("preview");
     fireEvent.doubleClick(tab);
-    expect(useApp.getState().openItems.preview).toBeNull();
+    expect(viewedItems(useApp.getState()).preview).toBeNull();
     expect(screen.getByRole("tab", { name: /Chat tabs/ }).className).not.toContain("preview");
   });
 
@@ -138,7 +146,7 @@ describe("OpenStrip", () => {
     const tab = screen.getByRole("tab", { name: "main.ts, herdr-app" });
     expect(tab.closest(".files-tab-item")?.getAttribute("title")).toBe("local/default · herdr-app · src/main.ts");
     fireEvent.click(tab);
-    expect(useApp.getState().openItems.active).toBe("file:local/default/w2|/r|src/main.ts");
+    expect(viewedItems(useApp.getState()).active).toBe("file:local/default/w2|/r|src/main.ts");
     expect(useApp.getState().selected).toEqual(ref("p1"));
   });
 
@@ -173,10 +181,10 @@ describe("OpenStrip", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close a.txt (unsaved)" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(useApp.getState().openItems.items).toHaveLength(1);
+    expect(viewedItems(useApp.getState()).items).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Close a.txt (unsaved)" }));
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
-    await waitFor(() => expect(useApp.getState().openItems.items).toHaveLength(0));
+    await waitFor(() => expect(viewedItems(useApp.getState()).items).toHaveLength(0));
   });
   it("marks a file with an unsaved draft", () => {
     const ws = { machine_id: "local", session: "default", workspace_id: "w1" };

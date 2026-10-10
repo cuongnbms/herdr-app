@@ -8,7 +8,7 @@ import { useTabLayout } from "../settings/tabLayout";
 import { closeItemsGuarded } from "../files/closeGuard";
 import { useShallow } from "zustand/react/shallow";
 import { useDrafts } from "../files/drafts";
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { itemKey, type OpenItem } from "../store/openItems";
 import type { MachineView, PaneView } from "../lib/types";
 import { CloseIcon, FileIcon } from "../ui/icons";
@@ -47,7 +47,7 @@ function placeOf(machines: Record<string, MachineView>, machine_id: string, sess
   return w ? { where: `${machine.label}/${session} · ${w.label}`, project: w.label } : null;
 }
 
-/** The panes and files opened in any session, like an editor's open files. */
+/** The panes and files opened in the viewed session, like an editor's open files. */
 type Side = "before" | "after";
 
 /** Which half of the tab under the pointer: the dragged tab lands on that side of it. */
@@ -60,7 +60,7 @@ const TAB_TYPE = "application/x-herdr-open-item";
 
 export const OpenStrip = memo(function OpenStrip() {
   const machines = useApp((s) => s.machines);
-  const { items, preview, active } = useApp((s) => s.openItems);
+  const { items, preview, active } = useApp(viewedItems);
   const activate = useApp((s) => s.activateItem);
   const pin = useApp((s) => s.pinItem);
   const moveItem = useApp((s) => s.moveItem);

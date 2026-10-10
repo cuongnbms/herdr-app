@@ -13,8 +13,8 @@ vi.mock("./terminal/TerminalLens", async () => {
 });
 
 import App from "./App";
-import { activeItem, useApp } from "./store/app";
-import { itemKey, NO_ITEMS } from "./store/openItems";
+import { activeItem, useApp, viewedItems } from "./store/app";
+import { itemKey } from "./store/openItems";
 import { useFilesPanel } from "./files/panelStore";
 import { useLensSettings } from "./settings/lens";
 import { initialSlots, useQuota } from "./quota/store";
@@ -97,7 +97,7 @@ describe("App shell", () => {
         ] }] } } as never,
         order: ["local"],
         selected: null,
-        openItems: NO_ITEMS,
+        tabs: {}, viewed: null,
         dashboardOpen: false,
         paletteOpen: false,
       });
@@ -108,7 +108,7 @@ describe("App shell", () => {
     afterEach(async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       (invoke as any).mockImplementation(() => Promise.resolve([]));
-      useApp.setState({ machines: {}, order: [], selected: null, openItems: NO_ITEMS });
+      useApp.setState({ machines: {}, order: [], selected: null, tabs: {}, viewed: null });
     });
 
     it("shows the active file item in the main area and the lens again when it closes", async () => {
@@ -118,7 +118,7 @@ describe("App shell", () => {
       fireEvent.keyDown(window, { key: "w", metaKey: true });
       await waitFor(() => expect(screen.queryByLabelText("Copy path")).toBeNull());
       expect(useApp.getState().selected?.pane_id).toBe("p1");
-      expect(useApp.getState().openItems.active).toBeNull();
+      expect(viewedItems(useApp.getState()).active).toBeNull();
       // The selected agent with no active item: its lens, not a blank main area.
       await waitFor(() => expect(document.querySelector(".main .chat-lens, .main .term-lens")).toBeTruthy());
       expect(document.querySelector(".main .header")).toBeTruthy();
@@ -131,7 +131,7 @@ describe("App shell", () => {
       act(() => useApp.getState().openFile(ws, "/r", "a.txt", { pin: false }));
       expect(await screen.findByLabelText("Copy path")).toBeTruthy();
       expect(document.querySelector(".main")!.textContent).toContain("a.txt");
-      act(() => useApp.getState().closeItems(useApp.getState().openItems.active!, "one"));
+      act(() => useApp.getState().closeItems(viewedItems(useApp.getState()).active!, "one"));
       expect(await screen.findByText("Select a pane")).toBeTruthy();
     });
 

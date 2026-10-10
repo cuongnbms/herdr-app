@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/ipc", () => ({ herdrCall: vi.fn().mockResolvedValue(undefined) }));
 import { herdrCall } from "../lib/ipc";
 import { useFilesPanel } from "../files/panelStore";
-import { useApp } from "../store/app";
-import { itemKey, NO_ITEMS } from "../store/openItems";
+import { useApp, viewedItems } from "../store/app";
+import { itemKey } from "../store/openItems";
 import { panelWorkspace } from "../files/root";
 import { getFolder, setFolder } from "../workspaces/folder";
 import { AgentList, workspaceGroups } from "./AgentList";
@@ -75,12 +75,12 @@ describe("AgentList", () => {
   });
 
   it("pins the pane's tab on double click", () => {
-    useApp.setState({ openItems: NO_ITEMS });
+    useApp.setState({ tabs: {} });
     render(<AgentList />);
     fireEvent.click(screen.getByText("Guard export"));
     fireEvent.doubleClick(screen.getByText("Guard export"));
-    expect(useApp.getState().openItems.items).toEqual([{ kind: "agent", ref: { machine_id: "local", session: "default", pane_id: "p2" } }]);
-    expect(useApp.getState().openItems.preview).toBeNull();
+    expect(viewedItems(useApp.getState()).items).toEqual([{ kind: "agent", ref: { machine_id: "local", session: "default", pane_id: "p2" } }]);
+    expect(viewedItems(useApp.getState()).preview).toBeNull();
   });
 
   it("shows a header per workspace with its folder, empty workspaces included", () => {
@@ -246,7 +246,8 @@ describe("AgentList", () => {
     const file = { kind: "file" as const, ws: { machine_id: "local", session: "default", workspace_id: "w1" }, root: "/x", rel: "a.md" };
     useApp.setState({
       selected: { machine_id: "local", session: "default", pane_id: "p4" },
-      openItems: { items: [file], preview: null, active: itemKey(file) },
+      viewed: { machine_id: "local", session: "default" },
+      tabs: { "local/default": { items: [file], preview: null, active: itemKey(file) } },
     });
     render(<AgentList />);
     fireEvent.contextMenu(screen.getByText("web", { selector: ".ws-label" }));

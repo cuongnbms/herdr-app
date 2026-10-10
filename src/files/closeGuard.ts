@@ -1,4 +1,4 @@
-import { useApp } from "../store/app";
+import { itemsWith, useApp } from "../store/app";
 import { closingKeys, type CloseScope } from "../store/openItems";
 import { showToast } from "../ui/Toast";
 import { isDirty, useDrafts } from "./drafts";
@@ -56,6 +56,6 @@ export async function settleDrafts(keys: string[]): Promise<boolean> {
 
 /** `closeItems`, but only once the Drafts of the items it would close are settled. */
 export async function closeItemsGuarded(key: string, scope: "one" | CloseScope): Promise<void> {
-  const keys = closingKeys(useApp.getState().openItems, scope, key);
+  const keys = closingKeys(itemsWith(useApp.getState(), key), scope, key);
   if (await settleDrafts(keys)) useApp.getState().closeItems(key, scope);
 }

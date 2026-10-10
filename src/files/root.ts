@@ -43,7 +43,7 @@ export function workspaceOfSelection(state: Pick<AppState, "machines" | "selecte
 }
 
 /** The Workspace the Files panel shows: the active item's, else the selected Pane's. */
-export function panelWorkspace(s: Pick<AppState, "machines" | "selected" | "openItems">): WorkspaceRef | null {
+export function panelWorkspace(s: Pick<AppState, "machines" | "selected" | "tabs" | "viewed">): WorkspaceRef | null {
   const item = activeItem(s);
   return item?.kind === "file" ? item.ws : workspaceOfSelection(s);
 }

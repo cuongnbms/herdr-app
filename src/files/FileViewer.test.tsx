@@ -28,7 +28,7 @@ vi.mock("mermaid", () => ({
 }));
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { showToast } from "../ui/Toast";
-import { useApp } from "../store/app";
+import { useApp, viewedItems } from "../store/app";
 import { useFilesBus } from "./bus";
 import { FileViewer } from "./FileViewer";
 import { HIGHLIGHT_LIMIT } from "./limits";
@@ -87,7 +87,7 @@ describe("FileViewer", () => {
     texts["notes.md"] = "# Notes\n\nsecond";
     const { rerender } = render(<FileViewer item={file("from.md")} online />);
     fireEvent.click(await screen.findByText("notes"));
-    expect(useApp.getState().openItems.active).toBe("file:" + key + "|notes.md");
+    expect(viewedItems(useApp.getState()).active).toBe("file:" + key + "|notes.md");
     rerender(<FileViewer item={file("notes.md")} online />);
     await waitFor(() => expect(screen.getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true"));
     expect(screen.queryByRole("heading", { name: "Notes" })).toBeNull();

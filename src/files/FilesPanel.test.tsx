@@ -18,8 +18,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
   },
 }));
-import { useApp } from "../store/app";
-import { NO_ITEMS } from "../store/openItems";
+import { useApp, viewedItems } from "../store/app";
 import { setFolder } from "../workspaces/folder";
 import { FilesPanel } from "./FilesPanel";
 import { useFilesPanel } from "./panelStore";
@@ -43,7 +42,7 @@ describe("FilesPanel", () => {
         { workspace_id: "w2", label: "other", number: 2, status: "idle", tabs: [{ tab_id: "t2", label: "t", panes: [{ pane_id: "p2", cwd: "/o" }] }] },
       ] }] } } as never,
       selected,
-      openItems: NO_ITEMS,
+      tabs: {}, viewed: null,
     });
   });
 
@@ -98,7 +97,7 @@ describe("FilesPanel", () => {
   });
 
   it("shows nothing to browse with no selection and no open file", () => {
-    useApp.setState({ selected: null, openItems: NO_ITEMS });
+    useApp.setState({ selected: null, tabs: {}, viewed: null });
     render(<FilesPanel />);
     expect(screen.getByText("Select an agent to browse its files")).toBeTruthy();
   });
@@ -116,8 +115,8 @@ describe("FilesPanel", () => {
       cmd === "files_list_dir" ? [{ name: "a.md", kind: "file" }] : cmd === "files_watch" ? 1 : { paths: [], capped: false, refused: false }) as never);
     render(<FilesPanel />);
     fireEvent.click(await screen.findByText("a.md"));
-    expect(useApp.getState().openItems.active).toBe("file:local/default/w1|/r|a.md");
-    expect(useApp.getState().openItems.preview).toBe("file:local/default/w1|/r|a.md");
+    expect(viewedItems(useApp.getState()).active).toBe("file:local/default/w1|/r|a.md");
+    expect(viewedItems(useApp.getState()).preview).toBe("file:local/default/w1|/r|a.md");
   });
 
   it("collapse hides the tree; focusTree expands it and focuses the tree", async () => {
