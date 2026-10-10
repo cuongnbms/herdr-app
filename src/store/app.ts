@@ -223,7 +223,7 @@ export const useApp = create<AppState>((set, get) => ({
     else useDrafts.getState().moveUnder(filesKey(ws, root), from, to);
     if (next === old) return;
     set((s) => ({ tabs: updateTabs(s.tabs, k, () => next) }));
-    if (next.active !== old.active) selectIfAgent(get(), next);
+    if (next.active !== old.active) selectIfAgent(get(), k, next);
   },
   activateItem: (key) => {
     const k = sessionWith(get().tabs, key);
@@ -246,14 +246,14 @@ export const useApp = create<AppState>((set, get) => ({
     const next = closeItems(old, scope, key);
     if (next === old) return;
     set((s) => ({ tabs: updateTabs(s.tabs, k, () => next) }));
-    if (next.active !== old.active) selectIfAgent(get(), next);
+    if (next.active !== old.active) selectIfAgent(get(), k, next);
   },
   cycleItems: (delta) => {
     const s = get();
     if (!s.viewed) return;
     const next = cycleItem(viewedItems(s), delta);
     set({ tabs: updateTabs(s.tabs, sessionKey(s.viewed.machine_id, s.viewed.session), () => next) });
-    selectIfAgent(get(), next);
+    selectIfAgent(get(), sessionKey(s.viewed.machine_id, s.viewed.session), next);
   },
   // Viewing another session brings its tabs back as they were left: its active file, or its active
   // pane, else the pane last selected there, else its first.
@@ -266,7 +266,7 @@ export const useApp = create<AppState>((set, get) => ({
     const pane = here ?? (last && findPane(s.machines, last) ? last : firstPane(s.machines, ref));
     const active = activeItem({ tabs: s.tabs, viewed: ref });
     // The file stays in front, with the session's pane selected behind it.
-    if (active?.kind === "file") return set({ viewed: ref, selected: pane, dashboardOpen: false });
+    if (active?.kind === "file") return set({ viewed: ref, selected: pane ?? sel, dashboardOpen: false });
     if (active?.kind === "agent" && findPane(s.machines, active.ref)) return s.select(active.ref);
     // Reselecting the current pane still closes the dashboard.
     if (pane) s.select(pane);
@@ -334,8 +334,9 @@ function mapTabs(tabs: Record<string, OpenItems>, f: (items: OpenItems) => OpenI
   return Object.keys(tabs).reduce((acc, k) => updateTabs(acc, k, f), tabs);
 }
 
-/** Selects the Pane of the active item when it is an agent. */
-function selectIfAgent(s: AppState, items: OpenItems) {
+/** Selects the Pane of the active item when it is an agent and `k` is the viewed Session: a hidden Session's tabs do not take the view. */
+function selectIfAgent(s: AppState, k: string, items: OpenItems) {
+  if (!s.viewed || sessionKey(s.viewed.machine_id, s.viewed.session) !== k) return;
   const active = items.active ? findItem(items, items.active) : undefined;
   if (active?.kind === "agent") s.select(active.ref);
 }

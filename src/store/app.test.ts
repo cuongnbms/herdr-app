@@ -589,13 +589,11 @@ describe("tabs per session", () => {
   });
 
   it("viewing a session brings back its active pane rather than its last selected one", () => {
-    useApp.getState().pinAgent(ref("default", "w1:p1"));
-    useApp.getState().pinAgent(ref("default", "w1:p2"));
     useApp.getState().select(ref("default", "w1:p1"));
+    useApp.getState().pinAgent(ref("default", "w1:p2"));
     useApp.getState().select(ref("work", "w1:p1"));
-    useApp.getState().activateItem(key("work", "w1:p1"));
     view("default");
-    expect(useApp.getState().selected).toEqual(ref("default", "w1:p1"));
+    expect(useApp.getState().selected).toEqual(ref("default", "w1:p2"));
   });
 
   it("cycling and closing all stay within the viewed session", () => {
@@ -608,6 +606,15 @@ describe("tabs per session", () => {
     expect(viewedItems(useApp.getState()).items).toEqual([]);
     view("default");
     expect(viewedItems(useApp.getState()).items).toEqual([{ kind: "agent", ref: ref("default", "w1:p1") }]);
+  });
+
+  it("closing a hidden session's tab does not switch to that session", () => {
+    useApp.getState().pinAgent(ref("default", "w1:p1"));
+    useApp.getState().pinAgent(ref("default", "w1:p2"));
+    useApp.getState().select(ref("work", "w1:p1"));
+    useApp.getState().closeItems(key("default", "w1:p2"), "one");
+    expect(useApp.getState().selected).toEqual(ref("work", "w1:p1"));
+    expect(useApp.getState().viewed).toEqual({ machine_id: "local", session: "work" });
   });
 
   it("a session gone from a connected snapshot takes its tabs along", () => {
