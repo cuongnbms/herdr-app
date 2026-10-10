@@ -120,6 +120,70 @@ async fn run(t: &dyn Transport, argv: &[String], input: Option<&[u8]>) -> AppRes
     }
 }
 
+/// A running command whose stdout is read line by line. Dropping it kills the process.
+pub struct LineChild {
+    child: tokio::process::Child,
+    lines: tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+    stderr: tokio::task::JoinHandle<String>,
+}
+
+/// Start `argv` on the Machine with stdin closed and stdout/stderr piped, with no timeout.
+/// `tty` requests a pseudo-terminal, which ends lines in `\r\n`; `next_line` trims that.
+pub async fn spawn_lines(t: &dyn Transport, argv: &[String], tty: bool) -> AppResult<LineChild> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    let wrapped = t.wrap(argv, tty);
+    let program = wrapped
+        .first()
+        .ok_or_else(|| AppError::new("invalid", "empty command"))?;
+    let mut child = Command::new(program)
+        .args(&wrapped[1..])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::new("io", "no stdout"))?;
+    let mut err = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::new("io", "no stderr"))?;
+    // Drain stderr concurrently so a chatty command never blocks on a full pipe.
+    let stderr = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        if let Err(e) = err.read_to_end(&mut buf).await {
+            tracing::debug!("spawn_lines stderr read: {e}");
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    });
+    Ok(LineChild {
+        child,
+        lines: BufReader::new(stdout).lines(),
+        stderr,
+    })
+}
+
+impl LineChild {
+    /// The next stdout line without its newline (and one trailing `\r`), `None` at the end.
+    pub async fn next_line(&mut self) -> AppResult<Option<String>> {
+        let line = self.lines.next_line().await?;
+        Ok(line.map(|l| match l.strip_suffix('\r') {
+            Some(s) => s.to_string(),
+            None => l,
+        }))
+    }
+
+    /// Wait for the process: its exit code (`-1` when killed) and its stderr text.
+    pub async fn finish(mut self) -> AppResult<(i32, String)> {
+        let status = self.child.wait().await?;
+        let stderr = self.stderr.await.unwrap_or_default();
+        Ok((status.code().unwrap_or(-1), stderr))
+    }
+}
+
 pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
@@ -798,6 +862,36 @@ broken               running  /only-one-path\n";
         assert_eq!(err.code, "invalid");
         let err = save_image_in(&t, b"", "png", None).await.unwrap_err();
         assert_eq!(err.code, "invalid");
+    }
+
+    #[tokio::test]
+    async fn spawn_lines_streams_lines_and_reports_exit() {
+        use crate::transport::local::LocalTransport;
+        let argv: Vec<String> = ["sh", "-c", "printf 'a\\r\\nb\\n'; echo oops >&2; exit 3"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut c = spawn_lines(&LocalTransport, &argv, false).await.unwrap();
+        assert_eq!(c.next_line().await.unwrap().as_deref(), Some("a"));
+        assert_eq!(c.next_line().await.unwrap().as_deref(), Some("b"));
+        assert_eq!(c.next_line().await.unwrap(), None);
+        let (status, stderr) = c.finish().await.unwrap();
+        assert_eq!(status, 3);
+        assert_eq!(stderr.trim(), "oops");
+    }
+
+    #[tokio::test]
+    async fn dropping_a_line_child_kills_it() {
+        use crate::transport::local::LocalTransport;
+        let d = tempfile::tempdir().unwrap();
+        let mark = d.path().join("mark");
+        let script = format!("echo up; sleep 2; touch '{}'", mark.display());
+        let argv: Vec<String> = vec!["sh".into(), "-c".into(), script];
+        let mut c = spawn_lines(&LocalTransport, &argv, false).await.unwrap();
+        assert_eq!(c.next_line().await.unwrap().as_deref(), Some("up"));
+        drop(c);
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        assert!(!mark.exists());
     }
 
     #[tokio::test]
