@@ -254,8 +254,15 @@ pub async fn ask(
     let (status, stderr) = child.finish().await?;
     if !finished {
         let tail = noise.iter().cloned().collect::<Vec<_>>().join("\n");
-        let message = if !stderr.trim().is_empty() {
-            stderr.trim().to_string()
+        let err_text = stderr
+            .lines()
+            .map(strip_ansi)
+            .filter(|l| keep_noise(l))
+            .map(|l| l.trim().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = if !err_text.is_empty() {
+            err_text
         } else if !tail.is_empty() {
             tail
         } else {
@@ -280,7 +287,15 @@ pub async fn discard_in(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
-    if uuid::Uuid::parse_str(fork_id).is_err() || fork_id == stem {
+    // Only the canonical lowercase hyphenated form, and never the Transcript's own id (on a
+    // case-insensitive filesystem an uppercase spelling would name the same file).
+    let canonical = uuid::Uuid::parse_str(fork_id)
+        .ok()
+        .filter(|u| u.hyphenated().to_string() == fork_id);
+    let is_transcript = |u: uuid::Uuid| {
+        fork_id.eq_ignore_ascii_case(stem) || uuid::Uuid::parse_str(stem).is_ok_and(|s| s == u)
+    };
+    if canonical.is_none_or(is_transcript) {
         return Err(AppError::new("invalid", "not a side question fork id"));
     }
     let script = r#"d="${1:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; rm -f -- "$d"/projects/*/"$2".jsonl; rm -rf -- "$d"/projects/*/"$2""#;
@@ -628,5 +643,51 @@ echo '{"type":"result","is_error":false,"session_id":"f1","usage":{"input_tokens
             "invalid"
         );
         assert!(std::path::Path::new(&path).exists());
+    }
+
+    #[tokio::test]
+    async fn ssh_close_notice_on_stderr_does_not_hide_the_stdout_error() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            "echo 'real failure'; echo 'Connection to h closed.' >&2; exit 1",
+        );
+        let path = transcript(d.path(), d.path());
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        let mut got = vec![];
+        ask(
+            &LocalTransport,
+            false,
+            &prog,
+            &path,
+            "q",
+            None,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![BtwEvent::Error {
+                message: "real failure".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn discard_refuses_the_transcripts_own_id_in_any_spelling() {
+        let d = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let path = d.path().join(format!("{id}.jsonl"));
+        std::fs::write(&path, "x").unwrap();
+        let p = path.to_str().unwrap();
+        for bad in [id.clone(), id.to_uppercase(), format!("{{{id}}}")] {
+            assert_eq!(
+                discard(&LocalTransport, p, &bad).await.unwrap_err().code,
+                "invalid"
+            );
+        }
+        assert!(path.exists());
     }
 }
