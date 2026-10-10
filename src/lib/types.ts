@@ -208,5 +208,6 @@ export type WatchEvent = { type: "resync" } | { type: "changes"; changes: FileCh
 export type BtwEvent =
   | { kind: "delta"; text: string }
   | { kind: "tool"; name: string }
+  | { kind: "started"; fork_id: string }
   | { kind: "done"; fork_id: string; cache_read: number; input: number }
   | { kind: "error"; message: string };

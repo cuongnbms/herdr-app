@@ -63,7 +63,7 @@ describe("side questions", () => {
   it("shows a failed ask in its turn", async () => {
     const a = nextAsk();
     const p = askSide(pane, "/p/t1.jsonl", "q");
-    a.finish(Object.assign(new Error("x"), { message: "claude not found on this machine" }));
+    a.finish({ code: "io", message: "claude not found on this machine" } as unknown as Error);
     await p;
     expect(thread().turns[0]).toMatchObject({ running: false, error: "claude not found on this machine" });
   });
@@ -94,6 +94,25 @@ describe("side questions", () => {
     await q;
     expect(chatBtwDiscard).toHaveBeenCalledWith("devtuf", "/p/t1.jsonl", "f1");
     expect(thread()).toMatchObject({ path: "/p/t2.jsonl", turns: [{ q: "q2" }] });
+  });
+
+  it("a stopped ask that had started is still discarded on close", async () => {
+    const a = nextAsk();
+    void askSide(pane, "/p/t1.jsonl", "q");
+    a.send({ kind: "started", fork_id: "f9" });
+    await stopSide(key);
+    await closeSide(pane);
+    expect(chatBtwDiscard).toHaveBeenCalledWith("devtuf", "/p/t1.jsonl", "f9");
+  });
+
+  it("an error event is shown while the turn runs until the ask settles", async () => {
+    const a = nextAsk();
+    const p = askSide(pane, "/p/t1.jsonl", "q");
+    a.send({ kind: "error", message: "boom" });
+    expect(thread().turns[0]).toMatchObject({ running: true, error: "boom" });
+    a.finish();
+    await p;
+    expect(thread().turns[0]).toMatchObject({ running: false, error: "boom" });
   });
 
   it("stop cancels the running ask", async () => {

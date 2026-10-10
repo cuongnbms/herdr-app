@@ -89,6 +89,10 @@ pub enum BtwEvent {
     Tool {
         name: String,
     },
+    /// The fork's session id, known as soon as the run starts (so a stopped ask can still be discarded).
+    Started {
+        fork_id: String,
+    },
     Done {
         fork_id: String,
         cache_read: u64,
@@ -143,6 +147,10 @@ pub fn parse_line(line: &str) -> Vec<BtwEvent> {
                 vec![]
             }
         }
+        Some("system") if !from_subagent && v["subtype"] == "init" => match v["session_id"].as_str() {
+            Some(id) if !id.is_empty() => vec![BtwEvent::Started { fork_id: id.into() }],
+            _ => vec![],
+        },
         _ => vec![],
     }
 }
@@ -426,6 +434,12 @@ mod tests {
         );
         assert_eq!(
             parse_line(r#"{"type":"system","subtype":"init","session_id":"f1"}"#),
+            vec![BtwEvent::Started {
+                fork_id: "f1".into()
+            }]
+        );
+        assert_eq!(
+            parse_line(r#"{"type":"system","subtype":"hook_started","session_id":"f1"}"#),
             vec![]
         );
         assert_eq!(parse_line("Warning: not json"), vec![]);

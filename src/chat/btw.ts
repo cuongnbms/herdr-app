@@ -18,7 +18,7 @@ export interface BtwThread {
   path: string;
   /** Set by the first `done`; later questions resume it. */
   forkId?: string;
-  /** The ask in flight, if the last turn runs. */
+  /** Identity of the latest ask (never cleared); late events of an older or closed ask are dropped by it. */
   askId?: string;
   turns: BtwTurn[];
 }
@@ -66,7 +66,7 @@ export async function askSide(pane: PaneRef, path: string, question: string): Pr
   events.onmessage = (e) => {
     if (e.kind === "delta") patchLast(key, askId, (t) => ({ ...t, a: t.a + e.text }));
     else if (e.kind === "tool") patchLast(key, askId, (t) => ({ ...t, tools: [...t.tools, e.name] }));
-    else if (e.kind === "done") patch(key, askId, (t) => ({ ...t, forkId: e.fork_id }));
+    else if (e.kind === "started" || e.kind === "done") patch(key, askId, (t) => ({ ...t, forkId: e.fork_id }));
     else patchLast(key, askId, (t) => ({ ...t, error: e.message }));
   };
   try {
