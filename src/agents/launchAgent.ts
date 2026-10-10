@@ -12,13 +12,13 @@ const LAUNCH_TIMEOUT_MS = 5000;
  * herdr reports the agent running there. Gives up after 5s, so the overlay never hides the
  * terminal for longer: the caller reports the error and the user sees what the shell did.
  */
-export async function launchAgent(call: Call, pane: PaneRef, kind: string): Promise<void> {
+export async function launchAgent(call: Call, pane: PaneRef, kind: string, args?: string[]): Promise<void> {
   const key = paneKey(pane);
   const { setStarting } = useApp.getState();
   const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
   setStarting(key, { agent: kind, phase: "shell" });
   try {
-    await startAgent(call, { name: kind, kind, pane_id: pane.pane_id }, { timeoutMs: LAUNCH_TIMEOUT_MS });
+    await startAgent(call, { name: kind, kind, pane_id: pane.pane_id, ...(args ? { args } : {}) }, { timeoutMs: LAUNCH_TIMEOUT_MS });
     setStarting(key, { agent: kind, phase: "agent" });
     await agentReported(pane, kind, deadline - Date.now());
   } finally {

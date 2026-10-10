@@ -2,6 +2,8 @@ export interface AgentStartParams {
   name: string;
   kind: string;
   pane_id: string;
+  /** Extra command-line arguments for the agent. */
+  args?: string[];
 }
 
 type Call = (method: string, params: unknown) => Promise<unknown>;

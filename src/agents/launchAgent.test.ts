@@ -26,6 +26,15 @@ describe("launchAgent", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("passes agent args to agent.start", async () => {
+    const call = vi.fn().mockResolvedValue({ ok: true });
+    const done = launchAgent(call, pane, "claude", ["--resume", "s1"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call).toHaveBeenCalledWith("agent.start", { name: "claude", kind: "claude", pane_id: "w1:p7", args: ["--resume", "s1"] });
+    useApp.getState().upsertMachine(machine("claude"));
+    await done;
+  });
+
   it("marks the pane starting until herdr reports the agent in it", async () => {
     const call = vi.fn().mockRejectedValueOnce(busy).mockResolvedValueOnce({ ok: true });
     const done = launchAgent(call, pane, "claude");
