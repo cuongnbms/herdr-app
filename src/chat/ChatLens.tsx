@@ -232,11 +232,21 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
   const forkPath = located?.path;
+  const forkAgent = located?.agent;
+  /** The user message whose fork is running, so its button shows busy. */
+  const [forking, setForking] = useState<string | null>(null);
   const onFork = useCallback(
-    (it: { id: string; text: string }) => void forkChat(pane, view.agent as "claude" | "pi", forkPath!, it),
-    [pane, view.agent, forkPath],
+    async (it: { id: string; text: string }) => {
+      setForking(it.id);
+      try {
+        await forkChat(pane, forkAgent as "claude" | "pi", forkPath!, it);
+      } finally {
+        setForking((f) => (f === it.id ? null : f));
+      }
+    },
+    [pane, forkAgent, forkPath],
   );
-  const forkable = canFork(view.agent, located);
+  const forkable = canFork(view.agent, located) && located?.agent === view.agent;
   const live = view.status === "working" || view.status === "blocked";
 
   const virt = useVirtualizer({
@@ -519,6 +529,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                     item={row.item}
                     copy
                     onFork={forkable ? onFork : undefined}
+                    forking={row.item.kind === "user" && !!row.item.id && row.item.id === forking}
                     result={row.item.kind === "tool_call" ? results.get(row.item.id) : undefined}
                   />
                 )}

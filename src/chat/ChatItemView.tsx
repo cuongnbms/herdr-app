@@ -158,12 +158,15 @@ export const ChatItemView = memo(function ChatItemView({
   result,
   copy = false,
   onFork,
+  forking = false,
 }: {
   item: ChatItem;
   result?: ToolResult;
   copy?: boolean;
   /** Fork the conversation from before this user message; the button shows only for a user item with an id. */
   onFork?: (item: { id: string; text: string }) => void;
+  /** This message's fork is running: the button is disabled until it ends. */
+  forking?: boolean;
 }) {
   switch (item.kind) {
     case "user":
@@ -180,6 +183,8 @@ export const ChatItemView = memo(function ChatItemView({
                   className="chat-copy chat-fork"
                   aria-label="Fork from here"
                   title="Fork from here"
+                  disabled={forking}
+                  aria-busy={forking || undefined}
                   onClick={() => onFork({ id: item.id!, text: item.text })}
                 >
                   <ForkIcon />

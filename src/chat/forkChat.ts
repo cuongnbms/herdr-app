@@ -1,6 +1,6 @@
 import { openAgentTab } from "../agents/openAgentTab";
 import { chatFork } from "../lib/ipc";
-import type { Located, PaneRef } from "../lib/types";
+import { paneKey, type Located, type PaneRef } from "../lib/types";
 import { useApp } from "../store/app";
 import { showToast } from "../ui/Toast";
 
@@ -21,11 +21,17 @@ function whereIs(pane: PaneRef): { workspaceId: string; cwd: string | null } | u
   return undefined;
 }
 
+/** Forks still running, by `${paneKey}|${entry id}`: a second click on the same message waits for none. */
+const inFlight = new Set<string>();
+
 /**
  * Forks the transcript at `path` from before the user message `item`: the cut becomes a new session,
  * opened as a new agent Tab on Chat with the message's text as its draft. Failures are toasted.
  */
 export async function forkChat(pane: PaneRef, agent: "claude" | "pi", path: string, item: { id: string; text: string }): Promise<void> {
+  const key = `${paneKey(pane)}|${item.id}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
   try {
     const at = whereIs(pane);
     if (!at) throw new Error("pane not found");
@@ -35,5 +41,7 @@ export async function forkChat(pane: PaneRef, agent: "claude" | "pi", path: stri
     await openAgentTab(pane.machine_id, pane.session, at.workspaceId, agent, forked.cwd ?? at.cwd ?? "", { args, draft: item.text });
   } catch (err) {
     showToast(`Could not fork: ${(err as { message?: string } | null)?.message ?? String(err)}`);
+  } finally {
+    inFlight.delete(key);
   }
 }

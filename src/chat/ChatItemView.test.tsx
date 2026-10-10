@@ -197,4 +197,17 @@ describe("Fork button", () => {
     rerender(<ChatItemView item={{ kind: "user", id: "u1", text: "x" }} copy />);
     expect(screen.queryByRole("button", { name: "Fork from here" })).toBeNull();
   });
+
+  it("is disabled and busy while its fork runs", () => {
+    const onFork = vi.fn();
+    const { rerender } = render(<ChatItemView item={{ kind: "user", id: "u4", text: "three" }} copy onFork={onFork} forking />);
+    const button = screen.getByRole("button", { name: "Fork from here" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(button);
+    expect(onFork).not.toHaveBeenCalled();
+    rerender(<ChatItemView item={{ kind: "user", id: "u4", text: "three" }} copy onFork={onFork} />);
+    expect(button.disabled).toBe(false);
+    expect(button.hasAttribute("aria-busy")).toBe(false);
+  });
 });

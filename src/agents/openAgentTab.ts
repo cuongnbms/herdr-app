@@ -1,7 +1,6 @@
 import { herdrCall } from "../lib/ipc";
-import { paneKey } from "../lib/types";
+import { paneKey, type PaneRef } from "../lib/types";
 import { writeDraft } from "../chat/drafts";
-import type { PaneRef } from "../lib/types";
 import { newAgentOnTerminal } from "../settings/lens";
 import { useApp } from "../store/app";
 import { launchAgent } from "./launchAgent";

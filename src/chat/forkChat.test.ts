@@ -79,6 +79,22 @@ describe("forkChat", () => {
     expect(readDraft(paneKey(fresh))).toBe("one");
   });
 
+  it("starts one fork when the same message is forked again while the first runs", async () => {
+    let finish!: (v: { id: string; path: string; cwd: string }) => void;
+    vi.mocked(chatFork).mockReturnValue(new Promise((r) => (finish = r)));
+    vi.mocked(herdrCall).mockImplementation(async (_m, _s, method) =>
+      method === "tab.create" ? { root_pane: { pane_id: "w1:p9" } } : { ok: true });
+    const first = forkChat(pane, "claude", "/p/old.jsonl", { id: "u4", text: "three" });
+    await forkChat(pane, "claude", "/p/old.jsonl", { id: "u4", text: "three" });
+    expect(chatFork).toHaveBeenCalledTimes(1);
+    finish({ id: "s2", path: "/p/s2.jsonl", cwd: "/w/b" });
+    await first;
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "tab.create", expect.anything());
+    vi.mocked(chatFork).mockResolvedValue({ id: "s3", path: "/p/s3.jsonl", cwd: "/w/b" });
+    await forkChat(pane, "claude", "/p/old.jsonl", { id: "u4", text: "three" });
+    expect(chatFork).toHaveBeenCalledTimes(2);
+  });
+
   it("toasts a failure", async () => {
     vi.mocked(chatFork).mockRejectedValue({ code: "not_found", message: "entry u9 not found in transcript" });
     await forkChat(pane, "claude", "/p/old.jsonl", { id: "u9", text: "x" });
