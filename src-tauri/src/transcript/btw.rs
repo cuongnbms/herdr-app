@@ -1,7 +1,10 @@
 //! Side questions (btw): the argv that runs `claude -p` on a fork of a Transcript, and the
 //! parsing of its stream-json output into events for the card.
+use crate::error::{AppError, AppResult};
+use crate::transport::{exec, exec_bytes, spawn_lines, Transport};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
 
 /// The `sh -c` body: enter the working directory, find `claude` (through a login shell when
 /// it is not on PATH) and exec it with the remaining arguments.
@@ -144,9 +147,170 @@ pub fn parse_line(line: &str) -> Vec<BtwEvent> {
     }
 }
 
+/// Drops ANSI escape sequences (`ESC [ … final`, or `ESC` plus one character) and `\r`.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '\x1b' => {
+                if it.peek() == Some(&'[') {
+                    it.next();
+                    for n in it.by_ref() {
+                        if ('\x40'..='\x7e').contains(&n) {
+                            break;
+                        }
+                    }
+                } else {
+                    it.next();
+                }
+            }
+            '\r' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Whether a non-JSON output line is worth showing in an error: not blank once cleaned, and
+/// not the `Connection to <host> closed.` ssh prints when a tty session ends.
+fn keep_noise(line: &str) -> bool {
+    let l = line.trim();
+    let ssh_closing = l.starts_with("Connection to ") && l.ends_with(" closed.");
+    !l.is_empty() && !ssh_closing
+}
+
+/// Asks `question` on a fork of the Transcript at `path` (or on the fork `fork_id`), running
+/// `claude -p` on the Machine in the Transcript's working directory and passing each parsed
+/// event to `emit`. `cancel` firing kills the run and returns without emitting.
+#[allow(clippy::too_many_arguments)]
+pub async fn ask(
+    t: &dyn Transport,
+    remote: bool,
+    program: &str,
+    path: &str,
+    question: &str,
+    fork_id: Option<&str>,
+    mut cancel: tokio::sync::oneshot::Receiver<()>,
+    emit: &mut (dyn FnMut(BtwEvent) + Send),
+) -> AppResult<()> {
+    if !path.starts_with('/') {
+        return Err(AppError::new(
+            "invalid",
+            format!("the transcript path is not absolute: {path}"),
+        ));
+    }
+    let out = exec_bytes(t, &["cat".to_string(), path.to_string()]).await?;
+    if out.status != 0 {
+        return Err(AppError::new(
+            "io",
+            format!("reading the transcript failed: {}", out.stderr.trim()),
+        ));
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let cwd = last_cwd(&text)
+        .ok_or_else(|| AppError::new("not_found", "the transcript has no working directory"))?;
+    let model = last_model(&text);
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let argv = btw_argv(program, &cwd, stem, fork_id, model.as_deref(), question);
+    let mut child = spawn_lines(t, &argv, remote).await?;
+    let mut finished = false;
+    let mut noise: VecDeque<String> = VecDeque::new();
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut cancel => return Ok(()), // dropping the child kills the process
+            line = child.next_line() => {
+                let Some(line) = line? else { break };
+                let events = parse_line(&line);
+                if events.is_empty() {
+                    let clean = strip_ansi(&line);
+                    if serde_json::from_str::<Value>(&line).is_err() && keep_noise(&clean) {
+                        if noise.len() == 5 {
+                            noise.pop_front();
+                        }
+                        noise.push_back(clean.trim().to_string());
+                    }
+                }
+                for e in events {
+                    match e {
+                        BtwEvent::Done { ref fork_id, .. } if fork_id.is_empty() => {
+                            finished = true;
+                            emit(BtwEvent::Error { message: "claude returned no session id".into() });
+                        }
+                        BtwEvent::Done { .. } | BtwEvent::Error { .. } => {
+                            finished = true;
+                            emit(e);
+                        }
+                        e => emit(e),
+                    }
+                }
+            }
+        }
+    }
+    let (status, stderr) = child.finish().await?;
+    if !finished {
+        let tail = noise.iter().cloned().collect::<Vec<_>>().join("\n");
+        let message = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !tail.is_empty() {
+            tail
+        } else {
+            format!("claude exited with {status}")
+        };
+        emit(BtwEvent::Error { message });
+    }
+    Ok(())
+}
+
+/// Deletes the fork `fork_id` that `claude -p --fork-session` left in the Machine's Claude
+/// config (`config_dir`, or `$CLAUDE_CONFIG_DIR`, or `~/.claude`). It lands in the project
+/// directory of the cwd the run used, not beside the Transcript, so every project directory
+/// is searched. Only a UUID that is not the Transcript's own id is ever removed.
+pub async fn discard_in(
+    t: &dyn Transport,
+    config_dir: Option<&str>,
+    path: &str,
+    fork_id: &str,
+) -> AppResult<()> {
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    if uuid::Uuid::parse_str(fork_id).is_err() || fork_id == stem {
+        return Err(AppError::new("invalid", "not a side question fork id"));
+    }
+    let script = r#"d="${1:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; rm -f -- "$d"/projects/*/"$2".jsonl; rm -rf -- "$d"/projects/*/"$2""#;
+    let argv: Vec<String> = ["sh", "-c", script, "sh", config_dir.unwrap_or(""), fork_id]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let out = exec(t, &argv).await?;
+    if out.status != 0 {
+        return Err(AppError::new(
+            "io",
+            format!("deleting the fork failed: {}", out.stderr.trim()),
+        ));
+    }
+    Ok(())
+}
+
+/// [`discard_in`] with the Machine's default Claude config.
+pub async fn discard(t: &dyn Transport, path: &str, fork_id: &str) -> AppResult<()> {
+    discard_in(t, None, path, fork_id).await
+}
+
+/// The cancel senders of the side questions running now, by ask id.
+#[derive(Default)]
+pub struct BtwRuns(pub std::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::local::LocalTransport;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
@@ -266,5 +430,203 @@ mod tests {
             ),
             vec![]
         );
+    }
+
+    fn fake(dir: &std::path::Path, body: &str) -> String {
+        let p = dir.join("fake-claude");
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    fn transcript(dir: &std::path::Path, cwd: &std::path::Path) -> String {
+        let p = dir.join("t1.jsonl");
+        std::fs::write(
+            &p,
+            format!(
+                "{{\"type\":\"assistant\",\"cwd\":\"{}\",\"message\":{{\"model\":\"m1\",\"content\":[]}}}}\n",
+                cwd.display()
+            ),
+        )
+        .unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn ask_streams_events_and_runs_in_the_transcript_cwd() {
+        let d = tempfile::tempdir().unwrap();
+        let work = d.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let prog = fake(
+            d.path(),
+            r#"for a; do q="$a"; done
+printf '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s|%s"}}}\n' "$(pwd -P)" "$q"
+echo '{"type":"result","is_error":false,"session_id":"f1","usage":{"input_tokens":1,"cache_read_input_tokens":2}}'"#,
+        );
+        let path = transcript(d.path(), &work);
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        let mut got = vec![];
+        ask(
+            &LocalTransport,
+            false,
+            &prog,
+            &path,
+            "why?",
+            None,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await
+        .unwrap();
+        let work = std::fs::canonicalize(&work).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                BtwEvent::Delta {
+                    text: format!("{}|why?", work.display())
+                },
+                BtwEvent::Done {
+                    fork_id: "f1".into(),
+                    cache_read: 2,
+                    input: 1
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_run_without_a_result_is_an_error_event() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(d.path(), "echo 'No conversation found' >&2; exit 1");
+        let path = transcript(d.path(), d.path());
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        let mut got = vec![];
+        ask(
+            &LocalTransport,
+            false,
+            &prog,
+            &path,
+            "q",
+            None,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![BtwEvent::Error {
+                message: "No conversation found".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_session_id_is_an_error_event() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            r#"echo '{"type":"result","is_error":false,"session_id":""}'"#,
+        );
+        let path = transcript(d.path(), d.path());
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        let mut got = vec![];
+        ask(
+            &LocalTransport,
+            false,
+            &prog,
+            &path,
+            "q",
+            None,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![BtwEvent::Error {
+                message: "claude returned no session id".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn noise_loses_ansi_and_the_ssh_closing_line() {
+        assert_eq!(strip_ansi("\x1b[?25hhello\r"), "hello");
+        assert!(!keep_noise("Connection to 1.2.3.4 closed."));
+        assert!(!keep_noise("  "));
+        assert!(keep_noise("boom"));
+    }
+
+    #[tokio::test]
+    async fn cancel_stops_the_run_without_events() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            "sleep 5; echo '{\"type\":\"result\",\"is_error\":false,\"session_id\":\"f1\"}'",
+        );
+        let path = transcript(d.path(), d.path());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tx.send(()).unwrap();
+        let mut got = vec![];
+        let t0 = std::time::Instant::now();
+        ask(
+            &LocalTransport,
+            false,
+            &prog,
+            &path,
+            "q",
+            None,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await
+        .unwrap();
+        assert!(got.is_empty());
+        assert!(t0.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn discard_removes_a_uuid_fork_from_any_project_dir() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = d.path().join("cfg");
+        let a = cfg.join("projects/-a");
+        let b = cfg.join("projects/-b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let path = transcript(&a, d.path());
+        let id = uuid::Uuid::new_v4().to_string();
+        std::fs::write(b.join(format!("{id}.jsonl")), "x").unwrap();
+        std::fs::create_dir(b.join(&id)).unwrap();
+        std::fs::write(b.join(&id).join("t.txt"), "x").unwrap();
+        let other = b.join(format!("{}.jsonl", uuid::Uuid::new_v4()));
+        std::fs::write(&other, "x").unwrap();
+        let cfg_s = cfg.to_str().unwrap();
+        discard_in(&LocalTransport, Some(cfg_s), &path, &id)
+            .await
+            .unwrap();
+        assert!(!b.join(format!("{id}.jsonl")).exists());
+        assert!(!b.join(&id).exists());
+        assert!(other.exists());
+        discard_in(&LocalTransport, Some(cfg_s), &path, &id)
+            .await
+            .unwrap();
+        assert_eq!(
+            discard_in(&LocalTransport, Some(cfg_s), &path, "t1")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert_eq!(
+            discard_in(&LocalTransport, Some(cfg_s), &path, "../t1")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert!(std::path::Path::new(&path).exists());
     }
 }

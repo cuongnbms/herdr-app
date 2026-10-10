@@ -68,6 +68,9 @@ pub fn run() {
             commands::chat_open,
             commands::chat_locate,
             commands::chat_fork,
+            commands::chat_btw_ask,
+            commands::chat_btw_cancel,
+            commands::chat_btw_discard,
             commands::chat_page,
             commands::chat_image,
             commands::chat_close,
@@ -123,6 +126,7 @@ pub fn run() {
             app.manage(mgr.clone());
             app.manage(attach);
             app.manage(chats);
+            app.manage(transcript::btw::BtwRuns::default());
             app.manage(Arc::new(files::watch_manager::FilesWatch::default()));
             tauri::async_runtime::spawn(async move { mgr.connect_at_startup().await });
             Ok(())
