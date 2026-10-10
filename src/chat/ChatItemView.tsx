@@ -73,7 +73,7 @@ function ToolSummary({ summary, input }: { summary: string; input: Record<string
       title="Open in Files"
       onClick={(e) => {
         e.stopPropagation();
-        openInFiles(pane, file);
+        void openInFiles(pane, file);
       }}
     >
       {summary}

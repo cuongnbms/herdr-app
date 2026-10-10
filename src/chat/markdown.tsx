@@ -55,7 +55,7 @@ function InlineCode({ children, className }: { children?: ReactNode; className?:
       title="Open in Files"
       onClick={(e) => {
         e.preventDefault();
-        openInFiles(pane, text);
+        void openInFiles(pane, text);
       }}
     >
       <code>{text}</code>

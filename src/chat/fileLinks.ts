@@ -4,6 +4,7 @@ import { panelRoot } from "../files/root";
 import { useFilesBus } from "../files/bus";
 import { itemKey } from "../store/openItems";
 import { showToast } from "../ui/Toast";
+import { filesRead } from "../lib/ipc";
 
 /** Extensions a bare file name (no folder) must end in to read as a file: `console.log` is code. */
 const COMMON_EXT = new Set(
@@ -67,8 +68,11 @@ export function relUnderRoot(path: string, cwd: string | null, root: string): st
   return parts.slice(top.parts.length).join("/");
 }
 
-/** Opens `path`, as the agent in `pane` wrote it, as a file item of its Workspace; `hash` is shown once it opens. */
-export function openInFiles(pane: PaneRef, path: string, hash?: string | null): void {
+/**
+ * Opens `path`, as the agent in `pane` wrote it, as a file item of its Workspace; `hash` is shown once it opens.
+ * A file that is not there gets a toast instead of a tab.
+ */
+export async function openInFiles(pane: PaneRef, path: string, hash?: string | null): Promise<void> {
   const state = useApp.getState();
   const found = selectedPane({ machines: state.machines, selected: pane });
   if (!found) return;
@@ -79,6 +83,17 @@ export function openInFiles(pane: PaneRef, path: string, hash?: string | null): 
     showToast(root ? `${path} is outside the workspace folder` : "This workspace has no folder");
     return;
   }
+  // A Machine that is not connected fails every read with not_found; that says nothing about the file.
+  if (state.machines[pane.machine_id]?.state === "connected") {
+    const missing = await filesRead(pane.machine_id, root.path, rel).then(
+      () => false,
+      (e: unknown) => (e as { code?: string } | null)?.code === "not_found",
+    );
+    if (missing) {
+      showToast(`${path} does not exist`);
+      return;
+    }
+  }
   useFilesBus.getState().setJump(hash ? { key: itemKey({ kind: "file", ws: ref, root: root.path, rel }), hash } : null);
-  state.openFile(ref, root.path, rel, { pin: false });
+  useApp.getState().openFile(ref, root.path, rel, { pin: false });
 }

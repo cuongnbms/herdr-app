@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { looksLikePath, relUnderRoot } from "./fileLinks";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { looksLikePath, openInFiles, relUnderRoot } from "./fileLinks";
+import { filesRead } from "../lib/ipc";
+import { showToast } from "../ui/Toast";
+
+const app = vi.hoisted(() => ({ openFile: vi.fn(), machineState: "connected" }));
+vi.mock("../lib/ipc", () => ({ filesRead: vi.fn() }));
+vi.mock("../ui/Toast", () => ({ showToast: vi.fn() }));
+vi.mock("../files/root", () => ({ panelRoot: () => ({ path: "/repo", source: "folder" }) }));
+vi.mock("../store/app", () => ({
+  useApp: { getState: () => ({ machines: { m: { state: app.machineState } }, selected: null, openFile: app.openFile }) },
+  selectedPane: () => ({ workspace: { workspace_id: "w" }, pane: { cwd: "/repo" } }),
+}));
 
 describe("looksLikePath", () => {
   it("takes paths with a folder and a file extension", () => {
@@ -53,5 +64,42 @@ describe("relUnderRoot", () => {
     expect(relUnderRoot("/root/app/a.md", null, "~/app")).toBe("a.md");
     expect(relUnderRoot("/srv/app/a.md", null, "~/app")).toBeNull();
     expect(relUnderRoot("a.md", "/home/me/app", "~/app")).toBe("a.md");
+  });
+});
+
+describe("openInFiles", () => {
+  const pane = { machine_id: "m", session: "s", pane_id: "p" };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    app.machineState = "connected";
+  });
+
+  it("opens a file that is there", async () => {
+    vi.mocked(filesRead).mockResolvedValue({ kind: "text", text: "", truncated: false } as never);
+    await openInFiles(pane, "src/a.ts");
+    expect(filesRead).toHaveBeenCalledWith("m", "/repo", "src/a.ts");
+    expect(app.openFile).toHaveBeenCalledWith({ machine_id: "m", session: "s", workspace_id: "w" }, "/repo", "src/a.ts", { pin: false });
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("toasts instead of opening a tab when the file is missing", async () => {
+    vi.mocked(filesRead).mockRejectedValue({ code: "not_found", message: "no such file" });
+    await openInFiles(pane, "src/gone.ts");
+    expect(app.openFile).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith("src/gone.ts does not exist");
+  });
+
+  it("still opens on other read errors, for the viewer to show", async () => {
+    vi.mocked(filesRead).mockRejectedValue({ code: "io", message: "permission denied" });
+    await openInFiles(pane, "src/a.ts");
+    expect(app.openFile).toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("does not check a Machine that is not connected", async () => {
+    app.machineState = "disconnected";
+    await openInFiles(pane, "src/a.ts");
+    expect(filesRead).not.toHaveBeenCalled();
+    expect(app.openFile).toHaveBeenCalled();
   });
 });
