@@ -684,7 +684,7 @@ describe("btw mode", () => {
     fireEvent.keyDown(box, { key: "b", code: "KeyB", metaKey: true });
     expect(screen.getByRole("button", { name: "btw" }).getAttribute("aria-pressed")).toBe("true");
     expect((box as HTMLTextAreaElement).value).toBe("");
-    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    expect(box.getAttribute("placeholder")).toBe("Ask a side question (not added to the Transcript)…");
     fireEvent.change(box, { target: { value: "why?" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(askSide).toHaveBeenCalledWith(pane, "/p/t1.jsonl", "why?");
@@ -716,7 +716,7 @@ describe("btw mode", () => {
     vi.mocked(chatGitStatus).mockClear();
     const { container } = render(<Composer pane={pane} agent="claude" status="blocked" btwPath="/p/t1.jsonl" btwOnly />);
     const box = screen.getByRole("textbox");
-    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    expect(box.getAttribute("placeholder")).toBe("Ask a side question (not added to the Transcript)…");
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     expect(container.querySelector(".composer-model")).toBeNull();
     expect(container.querySelector(".composer-quick")).toBeNull();

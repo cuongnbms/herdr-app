@@ -145,20 +145,20 @@ describe("ChatLens", () => {
     window.matchMedia ??= ((query: string) =>
       ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList);
     const { container } = render(<ChatLens pane={pane} view={{ status: "blocked", agent: "claude", title: "claude" } as PaneView} />);
-    const open = await screen.findByRole("button", { name: "btw — hỏi bên lề" });
+    const open = await screen.findByRole("button", { name: "btw — ask a side question" });
     const composer = () => container.querySelector<HTMLTextAreaElement>(".composer textarea");
     expect(container.querySelector(".blocked-panel")).toBeTruthy();
     expect(composer()).toBeNull();
     fireEvent.click(open);
     const box = composer()!;
-    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    expect(box.getAttribute("placeholder")).toBe("Ask a side question (not added to the Transcript)…");
     expect(container.querySelector(".blocked-panel")).toBeTruthy();
     fireEvent.change(box, { target: { value: "why?" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(askSide).toHaveBeenCalledWith(pane, "/p/t1.jsonl", "why?");
     expect(vi.mocked(herdrCall).mock.calls.some(([, , m]) => m === "agent.prompt")).toBe(false);
     fireEvent.keyDown(box, { key: "Escape" });
-    expect(screen.getByRole("button", { name: "btw — hỏi bên lề" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "btw — ask a side question" })).toBeTruthy();
     expect(composer()).toBeNull();
     useBtw.setState({ threads: {}, mode: {} });
   });
@@ -168,7 +168,7 @@ describe("ChatLens", () => {
       ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList);
     render(<ChatLens pane={pane} view={{ status: "blocked", agent: "pi", title: "pi" } as PaneView} />);
     await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByRole("button", { name: "btw — hỏi bên lề" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "btw — ask a side question" })).toBeNull();
   });
 
   it("does not locate again after an open that located, or a reattach to the same file", async () => {

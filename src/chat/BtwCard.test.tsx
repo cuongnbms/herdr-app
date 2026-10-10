@@ -32,21 +32,30 @@ describe("BtwCard", () => {
     setThread(true);
     render(<BtwCard pane={pane} />);
     expect(screen.getByText(/why\?/)).toBeTruthy();
-    expect(screen.getByText("⚙ Read")).toBeTruthy();
+    expect(screen.getByText("Read").classList.contains("btw-tool")).toBe(true);
     expect(screen.getByText("Because").tagName).toBe("STRONG");
-    fireEvent.click(screen.getByRole("button", { name: "Dừng" }));
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(stopSide).toHaveBeenCalledWith(key);
   });
 
-  it("Hỏi tiếp turns btw mode on, Đóng closes the thread, an error shows", () => {
+  it("Close closes the thread, an error shows, no Stop when idle", () => {
     setThread(false, "claude not found on this machine");
     render(<BtwCard pane={pane} />);
-    expect(screen.queryByRole("button", { name: "Dừng" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     expect(screen.getByText("claude not found on this machine")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Hỏi tiếp" }));
-    expect(useBtw.getState().mode[key]).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(closeSide).toHaveBeenCalledWith(pane);
+  });
+
+  it("copies a finished answer's markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    setThread(false);
+    render(<BtwCard pane={pane} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith("**Because**");
   });
 
   it("renders the answer with the transcript's markdown styles", () => {
@@ -59,7 +68,7 @@ describe("BtwCard", () => {
     const turn = (q: string, a = "", running = false) => ({ q, a, tools: [], running });
     const setTurns = (turns: ReturnType<typeof turn>[]) =>
       act(() => useBtw.setState({ threads: { [key]: { path: "/p/t1.jsonl", turns } }, mode: {} }));
-    const card = () => document.querySelector(".btw-card") as HTMLElement;
+    const card = () => document.querySelector(".btw-body") as HTMLElement;
     const size = (el: HTMLElement, scrollHeight: number, clientHeight: number) => {
       Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
       Object.defineProperty(el, "clientHeight", { configurable: true, value: clientHeight });

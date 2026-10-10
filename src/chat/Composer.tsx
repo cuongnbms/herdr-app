@@ -122,9 +122,9 @@ export function Composer({
   }, []);
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
-  // Whenever the mode changes (button, Cmd+B, the card's "Hỏi tiếp", or the Transcript going
-  // away), the old box's text is kept under its own Draft and the new box's is loaded, before
-  // useDraft can write the old text over it.
+  // Whenever the mode changes (button, Cmd+B, or the Transcript going away), the old box's text
+  // is kept under its own Draft and the new box's is loaded, before useDraft can write the old
+  // text over it.
   const [shownId, setShownId] = useState(draftId);
   if (shownId !== draftId) {
     writeDraft(shownId, text);
@@ -140,7 +140,7 @@ export function Composer({
     if (!btwPath) return;
     setBtwMode(key, !btwOn);
   };
-  // Entering the mode (by button, Cmd+B or the card's "Hỏi tiếp") puts the caret in the box.
+  // Entering the mode (by button or Cmd+B) puts the caret in the box.
   useEffect(() => {
     if (btwOn) box.current?.focus();
   }, [btwOn]);
@@ -357,7 +357,7 @@ export function Composer({
           autoComplete="off"
           placeholder={
             btwOn
-              ? "Hỏi bên lề (không vào Transcript)…"
+              ? "Ask a side question (not added to the Transcript)…"
               : offered
               ? `${offered}  (Tab to use)`
               : "Message the agent…  (Enter to send, Shift+Enter for newline, paste images)"

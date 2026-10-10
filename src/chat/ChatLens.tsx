@@ -579,7 +579,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
               <Composer pane={pane} agent={view.agent} btwPath={btwPath} status={view.status} btwOnly />
             ) : (
               <button className="btw-open" onClick={() => setBtwMode(key, true)}>
-                btw — hỏi bên lề
+                btw — ask a side question
               </button>
             ))}
         </>
