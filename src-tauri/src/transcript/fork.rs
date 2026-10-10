@@ -64,11 +64,81 @@ fn join(lines: Vec<String>) -> String {
     text
 }
 
+/// Claude records parallel tool calls as branches, so the parent chain reaches only the last
+/// result. Before the forked entry's line, also keep every `user` line whose `tool_result`
+/// answers a `tool_use` in a kept assistant line, plus its `attachment` descendants
+/// (transitively, stopping at any user or assistant line). Leaves `kept` in file order.
+fn add_parallel_tool_results(
+    parsed: &[(&str, Option<Value>)],
+    kept: &mut Vec<usize>,
+    entry_id: &str,
+) {
+    let Some(entry_at) = parsed
+        .iter()
+        .rposition(|(_, v)| v.as_ref().is_some_and(|v| v["uuid"] == entry_id))
+    else {
+        return;
+    };
+    let block_ids = |i: usize, kind: &str, key: &str| -> Vec<String> {
+        let Some(Value::Array(blocks)) = parsed[i].1.as_ref().map(|v| &v["message"]["content"])
+        else {
+            return Vec::new();
+        };
+        blocks
+            .iter()
+            .filter(|b| b["type"] == kind)
+            .filter_map(|b| b[key].as_str().map(str::to_string))
+            .collect()
+    };
+    let type_of = |i: usize| parsed[i].1.as_ref().and_then(|v| v["type"].as_str());
+    let tool_uses: HashSet<String> = kept
+        .iter()
+        .filter(|&&i| type_of(i) == Some("assistant"))
+        .flat_map(|&i| block_ids(i, "tool_use", "id"))
+        .collect();
+    let mut added: HashSet<usize> = kept.iter().copied().collect();
+    // Attachments hang off kept assistant lines and off the results added below.
+    let mut uuids: HashSet<String> = kept
+        .iter()
+        .filter(|&&i| type_of(i) == Some("assistant"))
+        .filter_map(|&i| parsed[i].1.as_ref()?["uuid"].as_str().map(str::to_string))
+        .collect();
+    for i in 0..entry_at {
+        if !added.contains(&i)
+            && type_of(i) == Some("user")
+            && block_ids(i, "tool_result", "tool_use_id")
+                .iter()
+                .any(|id| tool_uses.contains(id))
+        {
+            added.insert(i);
+            if let Some(u) = parsed[i].1.as_ref().and_then(|v| v["uuid"].as_str()) {
+                uuids.insert(u.to_string());
+            }
+        }
+    }
+    // File order puts a parent before its child, so one forward pass finds all descendants.
+    for i in 0..entry_at {
+        if added.contains(&i) || type_of(i) != Some("attachment") {
+            continue;
+        }
+        let parent = parsed[i].1.as_ref().and_then(|v| v["parentUuid"].as_str());
+        if parent.is_some_and(|p| uuids.contains(p)) {
+            added.insert(i);
+            if let Some(u) = parsed[i].1.as_ref().and_then(|v| v["uuid"].as_str()) {
+                uuids.insert(u.to_string());
+            }
+        }
+    }
+    *kept = added.into_iter().collect();
+    kept.sort_unstable();
+}
+
 /// Cut a Claude Transcript to the chain before `entry_id`, re-keyed to session `new_id`.
 /// `Ok(None)` when that chain holds no user or assistant line.
 pub fn cut_claude(text: &str, entry_id: &str, new_id: &str) -> AppResult<Option<Cut>> {
     let parsed = parse(text);
-    let kept = chain(&parsed, "uuid", "parentUuid", entry_id)?;
+    let mut kept = chain(&parsed, "uuid", "parentUuid", entry_id)?;
+    add_parallel_tool_results(&parsed, &mut kept, entry_id);
     let has_conversation = kept.iter().any(|&i| {
         matches!(
             parsed[i].1.as_ref().and_then(|v| v["type"].as_str()),
@@ -275,6 +345,43 @@ mod tests {
         let cut = cut_claude(t, "u2", "new").unwrap().unwrap();
         assert_eq!(lines(&cut.text).len(), 1);
         assert_eq!(cut.cwd, None);
+    }
+
+    #[test]
+    fn claude_keeps_results_of_parallel_tool_calls() {
+        let t = concat!(
+            r#"{"type":"user","uuid":"root","parentUuid":null,"sessionId":"old","message":{"content":"r"}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"P","parentUuid":"root","sessionId":"old","message":{"content":"p"}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"A1","parentUuid":"P","sessionId":"old","message":{"content":[{"type":"tool_use","id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"A2","parentUuid":"A1","sessionId":"old","message":{"content":[{"type":"tool_use","id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"AT2","parentUuid":"A2","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R1","parentUuid":"A1","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"X1","parentUuid":"R1","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"X2","parentUuid":"X1","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R2","parentUuid":"A2","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"attachment","uuid":"AR2","parentUuid":"R2","sessionId":"old"}"#,
+            "\n",
+            r#"{"type":"user","uuid":"F","parentUuid":"AR2","sessionId":"old","message":{"content":"fork here"}}"#,
+            "\n",
+        );
+        let cut = cut_claude(t, "F", "new").unwrap().unwrap();
+        let ids: Vec<String> = lines(&cut.text)
+            .iter()
+            .map(|v| v["uuid"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            ids,
+            ["root", "P", "A1", "A2", "AT2", "R1", "X1", "X2", "R2", "AR2"]
+        );
     }
 
     const PI: &str = concat!(
