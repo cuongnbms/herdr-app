@@ -147,10 +147,12 @@ pub fn parse_line(line: &str) -> Vec<BtwEvent> {
                 vec![]
             }
         }
-        Some("system") if !from_subagent && v["subtype"] == "init" => match v["session_id"].as_str() {
-            Some(id) if !id.is_empty() => vec![BtwEvent::Started { fork_id: id.into() }],
-            _ => vec![],
-        },
+        Some("system") if !from_subagent && v["subtype"] == "init" => {
+            match v["session_id"].as_str() {
+                Some(id) if !id.is_empty() => vec![BtwEvent::Started { fork_id: id.into() }],
+                _ => vec![],
+            }
+        }
         _ => vec![],
     }
 }
