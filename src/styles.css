@@ -921,10 +921,10 @@ kbd {
 }
 .chat-new .icon { width: 14px; height: 14px; }
 .chat-working {
-  flex: none; display: flex; align-items: center; gap: 8px; width: 100%; max-width: 840px; margin: 0 auto;
-  padding: 6px 28px 0; box-sizing: border-box; color: var(--fg-3); font-size: 12px;
-  animation: fade-in var(--t) var(--ease);
+  flex: none; display: flex; align-items: center; width: 100%; max-width: 840px; height: 22px; margin: 0 auto;
+  padding: 6px 28px 0; box-sizing: border-box; color: var(--fg-3); font-size: 12px; line-height: 16px;
 }
+.chat-working-label { display: flex; align-items: center; gap: 8px; animation: fade-in var(--t) var(--ease); }
 .chat-working-dots { display: inline-flex; gap: 3px; }
 .chat-working-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: working-dot 1.2s ease-in-out infinite; }
 .chat-working-dots i:nth-child(2) { animation-delay: 0.15s; }

@@ -10,4 +10,10 @@ describe("WorkingIndicator", () => {
     render(<WorkingIndicator status={status} />);
     expect(screen.queryByRole("status")).toBeNull();
   });
+  it("keeps its row while hidden, so the layout does not jump", () => {
+    const { container, rerender } = render(<WorkingIndicator status="working" />);
+    const row = container.querySelector(".chat-working");
+    rerender(<WorkingIndicator status="idle" />);
+    expect(container.querySelector(".chat-working")).toBe(row);
+  });
 });
