@@ -104,11 +104,9 @@ fn add_parallel_tool_results(
         .filter(|&&i| type_of(i) == Some("assistant"))
         .filter_map(|&i| message_id(i))
         .collect();
-    for i in 0..entry_at {
-        if type_of(i) == Some("assistant") && message_id(i).is_some_and(|m| responses.contains(m)) {
-            added.insert(i);
-        }
-    }
+    added.extend((0..entry_at).filter(|&i| {
+        type_of(i) == Some("assistant") && message_id(i).is_some_and(|m| responses.contains(m))
+    }));
     let assistants: Vec<usize> = added
         .iter()
         .copied()
@@ -123,7 +121,7 @@ fn add_parallel_tool_results(
         .iter()
         .filter_map(|&i| parsed[i].1.as_ref()?["uuid"].as_str().map(str::to_string))
         .collect();
-    for i in 0..entry_at {
+    for (i, (_, v)) in parsed[..entry_at].iter().enumerate() {
         if !added.contains(&i)
             && type_of(i) == Some("user")
             && block_ids(i, "tool_result", "tool_use_id")
@@ -131,20 +129,20 @@ fn add_parallel_tool_results(
                 .any(|id| tool_uses.contains(id))
         {
             added.insert(i);
-            if let Some(u) = parsed[i].1.as_ref().and_then(|v| v["uuid"].as_str()) {
+            if let Some(u) = v.as_ref().and_then(|v| v["uuid"].as_str()) {
                 uuids.insert(u.to_string());
             }
         }
     }
     // File order puts a parent before its child, so one forward pass finds all descendants.
-    for i in 0..entry_at {
+    for (i, (_, v)) in parsed[..entry_at].iter().enumerate() {
         if added.contains(&i) || type_of(i) != Some("attachment") {
             continue;
         }
-        let parent = parsed[i].1.as_ref().and_then(|v| v["parentUuid"].as_str());
+        let parent = v.as_ref().and_then(|v| v["parentUuid"].as_str());
         if parent.is_some_and(|p| uuids.contains(p)) {
             added.insert(i);
-            if let Some(u) = parsed[i].1.as_ref().and_then(|v| v["uuid"].as_str()) {
+            if let Some(u) = v.as_ref().and_then(|v| v["uuid"].as_str()) {
                 uuids.insert(u.to_string());
             }
         }
@@ -244,6 +242,12 @@ pub async fn fork(t: &dyn Transport, agent: &str, path: &str, entry_id: &str) ->
             format!("forking is not supported for {agent}"),
         ));
     }
+    if !path.starts_with('/') {
+        return Err(AppError::new(
+            "invalid",
+            format!("the transcript path is not absolute: {path}"),
+        ));
+    }
     let out = exec_bytes(t, &["cat".to_string(), path.to_string()]).await?;
     if out.status != 0 {
         return Err(AppError::new(
@@ -281,7 +285,10 @@ async fn write_new(t: &dyn Transport, path: &str, text: &str) -> AppResult<()> {
     let argv: Vec<String> = vec![
         "sh".into(),
         "-c".into(),
-        "umask 077; set -C; cat > \"$1\"".into(),
+        // `set -C` refuses an existing file before anything is written; only a file this call
+        // created is removed when the copy fails part way.
+        "umask 077; set -C; : > \"$1\" || exit 1; cat >> \"$1\" || { rm -f \"$1\"; exit 1; }"
+            .into(),
         "sh".into(),
         path.into(),
     ];
@@ -542,6 +549,13 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
         assert_eq!(
             fork(&LocalTransport, "codex", taken.to_str().unwrap(), "u1")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
+        assert_eq!(
+            fork(&LocalTransport, "claude", "old.jsonl", "u4")
                 .await
                 .unwrap_err()
                 .code,

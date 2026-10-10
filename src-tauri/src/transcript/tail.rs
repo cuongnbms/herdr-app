@@ -556,7 +556,7 @@ mod tests {
                 }])
             } else {
                 ParserOutput::Append(vec![ChatItem::User {
-id: None,
+                    id: None,
                     images: vec![],
                     skills: vec![],
                     ts: None,
@@ -579,7 +579,7 @@ id: None,
                 return ParserOutput::None;
             }
             ParserOutput::Append(vec![ChatItem::User {
-id: None,
+                id: None,
                 ts: None,
                 text: line.into(),
                 images: vec![],
@@ -811,7 +811,7 @@ id: None,
         assert_eq!(
             older[0],
             ChatItem::User {
-id: None,
+                id: None,
                 images: vec![],
                 skills: vec![],
                 ts: None,
