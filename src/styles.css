@@ -972,6 +972,11 @@ kbd {
   max-height: calc(1.5em * 12); overflow-y: auto;
 }
 .composer textarea:focus-visible { box-shadow: none; }
+.composer.btw textarea { padding: 6px 8px; border: 1px dashed var(--accent); border-radius: 6px; }
+button.composer-btw { margin-left: auto; padding: 2px 6px; border: 0; border-radius: 5px; background: none; color: var(--fg-3); font-size: 11.5px; cursor: pointer; }
+button.composer-btw:hover { background: var(--active); color: var(--fg-2); }
+button.composer-btw[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.composer-btw + .composer-model { margin-left: 0; }
 .composer-bar { display: flex; align-items: center; gap: 8px; }
 .composer-model { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: 11.5px; }
 .composer-git {

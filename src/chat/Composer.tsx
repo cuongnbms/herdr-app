@@ -7,7 +7,8 @@ import { CompletionMenu } from "./CompletionMenu";
 import { GitStatusLine } from "./GitStatus";
 import { rankCommands, rankFiles, readUsage, recordUse, splitParentQuery } from "./complete";
 import { dirSuggestions } from "../lib/pathInput";
-import { readDraft, useDraft } from "./drafts";
+import { askSide, setBtwMode, useBtw } from "./btw";
+import { readDraft, useDraft, writeDraft } from "./drafts";
 import { usePaneImages, type Attachment } from "./draftImages";
 import { activeTrigger, applyCompletion } from "./mentions";
 import { modelLabel } from "./modelLabel";
@@ -56,6 +57,7 @@ export function Composer({
   onPiModel,
   meta,
   onSend,
+  btwPath,
 }: {
   pane: PaneRef;
   agent: string | null;
@@ -69,9 +71,17 @@ export function Composer({
    * revoke; a failed send's go back into the box.
    */
   onSend?: (text: string, previews: string[]) => (ok: boolean) => void;
+  /** The located Claude Transcript's path when side questions (btw) are available; else none. */
+  btwPath?: string | null;
 }) {
   const key = paneKey(pane);
-  const [text, setText] = useState(() => readDraft(key));
+  const btwOn = !!btwPath && !!useBtw((s) => s.mode[key]);
+  const btwRunning = useBtw((s) => {
+    const turns = s.threads[key]?.turns;
+    return !!turns && turns.length > 0 && turns[turns.length - 1].running;
+  });
+  const draftId = btwOn ? `btw:${key}` : key;
+  const [text, setText] = useState(() => readDraft(draftId));
   // Kept per pane outside the Composer, so a tab switch does not drop them; a paste or send
   // in flight updates the pane it started on.
   const [images, setImages] = usePaneImages(key);
@@ -106,13 +116,26 @@ export function Composer({
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
   // Sending clears the text and a failed send restores it, so the draft follows both.
-  useDraft(key, text);
+  useDraft(draftId, text);
+
+  /** Swaps between the agent box and the side-question box, each keeping its own Draft. */
+  const toggleBtw = () => {
+    if (!btwPath) return;
+    writeDraft(draftId, text);
+    setText(readDraft(btwOn ? key : `btw:${key}`));
+    setDismissed(false);
+    setBtwMode(key, !btwOn);
+  };
+  // Entering the mode (by button, Cmd+B or the card's "Hỏi tiếp") puts the caret in the box.
+  useEffect(() => {
+    if (btwOn) box.current?.focus();
+  }, [btwOn]);
 
   const [sending, setSending] = useState(false);
   // Read only while the box is empty (that is when the suggestion shows, and Tab takes it), and
   // not while a send is on its way: Claude's box would still show the old suggestion.
-  const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending);
-  const offered = text === "" ? suggestion : null;
+  const { suggestion, clear: clearSuggestion } = useClaudeSuggestion(pane, agent, status, text === "" && !sending && !btwOn);
+  const offered = text === "" && !btwOn ? suggestion : null;
   const label = modelLabel(meta);
   // Where the model menu opens from; null while it is closed.
   const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
@@ -120,7 +143,7 @@ export function Composer({
   const quickReplies = quickReplyButtons(useQuickReplies((s) => s.replies));
 
   const found = activeTrigger(text, caret, { skills: agent === "codex" });
-  const trigger = found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
+  const trigger = !btwOn && found && (found.kind === "file" || (agent && SLASH_AGENTS.has(agent))) ? found : null;
   const query = trigger?.query;
   const kind = trigger?.kind ?? null;
   const prefix = trigger?.prefix ?? "/";
@@ -199,7 +222,9 @@ export function Composer({
     });
 
   const uploading = images.some((a) => a.path === null);
-  const canSend = !uploading && (text.trim() !== "" || images.length > 0);
+  const canSend = btwOn
+    ? text.trim() !== "" && !btwRunning
+    : !uploading && (text.trim() !== "" || images.length > 0);
 
   const submit = async (sent: string, paths: string[]) => {
     const target = pane.pane_id;
@@ -217,6 +242,11 @@ export function Composer({
 
   const send = () => {
     if (!canSend) return;
+    if (btwOn && btwPath) {
+      void askSide(pane, btwPath, text);
+      setText("");
+      return;
+    }
     const sent = text;
     const sentImages = images;
     setText("");
@@ -257,7 +287,7 @@ export function Composer({
   };
 
   return (
-    <div className="composer">
+    <div className={`composer${btwOn ? " btw" : ""}`}>
       <div className="composer-top">
         {showQuick && quickReplies.length > 0 && (
           <div className="composer-quick" role="group" aria-label="Quick replies">
@@ -309,7 +339,9 @@ export function Composer({
           autoCapitalize="off"
           autoComplete="off"
           placeholder={
-            offered
+            btwOn
+              ? "Hỏi bên lề (không vào Transcript)…"
+              : offered
               ? `${offered}  (Tab to use)`
               : "Message the agent…  (Enter to send, Shift+Enter for newline, paste images)"
           }
@@ -320,6 +352,7 @@ export function Composer({
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onPaste={(e) => {
+            if (btwOn) return;
             const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
             if (files.length === 0) return;
             // Text that came with the image still lands in the textarea.
@@ -331,6 +364,15 @@ export function Composer({
             if (open && e.key === "Escape" && !e.nativeEvent.isComposing) {
               e.preventDefault();
               return setDismissed(true);
+            }
+            if (e.nativeEvent.isComposing) {
+              /* an IME owns these keys */
+            } else if (btwPath && e.key === "b" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+              e.preventDefault();
+              return toggleBtw();
+            } else if (btwOn && e.key === "Escape") {
+              e.preventDefault();
+              return toggleBtw();
             }
             if (capturing && !e.nativeEvent.isComposing) {
               const move = (by: number) => {
@@ -365,6 +407,16 @@ export function Composer({
         />
         <div className="composer-bar">
           <GitStatusLine pane={pane} status={status} />
+          {btwPath && (
+            <button
+              className="composer-btw"
+              title="Side question (Cmd+B)"
+              aria-pressed={btwOn}
+              onClick={toggleBtw}
+            >
+              btw
+            </button>
+          )}
           {agent === "claude" ? (
             // Claude takes /model and /effort with an argument; only while idle, since a turn would
             // queue them and a blocked prompt would take the text as its answer.
