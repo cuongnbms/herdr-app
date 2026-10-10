@@ -183,16 +183,35 @@ fn strip_ansi(s: &str) -> String {
 }
 
 /// Whether a non-JSON output line is worth showing in an error: not blank once cleaned, and
-/// not the `Connection to <host> closed.` ssh prints when a tty session ends.
+/// not the `Connection to <host> closed.` ssh prints when a tty session ends (or the `Shared
+/// connection to <host> closed.` of a ControlMaster mux client).
 fn keep_noise(line: &str) -> bool {
     let l = line.trim();
-    let ssh_closing = l.starts_with("Connection to ") && l.ends_with(" closed.");
+    let ssh_closing = (l.starts_with("Connection to ") || l.starts_with("Shared connection to "))
+        && l.ends_with(" closed.");
     !l.is_empty() && !ssh_closing
+}
+
+/// Whether a stream-json line starts a new assistant message of the main conversation.
+fn starts_message(v: &Value) -> bool {
+    v["type"] == "stream_event"
+        && v["parent_tool_use_id"].is_null()
+        && v["event"]["type"] == "message_start"
+}
+
+/// Pushes `line` onto a ring that keeps the last 5.
+fn push_last5(ring: &mut VecDeque<String>, line: String) {
+    if ring.len() == 5 {
+        ring.pop_front();
+    }
+    ring.push_back(line);
 }
 
 /// Asks `question` on a fork of the Transcript at `path` (or on the fork `fork_id`), running
 /// `claude -p` on the Machine in the Transcript's working directory and passing each parsed
-/// event to `emit`. `cancel` firing kills the run and returns without emitting.
+/// event to `emit`. `cancel` firing kills the run and returns without emitting. The text of
+/// an answer's later messages starts after a blank line. A `fork_id` that is the
+/// Transcript's own id is refused, and a run that did not fork is stopped with an error.
 #[allow(clippy::too_many_arguments)]
 pub async fn ask(
     t: &dyn Transport,
@@ -225,10 +244,18 @@ pub async fn ask(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
+    if fork_id.is_some_and(|f| f.eq_ignore_ascii_case(stem)) {
+        return Err(AppError::new(
+            "invalid",
+            "the fork id is the transcript's own id",
+        ));
+    }
     let argv = btw_argv(program, &cwd, stem, fork_id, model.as_deref(), question);
     let mut child = spawn_lines(t, &argv, remote).await?;
     let mut finished = false;
     let mut noise: VecDeque<String> = VecDeque::new();
+    // Text has been emitted, and a later message has started since.
+    let (mut wrote, mut gap) = (false, false);
     loop {
         tokio::select! {
             biased;
@@ -236,17 +263,29 @@ pub async fn ask(
             line = child.next_line() => {
                 let Some(line) = line? else { break };
                 let events = parse_line(&line);
-                if events.is_empty() {
-                    let clean = strip_ansi(&line);
-                    if serde_json::from_str::<Value>(&line).is_err() && keep_noise(&clean) {
-                        if noise.len() == 5 {
-                            noise.pop_front();
+                match serde_json::from_str::<Value>(&line) {
+                    Ok(v) => gap |= wrote && starts_message(&v),
+                    Err(_) => {
+                        let clean = strip_ansi(&line);
+                        if keep_noise(&clean) {
+                            push_last5(&mut noise, clean.trim().to_string());
                         }
-                        noise.push_back(clean.trim().to_string());
                     }
                 }
                 for e in events {
                     match e {
+                        BtwEvent::Started { ref fork_id } if fork_id.eq_ignore_ascii_case(stem) => {
+                            // Resumed the Transcript itself: stop before it is written to.
+                            emit(BtwEvent::Error { message: "claude did not fork the transcript".into() });
+                            return Ok(()); // dropping the child kills the process
+                        }
+                        BtwEvent::Delta { .. } => {
+                            if std::mem::take(&mut gap) {
+                                emit(BtwEvent::Delta { text: "\n\n".into() });
+                            }
+                            wrote = true;
+                            emit(e);
+                        }
                         BtwEvent::Done { ref fork_id, .. } if fork_id.is_empty() => {
                             finished = true;
                             emit(BtwEvent::Error { message: "claude returned no session id".into() });
@@ -264,13 +303,11 @@ pub async fn ask(
     let (status, stderr) = child.finish().await?;
     if !finished {
         let tail = noise.iter().cloned().collect::<Vec<_>>().join("\n");
-        let err_text = stderr
-            .lines()
-            .map(strip_ansi)
-            .filter(|l| keep_noise(l))
-            .map(|l| l.trim().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let mut err_lines = VecDeque::new();
+        for l in stderr.lines().map(strip_ansi).filter(|l| keep_noise(l)) {
+            push_last5(&mut err_lines, l.trim().to_string());
+        }
+        let err_text = err_lines.into_iter().collect::<Vec<_>>().join("\n");
         let message = if !err_text.is_empty() {
             err_text
         } else if !tail.is_empty() {
@@ -587,6 +624,10 @@ echo '{"type":"result","is_error":false,"session_id":"f1","usage":{"input_tokens
     fn noise_loses_ansi_and_the_ssh_closing_line() {
         assert_eq!(strip_ansi("\x1b[?25hhello\r"), "hello");
         assert!(!keep_noise("Connection to 1.2.3.4 closed."));
+        assert!(!keep_noise(&strip_ansi(
+            "Shared connection to devtuf closed.\r"
+        )));
+        assert!(!keep_noise("Shared connection to devtuf closed.\r"));
         assert!(!keep_noise("  "));
         assert!(keep_noise("boom"));
     }
@@ -666,7 +707,7 @@ echo '{"type":"result","is_error":false,"session_id":"f1","usage":{"input_tokens
         let d = tempfile::tempdir().unwrap();
         let prog = fake(
             d.path(),
-            "echo 'real failure'; echo 'Connection to h closed.' >&2; exit 1",
+            r"echo 'real failure'; echo 'Connection to h closed.' >&2; printf 'Shared connection to h closed.\r\n' >&2; exit 1",
         );
         let path = transcript(d.path(), d.path());
         let (_tx, rx) = tokio::sync::oneshot::channel();
@@ -705,5 +746,122 @@ echo '{"type":"result","is_error":false,"session_id":"f1","usage":{"input_tokens
             );
         }
         assert!(path.exists());
+    }
+
+    async fn run(prog: &str, path: &str, fork_id: Option<&str>) -> (AppResult<()>, Vec<BtwEvent>) {
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        let mut got = vec![];
+        let r = ask(
+            &LocalTransport,
+            false,
+            prog,
+            path,
+            "q",
+            fork_id,
+            rx,
+            &mut |e| got.push(e),
+        )
+        .await;
+        (r, got)
+    }
+
+    #[tokio::test]
+    async fn resuming_the_transcripts_own_id_is_refused_before_spawning() {
+        let d = tempfile::tempdir().unwrap();
+        let marker = d.path().join("ran");
+        let prog = fake(d.path(), &format!("touch '{}'", marker.display()));
+        let path = transcript(d.path(), d.path());
+        for bad in ["t1", "T1"] {
+            let (r, got) = run(&prog, &path, Some(bad)).await;
+            assert_eq!(r.unwrap_err().code, "invalid");
+            assert!(got.is_empty());
+        }
+        assert!(!marker.exists());
+    }
+
+    #[tokio::test]
+    async fn a_run_that_did_not_fork_is_an_error_and_is_stopped() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            r#"echo '{"type":"system","subtype":"init","session_id":"T1"}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"x"}}}'
+echo '{"type":"result","is_error":false,"session_id":"T1"}'"#,
+        );
+        let path = transcript(d.path(), d.path());
+        let (r, got) = run(&prog, &path, None).await;
+        r.unwrap();
+        assert_eq!(
+            got,
+            vec![BtwEvent::Error {
+                message: "claude did not fork the transcript".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_messages_of_one_answer_are_separated_by_a_blank_line() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            r#"start='{"type":"stream_event","event":{"type":"message_start","message":{}}}'
+text() { printf '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}}\n' "$1"; }
+echo "$start"; text A
+echo "$start"; text B
+echo '{"type":"result","is_error":false,"session_id":"f1"}'"#,
+        );
+        let path = transcript(d.path(), d.path());
+        let (r, got) = run(&prog, &path, None).await;
+        r.unwrap();
+        let text: String = got
+            .iter()
+            .filter_map(|e| match e {
+                BtwEvent::Delta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "A\n\nB");
+    }
+
+    #[tokio::test]
+    async fn a_message_without_text_adds_no_blank_line() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            r#"start='{"type":"stream_event","event":{"type":"message_start","message":{}}}'
+echo "$start"
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Read","input":{}}]}}'
+echo "$start"
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"B"}}}'
+echo '{"type":"result","is_error":false,"session_id":"f1"}'"#,
+        );
+        let path = transcript(d.path(), d.path());
+        let (r, got) = run(&prog, &path, None).await;
+        r.unwrap();
+        assert_eq!(
+            got[0],
+            BtwEvent::Tool {
+                name: "Read".into()
+            }
+        );
+        assert_eq!(got[1], BtwEvent::Delta { text: "B".into() });
+    }
+
+    #[tokio::test]
+    async fn stderr_in_an_error_keeps_its_last_five_lines() {
+        let d = tempfile::tempdir().unwrap();
+        let prog = fake(
+            d.path(),
+            "for i in 1 2 3 4 5 6 7; do echo \"e$i\" >&2; done; exit 1",
+        );
+        let path = transcript(d.path(), d.path());
+        let (r, got) = run(&prog, &path, None).await;
+        r.unwrap();
+        assert_eq!(
+            got,
+            vec![BtwEvent::Error {
+                message: "e3\ne4\ne5\ne6\ne7".into()
+            }]
+        );
     }
 }
