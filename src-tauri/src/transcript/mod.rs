@@ -1,5 +1,6 @@
 //! Transcript discovery and streaming: find an agent's JSONL transcript on a Machine and
 //! tail it into chat items.
+pub mod btw;
 pub mod claude;
 pub mod fork;
 pub mod images;
