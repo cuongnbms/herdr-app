@@ -169,13 +169,22 @@ function PromptCard({
           <figcaption>
             Preview · {prompt.options[previewing]?.label.replace(RECOMMENDED_RE, "")}
           </figcaption>
-          {previewText !== null ? (
-            <pre>{previewText}</pre>
-          ) : (
-            <p className="prompt-preview-none">
-              {previews !== null ? "No preview for this option." : "The terminal shows this option's preview once its cursor is there."}
-            </p>
-          )}
+          {/* every preview the transcript has sits in one grid cell, only the pointed one visible, so
+              the card keeps the tallest one's height: a card that resized on hover moved the options
+              under the mouse, which pointed at another option, which resized it again */}
+          <div className="prompt-preview-stack">
+            {(previews ?? [previewText]).map((text, i) => {
+              const showing = previews === null || i === previewing;
+              const layer = showing ? undefined : "prompt-preview-hidden";
+              return text !== null ? (
+                <pre key={i} className={layer} aria-hidden={!showing || undefined}>{text}</pre>
+              ) : (
+                <p key={i} className={"prompt-preview-none" + (layer ? " " + layer : "")} aria-hidden={!showing || undefined}>
+                  {previews !== null ? "No preview for this option." : "The terminal shows this option's preview once its cursor is there."}
+                </p>
+              );
+            })}
+          </div>
         </figure>
       )}
       </div>

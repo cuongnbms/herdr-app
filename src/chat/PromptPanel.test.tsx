@@ -103,7 +103,10 @@ describe("PromptPanel", () => {
     render(<PromptPanel pane={pane} view={view} asked={asked} />);
     expect(await screen.findByText("( Started 09:00 )")).toBeTruthy();
     fireEvent.mouseEnter(screen.getByRole("button", { name: /Timeline/ }));
-    expect(screen.getByText(/o 09:15/)).toBeTruthy();
+    expect(screen.getByText(/o 09:15/).getAttribute("aria-hidden")).toBeNull();
+    // the other preview stays laid out, hidden, so the card keeps one height while pointing around
+    expect(screen.getByText("( Started 09:00 )").getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("( Started 09:00 )").className).toBe("prompt-preview-hidden");
     expect(sent()).toEqual([]);
   });
 

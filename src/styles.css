@@ -1090,6 +1090,9 @@ button.composer-model:disabled { cursor: default; }
 }
 .prompt-preview pre { margin: 0; padding: 10px 12px; max-height: 340px; overflow: auto; white-space: pre; color: var(--fg-2); font: 12px/1.45 var(--mono); }
 .prompt-preview-none { margin: 0; padding: 10px 12px; color: var(--fg-3); font-size: 12px; }
+.prompt-preview-stack { display: grid; }
+.prompt-preview-stack > * { grid-area: 1 / 1; }
+.prompt-preview-hidden { visibility: hidden; }
 .prompt-custom { display: flex; gap: 6px; }
 .prompt-custom input {
   flex: 1; min-width: 0; height: 30px; padding: 0 10px; box-sizing: border-box;
