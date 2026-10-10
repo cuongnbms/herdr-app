@@ -59,9 +59,11 @@ fork's own file.
   assistant line (none found: no `--model`).
 - Runs in the `cwd` of the Transcript's last line (as `chat_fork` finds it), since Claude finds
   `--resume <id>` only in the project dir of the cwd it runs in. None: `not_found`.
-- The question goes on stdin.
-- Run through a login shell, `$SHELL -lc 'cd "$1" && exec claude "$@"'`, so `claude` is found on
-  a remote Machine whose non-login PATH lacks it (`~/.local/bin`). The argv is passed as
+- The question is the last argument, after `--` (stdin is unusable once a remote run has a
+  tty, below).
+- Run through `sh -c`, which `cd`s to the cwd and finds `claude` with `command -v`, falling back
+  to `command -v claude` in `$SHELL -lc` (a login shell, so a remote Machine whose non-login PATH
+  lacks `~/.local/bin` still finds it; `command -v` works in fish too). The argv is passed as
   positional arguments, never spliced into the script.
 - Remote: wrapped with a tty (`Transport::wrap(argv, true)`), so dropping the ssh client hangs
   up the remote process on cancel.
@@ -69,7 +71,7 @@ fork's own file.
 Pure parts, tested without a process:
 
 ```rust
-pub fn btw_argv(transcript_id: &str, fork_id: Option<&str>, model: Option<&str>, cwd: &str) -> Vec<String>;
+pub fn btw_argv(program: &str, cwd: &str, transcript_id: &str, fork_id: Option<&str>, model: Option<&str>, question: &str) -> Vec<String>;
 pub fn last_model(text: &str) -> Option<String>;
 /// One stream-json line to zero or more events.
 pub fn parse_line(line: &str) -> Vec<BtwEvent>;
@@ -92,8 +94,8 @@ pub enum BtwEvent {
 `exec` returns all output at the end. A new helper reads stdout line by line:
 
 ```rust
-pub async fn spawn_lines(t: &dyn Transport, argv: &[String], input: Option<&[u8]>, tty: bool)
-    -> AppResult<LineChild>; // next_line().await, kill().await, stderr tail on exit
+pub async fn spawn_lines(t: &dyn Transport, argv: &[String], tty: bool) -> AppResult<LineChild>;
+// stdin closed; next_line().await (a trailing \r trimmed), finish().await -> (status, stderr)
 ```
 
 ### 3. Commands
@@ -145,7 +147,7 @@ keeps the card.
 Rust:
 
 - `btw_argv`: first question has `--resume <transcript id> --fork-session`; a follow-up has
-  `--resume <fork id>` without it; `--model` only when known; the question is not in argv.
+  `--resume <fork id>` without it; `--model` only when known; the question is last, after `--`.
 - `last_model` over `tests/fixtures/claude.jsonl`.
 - `parse_line` over recorded stream-json lines: text deltas, a tool_use, a result (fork id,
   cache tokens), an error result, unrelated lines give nothing.
