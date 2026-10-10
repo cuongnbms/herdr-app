@@ -96,6 +96,10 @@ _Avoid_: dead tail, snapshot
 Where the user was in a Chat lens's Transcript when it closed; reopening it returns there unless they were at the latest message.
 _Avoid_: scroll position, bookmark
 
+**Fork**:
+A new Agent in a new Tab whose Transcript is a copy of another's, cut just before one of its user messages; that message's text waits in the new Agent's Composer. The original Agent is unchanged.
+_Avoid_: branch, clone (pi's `/fork` and `/clone` act inside one Agent; a git fork is a repository)
+
 **Provider**:
 The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
 _Avoid_: vendor, model
