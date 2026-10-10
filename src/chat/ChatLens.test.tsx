@@ -22,6 +22,11 @@ vi.mock("./chatSession", () => ({
   onOpenFailure: () => "error",
   watchMachine: () => ({ sawDown: false, reopen: false }),
 }));
+vi.mock("./btw", async (orig) => {
+  const m = await orig<typeof import("./btw")>();
+  return { ...m, closeSide: vi.fn() };
+});
+import { closeSide, useBtw } from "./btw";
 import { chatLocate, chatPage, herdrCall } from "../lib/ipc";
 import { paneKey, type PaneView } from "../lib/types";
 import { useApp, viewedItems } from "../store/app";
@@ -121,6 +126,15 @@ describe("ChatLens", () => {
     render(<ChatLens pane={pane} view={idlePi} />);
     await waitFor(() => expect(openedPaths).toEqual([null, "/h/new.jsonl"]));
     expect(chatLocate).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the side-question thread once the lens locates another transcript", async () => {
+    const at = { agent: "claude", path: "/p/new.jsonl", ambiguous: false, candidates: ["/p/new.jsonl"], pending: false };
+    opened = Promise.resolve(at);
+    useBtw.setState({ threads: { [paneKey(pane)]: { path: "/p/old.jsonl", turns: [] } }, mode: {} });
+    render(<ChatLens pane={pane} view={idlePi} />);
+    await waitFor(() => expect(closeSide).toHaveBeenCalledWith(pane));
+    useBtw.setState({ threads: {}, mode: {} });
   });
 
   it("does not locate again after an open that located, or a reattach to the same file", async () => {
