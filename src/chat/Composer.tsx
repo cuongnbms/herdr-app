@@ -115,15 +115,22 @@ export function Composer({
   }, []);
 
   useEffect(() => setUsage(agent ? readUsage(agent) : {}), [agent]);
+  // Whenever the mode changes (button, Cmd+B, the card's "Hỏi tiếp", or the Transcript going
+  // away), the old box's text is kept under its own Draft and the new box's is loaded, before
+  // useDraft can write the old text over it.
+  const [shownId, setShownId] = useState(draftId);
+  if (shownId !== draftId) {
+    writeDraft(shownId, text);
+    setShownId(draftId);
+    setText(readDraft(draftId));
+    setDismissed(false);
+  }
   // Sending clears the text and a failed send restores it, so the draft follows both.
   useDraft(draftId, text);
 
   /** Swaps between the agent box and the side-question box, each keeping its own Draft. */
   const toggleBtw = () => {
     if (!btwPath) return;
-    writeDraft(draftId, text);
-    setText(readDraft(btwOn ? key : `btw:${key}`));
-    setDismissed(false);
     setBtwMode(key, !btwOn);
   };
   // Entering the mode (by button, Cmd+B or the card's "Hỏi tiếp") puts the caret in the box.
@@ -289,7 +296,7 @@ export function Composer({
   return (
     <div className={`composer${btwOn ? " btw" : ""}`}>
       <div className="composer-top">
-        {showQuick && quickReplies.length > 0 && (
+        {!btwOn && showQuick && quickReplies.length > 0 && (
           <div className="composer-quick" role="group" aria-label="Quick replies">
             {quickReplies.map((reply, i) => (
               <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
@@ -307,7 +314,7 @@ export function Composer({
         </div>
       </div>
       <div className="composer-box">
-        {images.length > 0 && (
+        {!btwOn && images.length > 0 && (
           <div className="composer-images">
             {images.map((a, i) => (
               <div key={a.id} className={`composer-image${a.path === null ? " saving" : ""}`}>
@@ -367,7 +374,7 @@ export function Composer({
             }
             if (e.nativeEvent.isComposing) {
               /* an IME owns these keys */
-            } else if (btwPath && e.key === "b" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+            } else if (btwPath && e.code === "KeyB" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
               e.preventDefault();
               return toggleBtw();
             } else if (btwOn && e.key === "Escape") {

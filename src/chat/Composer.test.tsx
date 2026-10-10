@@ -18,7 +18,7 @@ vi.mock("./btw", async (orig) => {
 });
 import { completeCommands, completeEntries, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
 import { rankFiles } from "./complete";
-import { askSide, useBtw } from "./btw";
+import { askSide, setBtwMode, useBtw } from "./btw";
 import { paneKey } from "../lib/types";
 import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
@@ -681,7 +681,7 @@ describe("btw mode", () => {
     render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" />);
     const box = screen.getByRole("textbox");
     fireEvent.change(box, { target: { value: "main draft" } });
-    fireEvent.keyDown(box, { key: "b", metaKey: true });
+    fireEvent.keyDown(box, { key: "b", code: "KeyB", metaKey: true });
     expect(screen.getByRole("button", { name: "btw" }).getAttribute("aria-pressed")).toBe("true");
     expect((box as HTMLTextAreaElement).value).toBe("");
     expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
@@ -692,6 +692,16 @@ describe("btw mode", () => {
     fireEvent.keyDown(box, { key: "Escape" });
     expect(screen.getByRole("button", { name: "btw" }).getAttribute("aria-pressed")).toBe("false");
     expect((box as HTMLTextAreaElement).value).toBe("main draft");
+  });
+
+  it("swaps Drafts when the mode changes from outside", () => {
+    render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "main draft" } });
+    act(() => setBtwMode(paneKey(pane), true));
+    expect(box.value).toBe("");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box.value).toBe("main draft");
   });
 
   it("disables Send while the side question runs", () => {
