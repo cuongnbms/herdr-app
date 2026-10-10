@@ -998,7 +998,9 @@ button.btw-open:hover { background: var(--hover); color: var(--fg-2); }
   max-height: calc(1.5em * 12); overflow-y: auto;
 }
 .composer textarea:focus-visible { box-shadow: none; }
-.composer.btw textarea { padding: 6px 8px; border: 1px dashed var(--accent); border-radius: 6px; }
+/* btw mode marks the box itself, not the textarea, so toggling it moves nothing inside. */
+.composer.btw .composer-box, .composer.btw .composer-box:focus-within { border-style: dashed; border-color: var(--accent); }
+.stop[hidden] { display: grid; visibility: hidden; }
 button.composer-btw { margin-left: auto; padding: 2px 6px; border: 0; border-radius: 5px; background: none; color: var(--fg-3); font-size: 11.5px; cursor: pointer; }
 button.composer-btw:hover { background: var(--active); color: var(--fg-2); }
 button.composer-btw[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }

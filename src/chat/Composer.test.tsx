@@ -704,11 +704,14 @@ describe("btw mode", () => {
     expect(box.value).toBe("main draft");
   });
 
-  it("hides Stop in btw mode, since it would interrupt the Agent", () => {
-    render(<Composer pane={pane} agent="claude" status="working" btwPath="/p/t1.jsonl" />);
+  it("hides Stop in btw mode, since it would interrupt the Agent, but keeps its place in the row", () => {
+    const { container } = render(<Composer pane={pane} agent="claude" status="working" btwPath="/p/t1.jsonl" />);
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
     act(() => setBtwMode(paneKey(pane), true));
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    const kept = container.querySelector<HTMLButtonElement>("button.stop")!;
+    expect(kept.hidden).toBe(true);
+    expect(kept.disabled).toBe(true);
   });
 
   it("btwOnly is always in btw mode, with nothing that talks to the Agent", () => {
