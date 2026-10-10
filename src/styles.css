@@ -933,7 +933,9 @@ kbd {
 @keyframes working-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
 .composer { flex: none; padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; }
-.btw-card { flex: none; max-height: 40%; overflow-y: auto; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; padding: 8px 20px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+.btw-card { flex: none; max-height: 40%; overflow-y: auto; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; padding: 8px 20px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); font-size: 13px; user-select: text; -webkit-user-select: text; cursor: auto; }
+/* The answer takes the transcript's markdown styles (`.chat-assistant`) at the card's size. */
+.btw-card .chat-assistant { font-size: inherit; }
 .btw-q, .btw-tool { color: var(--fg-3); }
 .btw-error { color: var(--err); }
 .btw-actions { display: flex; gap: 6px; justify-content: flex-end; }
