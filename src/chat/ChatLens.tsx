@@ -16,6 +16,8 @@ import { buildRows } from "./workBlocks";
 import { ChatOutline } from "./ChatOutline";
 import { currentEntry, outline } from "./outline";
 import { Composer } from "./Composer";
+import { BtwCard } from "./BtwCard";
+import { closeSide, setBtwMode, useBtw } from "./btw";
 import { WorkingIndicator } from "./WorkingIndicator";
 import { usePiModelPicker } from "./usePiModelPicker";
 import { usePendingTranscript } from "./pendingTranscript";
@@ -247,6 +249,14 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     [pane, forkAgent, forkPath],
   );
   const forkable = canFork(view.agent, located) && located?.agent === view.agent;
+  // A thread belongs to the Transcript it forked; a lens that moved to another one drops it.
+  const btwPathOf = useBtw((s) => s.threads[key]?.path);
+  useEffect(() => {
+    if (btwPathOf && located?.path && located.path !== btwPathOf) void closeSide(pane);
+  }, [btwPathOf, located?.path, pane]);
+  // Side questions need a located Claude Transcript to fork.
+  const btwPath = forkable && located?.agent === "claude" ? forkPath : null;
+  const btwMode = useBtw((s) => !!s.mode[key]);
   const live = view.status === "working" || view.status === "blocked";
 
   const virt = useVirtualizer({
@@ -559,10 +569,22 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
       )}
       </div>
       <WorkingIndicator status={view.status} />
+      <BtwCard pane={pane} />
       {view.status === "blocked" || picker.open ? (
-        <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />
+        <>
+          <PromptPanel pane={pane} view={view} fallback={view.status === "blocked"} asked={asked} />
+          {/* A side question can still be asked while the Agent waits on its prompt. */}
+          {view.status === "blocked" && btwPath &&
+            (btwMode ? (
+              <Composer pane={pane} agent={view.agent} btwPath={btwPath} status={view.status} btwOnly />
+            ) : (
+              <button className="btw-open" onClick={() => setBtwMode(key, true)}>
+                btw — hỏi bên lề
+              </button>
+            ))}
+        </>
       ) : (
-        <Composer pane={pane} agent={view.agent} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} onSend={(text, previews) => {
+        <Composer pane={pane} agent={view.agent} btwPath={btwPath} status={view.status} onPiModel={() => setModelFor(key)} meta={state.meta} onSend={(text, previews) => {
           // Chatting with an agent keeps its tab.
           pinAgent(pane);
           return outgoing.start(text, previews);

@@ -12,8 +12,14 @@ vi.mock("./complete", async (orig) => {
   const m = await orig<typeof import("./complete")>();
   return { ...m, rankFiles: vi.fn(m.rankFiles) };
 });
-import { completeCommands, completeEntries, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
+vi.mock("./btw", async (orig) => {
+  const m = await orig<typeof import("./btw")>();
+  return { ...m, askSide: vi.fn().mockResolvedValue(undefined) };
+});
+import { chatGitStatus, completeCommands, completeEntries, completeFiles, herdrCall, imageSaveTemp } from "../lib/ipc";
 import { rankFiles } from "./complete";
+import { askSide, setBtwMode, useBtw } from "./btw";
+import { paneKey } from "../lib/types";
 import { DEFAULT_QUICK_REPLIES, useQuickReplies } from "../settings/quickReplies";
 import { Composer } from "./Composer";
 import { clearCompletionCache } from "./useCompletions";
@@ -657,5 +663,92 @@ describe("Composer model menu", () => {
     expect(button().disabled).toBe(true);
     rerender(<Composer pane={pane} agent="claude" status="blocked" meta={meta} />);
     expect(button().disabled).toBe(true);
+  });
+});
+
+describe("btw mode", () => {
+  beforeEach(() => {
+    vi.mocked(askSide).mockClear();
+    useBtw.setState({ threads: {}, mode: {} });
+  });
+
+  it("has no btw button without a transcript path", () => {
+    render(<Composer pane={pane} agent="claude" />);
+    expect(screen.queryByRole("button", { name: "btw" })).toBeNull();
+  });
+
+  it("Cmd+B switches to btw mode and Enter asks a side question, not the agent", async () => {
+    render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" />);
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "main draft" } });
+    fireEvent.keyDown(box, { key: "b", code: "KeyB", metaKey: true });
+    expect(screen.getByRole("button", { name: "btw" }).getAttribute("aria-pressed")).toBe("true");
+    expect((box as HTMLTextAreaElement).value).toBe("");
+    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    fireEvent.change(box, { target: { value: "why?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(askSide).toHaveBeenCalledWith(pane, "/p/t1.jsonl", "why?");
+    expect(herdrCall).not.toHaveBeenCalledWith("devtuf", "default", "agent.prompt", expect.anything());
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "btw" }).getAttribute("aria-pressed")).toBe("false");
+    expect((box as HTMLTextAreaElement).value).toBe("main draft");
+  });
+
+  it("swaps Drafts when the mode changes from outside", () => {
+    render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(box, { target: { value: "main draft" } });
+    act(() => setBtwMode(paneKey(pane), true));
+    expect(box.value).toBe("");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box.value).toBe("main draft");
+  });
+
+  it("hides Stop in btw mode, since it would interrupt the Agent", () => {
+    render(<Composer pane={pane} agent="claude" status="working" btwPath="/p/t1.jsonl" />);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    act(() => setBtwMode(paneKey(pane), true));
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+
+  it("btwOnly is always in btw mode, with nothing that talks to the Agent", () => {
+    useQuickReplies.setState({ show: true, replies: DEFAULT_QUICK_REPLIES });
+    vi.mocked(chatGitStatus).mockClear();
+    const { container } = render(<Composer pane={pane} agent="claude" status="blocked" btwPath="/p/t1.jsonl" btwOnly />);
+    const box = screen.getByRole("textbox");
+    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(container.querySelector(".composer-model")).toBeNull();
+    expect(container.querySelector(".composer-quick")).toBeNull();
+    expect(container.querySelector(".composer-keys")).toBeNull();
+    expect(chatGitStatus).not.toHaveBeenCalled(); // no git status line
+    fireEvent.change(box, { target: { value: "why?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(askSide).toHaveBeenCalledWith(pane, "/p/t1.jsonl", "why?");
+    expect(herdrCall).not.toHaveBeenCalledWith("devtuf", "default", "agent.prompt", expect.anything());
+  });
+
+  it("Esc, Cmd+B and the btw button turn btwOnly's mode off", () => {
+    render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" btwOnly />);
+    const box = screen.getByRole("textbox");
+    for (const leave of [
+      () => fireEvent.keyDown(box, { key: "Escape" }),
+      () => fireEvent.keyDown(box, { key: "b", code: "KeyB", metaKey: true }),
+      () => fireEvent.click(screen.getByRole("button", { name: "btw" })),
+    ]) {
+      act(() => setBtwMode(paneKey(pane), true));
+      leave();
+      expect(useBtw.getState().mode[paneKey(pane)]).toBe(false);
+    }
+  });
+
+  it("disables Send while the side question runs", () => {
+    useBtw.setState({
+      threads: { [paneKey(pane)]: { path: "/p/t1.jsonl", turns: [{ q: "q", a: "", tools: [], running: true }] } },
+      mode: { [paneKey(pane)]: true },
+    });
+    render(<Composer pane={pane} agent="claude" btwPath="/p/t1.jsonl" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "next" } });
+    expect(sendButton().disabled).toBe(true);
   });
 });

@@ -203,3 +203,11 @@ export interface FileChange {
 }
 
 export type WatchEvent = { type: "resync" } | { type: "changes"; changes: FileChange[] } | { type: "error"; message: string };
+
+/** Streamed from `chat_btw_ask`; `done` always carries a non-empty fork id. */
+export type BtwEvent =
+  | { kind: "delta"; text: string }
+  | { kind: "tool"; name: string }
+  | { kind: "started"; fork_id: string }
+  | { kind: "done"; fork_id: string; cache_read: number; input: number }
+  | { kind: "error"; message: string };

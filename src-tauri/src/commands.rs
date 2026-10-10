@@ -464,6 +464,66 @@ pub async fn chat_fork(
     transcript::fork::fork(&*t, &agent, &path, &entry_id).await
 }
 
+/// Asks a side question on a fork of the Transcript, streaming its events over `events`. The
+/// run ends with a `done` or `error` event, or silently when `chat_btw_cancel` stops it.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn chat_btw_ask(
+    mgr: Mgr<'_>,
+    runs: State<'_, transcript::btw::BtwRuns>,
+    machine_id: String,
+    path: String,
+    question: String,
+    fork_id: Option<String>,
+    ask_id: String,
+    events: Channel<transcript::btw::BtwEvent>,
+) -> Result<(), AppError> {
+    let t = mgr.transport(&machine_id)?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    runs.0.lock().unwrap().insert(ask_id.clone(), tx);
+    let result = transcript::btw::ask(
+        &*t,
+        machine_id != crate::machines::LOCAL,
+        "claude",
+        &path,
+        &question,
+        fork_id.as_deref(),
+        rx,
+        &mut |e| {
+            if let Err(err) = events.send(e) {
+                tracing::debug!("btw event not delivered: {err}");
+            }
+        },
+    )
+    .await;
+    runs.0.lock().unwrap().remove(&ask_id);
+    result
+}
+
+/// Stops a running side question; an unknown id is fine (it already ended).
+#[tauri::command]
+pub async fn chat_btw_cancel(
+    runs: State<'_, transcript::btw::BtwRuns>,
+    ask_id: String,
+) -> Result<(), AppError> {
+    if let Some(tx) = runs.0.lock().unwrap().remove(&ask_id) {
+        let _ = tx.send(());
+    }
+    Ok(())
+}
+
+/// Deletes the fork a side question left on the Machine.
+#[tauri::command]
+pub async fn chat_btw_discard(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    path: String,
+    fork_id: String,
+) -> Result<(), AppError> {
+    let t = mgr.transport(&machine_id)?;
+    transcript::btw::discard(&*t, &path, &fork_id).await
+}
+
 /// The Slash commands the Agent in a Pane offers, read on the Pane's Machine.
 #[tauri::command]
 pub async fn complete_commands(

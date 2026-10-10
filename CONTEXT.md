@@ -100,6 +100,10 @@ _Avoid_: scroll position, bookmark
 A new Agent in a new Tab whose Transcript is a copy of another's, cut just before one of its user messages; that message's text waits in the new Agent's Composer. The original Agent is unchanged.
 _Avoid_: branch, clone (pi's `/fork` and `/clone` act inside one Agent; a git fork is a repository)
 
+**Side question**:
+A question asked beside an Agent's Transcript, from the Composer's btw mode: a separate `claude -p` process answers it from a fork of the Transcript, so the Agent and its Transcript are untouched. Follow-ups continue that fork; closing the card deletes it.
+_Avoid_: btw (only as the UI label), side chat, aside
+
 **Provider**:
 The service an Agent's account belongs to (Claude, Codex, OpenCode Go, Grok); it owns a Quota.
 _Avoid_: vendor, model
@@ -130,6 +134,7 @@ The moment a Window's used percent goes back to zero.
 - Each **Pane** has exactly one **Terminal**
 - A **Pane** has at most one **Agent**; an **Agent** has at most one **Transcript** the app can find
 - A **Terminal** has at most one **Attach** at a time
+- A **Chat lens** has at most one open **Side question** thread per **Pane**
 - A **Provider** has one **Quota**; a **Quota** has one or more **Windows**, each with at most one **Reset**
 
 ## Example dialogue

@@ -933,6 +933,17 @@ kbd {
 @keyframes working-dot { 0%, 60%, 100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
 .composer { flex: none; padding: 8px 20px 16px; display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; }
+.btw-card { flex: none; max-height: 40%; overflow-y: auto; width: 100%; max-width: 840px; margin: 0 auto; box-sizing: border-box; padding: 8px 20px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); font-size: 13px; user-select: text; -webkit-user-select: text; cursor: auto; }
+/* The answer takes the transcript's markdown styles (`.chat-assistant`) at the card's size. */
+.btw-card .chat-assistant { font-size: inherit; }
+.btw-q, .btw-tool { color: var(--fg-3); }
+.btw-error { color: var(--err); }
+.btw-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.btw-actions button { padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg-2); cursor: pointer; }
+.btw-actions button:hover { background: var(--hover); color: var(--fg); }
+/* Below a blocked Agent's prompt card: opens the side-question box. */
+button.btw-open { flex: none; align-self: center; margin: 4px auto 8px; padding: 2px 10px; border: 1px dashed var(--line-2); border-radius: 6px; background: transparent; color: var(--fg-3); font-size: 12px; cursor: pointer; }
+button.btw-open:hover { background: var(--hover); color: var(--fg-2); }
 .composer-box {
   position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 10px 8px 14px;
   background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-lg);
@@ -972,6 +983,11 @@ kbd {
   max-height: calc(1.5em * 12); overflow-y: auto;
 }
 .composer textarea:focus-visible { box-shadow: none; }
+.composer.btw textarea { padding: 6px 8px; border: 1px dashed var(--accent); border-radius: 6px; }
+button.composer-btw { margin-left: auto; padding: 2px 6px; border: 0; border-radius: 5px; background: none; color: var(--fg-3); font-size: 11.5px; cursor: pointer; }
+button.composer-btw:hover { background: var(--active); color: var(--fg-2); }
+button.composer-btw[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.composer-btw + .composer-model { margin-left: 0; }
 .composer-bar { display: flex; align-items: center; gap: 8px; }
 .composer-model { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: 11.5px; }
 .composer-git {
