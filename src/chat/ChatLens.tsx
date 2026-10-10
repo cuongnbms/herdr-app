@@ -9,6 +9,7 @@ import { PromptPanel } from "./PromptPanel";
 import { pendingQuestions } from "./prompt/askedPreviews";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
+import { canFork, forkChat } from "./forkChat";
 import { ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
 import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
@@ -230,6 +231,12 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const toggle = useCallback((id: string, wasOpen: boolean) => {
     setChosenOpen((m) => new Map(m).set(id, !wasOpen));
   }, []);
+  const forkPath = located?.path;
+  const onFork = useCallback(
+    (it: { id: string; text: string }) => void forkChat(pane, view.agent as "claude" | "pi", forkPath!, it),
+    [pane, view.agent, forkPath],
+  );
+  const forkable = canFork(view.agent, located);
   const live = view.status === "working" || view.status === "blocked";
 
   const virt = useVirtualizer({
@@ -511,6 +518,7 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                   <ChatItemView
                     item={row.item}
                     copy
+                    onFork={forkable ? onFork : undefined}
                     result={row.item.kind === "tool_call" ? results.get(row.item.id) : undefined}
                   />
                 )}

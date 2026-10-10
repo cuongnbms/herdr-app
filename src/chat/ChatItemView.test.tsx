@@ -182,3 +182,19 @@ describe("a long tool path", () => {
     expect(viewedItems(useApp.getState()).active).toMatch(/^file:local\/default\/w1\|\/w\/app\|d\/d\//);
   });
 });
+
+describe("Fork button", () => {
+  it("shows on a user message with an id and forks with its id and text", () => {
+    const onFork = vi.fn();
+    render(<ChatItemView item={{ kind: "user", id: "u4", text: "three" }} copy onFork={onFork} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fork from here" }));
+    expect(onFork).toHaveBeenCalledWith({ id: "u4", text: "three" });
+  });
+
+  it("is absent without an id or without onFork", () => {
+    const { rerender } = render(<ChatItemView item={{ kind: "user", text: "x" }} copy onFork={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Fork from here" })).toBeNull();
+    rerender(<ChatItemView item={{ kind: "user", id: "u1", text: "x" }} copy />);
+    expect(screen.queryByRole("button", { name: "Fork from here" })).toBeNull();
+  });
+});

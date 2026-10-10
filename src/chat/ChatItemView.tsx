@@ -1,7 +1,7 @@
 import { memo, useContext, useState } from "react";
 import Markdown from "react-markdown";
 import type { ChatItem } from "../lib/types";
-import { BrainIcon, ChevronIcon } from "../ui/icons";
+import { BrainIcon, ChevronIcon, ForkIcon } from "../ui/icons";
 import { CopyButton } from "./CopyButton";
 import { mdComponents, rehypePlugins, remarkPlugins } from "./markdown";
 import { checklist, checklistSummary, type ChecklistRow } from "./checklist";
@@ -153,7 +153,18 @@ function ShellText({ text, error }: { text: string; error?: boolean }) {
 }
 
 /** `copy`: offer a copy button on a user message or an answer (not on narration inside a work block). */
-export const ChatItemView = memo(function ChatItemView({ item, result, copy = false }: { item: ChatItem; result?: ToolResult; copy?: boolean }) {
+export const ChatItemView = memo(function ChatItemView({
+  item,
+  result,
+  copy = false,
+  onFork,
+}: {
+  item: ChatItem;
+  result?: ToolResult;
+  copy?: boolean;
+  /** Fork the conversation from before this user message; the button shows only for a user item with an id. */
+  onFork?: (item: { id: string; text: string }) => void;
+}) {
   switch (item.kind) {
     case "user":
       return (
@@ -163,6 +174,17 @@ export const ChatItemView = memo(function ChatItemView({ item, result, copy = fa
             <div className="chat-user-line">
               <div className="chat-bubble">{item.text}</div>
               {copy && <CopyButton text={item.text} />}
+              {onFork && item.id && (
+                <button
+                  type="button"
+                  className="chat-copy chat-fork"
+                  aria-label="Fork from here"
+                  title="Fork from here"
+                  onClick={() => onFork({ id: item.id!, text: item.text })}
+                >
+                  <ForkIcon />
+                </button>
+              )}
             </div>
           )}
           {!!item.skills?.length && <SkillChips chips={item.skills.map((s) => ({ name: s.name, path: s.path, status: "loaded" }))} />}

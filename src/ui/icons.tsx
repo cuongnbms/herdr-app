@@ -68,6 +68,14 @@ export const CopyIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5 15V6a2 2 0 0 1 2-2h8" />
   </Icon>
 );
+export const ForkIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <circle cx="6" cy="5" r="2" />
+    <circle cx="6" cy="19" r="2" />
+    <circle cx="18" cy="8" r="2" />
+    <path d="M6 7v10M18 10c0 4-12 3-12 7" />
+  </Icon>
+);
 export const FileCopyIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
