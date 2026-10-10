@@ -90,7 +90,7 @@ export interface ChatMeta { model: string | null; effort: string | null; context
 
 /** `ts`: when the Transcript record was written (ISO 8601), if it says. */
 export type ChatItem = (
-  | { kind: "user"; text: string; images?: ImageRef[]; skills?: SkillUse[] }
+  | { kind: "user"; id?: string; text: string; images?: ImageRef[]; skills?: SkillUse[] }
   | { kind: "assistant_text"; markdown: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; id: string; name: string; input_summary: string; input: unknown }

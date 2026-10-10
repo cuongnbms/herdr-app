@@ -167,6 +167,7 @@ fn message_items(entry_id: &str, entry: &Value, sink: &mut dyn ImageSink) -> Vec
                         None => (text, vec![]),
                     };
                     ChatItem::User {
+                        id: Some(entry_id.to_string()),
                         images: vec![],
                         skills,
                         ts: ts.clone(),
@@ -181,6 +182,7 @@ fn message_items(entry_id: &str, entry: &Value, sink: &mut dyn ImageSink) -> Vec
                     _ => items.insert(
                         0,
                         ChatItem::User {
+                            id: Some(entry_id.to_string()),
                             images: refs,
                             skills: vec![],
                             ts: ts.clone(),
@@ -360,6 +362,13 @@ mod tests {
     }
 
     #[test]
+    fn a_user_item_carries_its_entry_id() {
+        let mut p = PiParser::default();
+        let items = appended(feed(&mut p, r#"{"type":"message","id":"e1","parentId":null,"message":{"role":"user","content":"hey"}}"#));
+        assert!(matches!(&items[0], ChatItem::User { id: Some(id), .. } if id == "e1"));
+    }
+
+    #[test]
     fn caps_a_huge_write_but_summarises_the_whole_input() {
         let content = "x".repeat(1024 * 1024);
         let line = serde_json::json!({"type":"message","id":"a","parentId":null,"message":{"role":"assistant","content":[{"type":"toolCall","id":"t","name":"write","arguments":{"path":"/src/a.rs","content":content}}]}}).to_string();
@@ -383,6 +392,7 @@ mod tests {
         let line = serde_json::json!({"type":"message","id":"a","parentId":null,"message":{"role":"user","content":[{"type":"text","text":text}]}}).to_string();
         match p.push_line(&line, &mut Vec::<(String, String, Vec<u8>)>::new()) {
             ParserOutput::Append(v) => assert_eq!(v, vec![User {
+                id: Some("a".into()),
                 ts: None, text: "/skill:tdd".into(), images: vec![],
                 skills: vec![SkillUse { name: "tdd".into(), path: "/t/SKILL.md".into() }],
             }]),
@@ -398,6 +408,7 @@ mod tests {
             items,
             vec![
                 User {
+                    id: Some("a".into()),
                     images: vec![],
                     skills: vec![],
                     ts: None,
@@ -438,12 +449,14 @@ mod tests {
                 items,
                 vec![
                     User {
+                        id: Some("a".into()),
                         images: vec![],
                         skills: vec![],
                         ts: None,
                         text: "hi".into()
                     },
                     User {
+                        id: Some("e".into()),
                         images: vec![],
                         skills: vec![],
                         ts: None,
@@ -463,7 +476,7 @@ mod tests {
         let mut p = PiParser::default();
         let out = p.push_line(r#"{"type":"message","id":"x","parentId":"gone","message":{"role":"user","content":"hey"}}"#, &mut Vec::<(String, String, Vec<u8>)>::new());
         assert!(
-            matches!(out, ParserOutput::Reset(v) if v == vec![User { ts: None, text: "hey".into(), images: vec![], skills: vec![] }])
+            matches!(out, ParserOutput::Reset(v) if v == vec![User { id: Some("x".into()), ts: None, text: "hey".into(), images: vec![], skills: vec![] }])
         );
     }
     #[test]
@@ -545,6 +558,7 @@ mod tests {
             items,
             vec![
                 User {
+                    id: Some("a".into()),
                     ts: None,
                     text: "see".into(),
                     skills: vec![],
@@ -558,6 +572,7 @@ mod tests {
                     images: vec![r("b:0", "image/jpeg"), r("b:1", "image/png")]
                 },
                 User {
+                    id: Some("c".into()),
                     ts: None,
                     text: "".into(),
                     skills: vec![],

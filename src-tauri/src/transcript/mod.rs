@@ -48,6 +48,8 @@ pub struct ChatMeta {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChatItem {
     User {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         text: String,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         images: Vec<ImageRef>,
@@ -604,7 +606,7 @@ mod tests {
     struct Echo;
     impl Parser for Echo {
         fn push_line(&mut self, line: &str, _: &mut dyn ImageSink) -> ParserOutput {
-            let item = ChatItem::User { ts: None, text: line.into(), images: vec![], skills: vec![] };
+            let item = ChatItem::User { id: None, ts: None, text: line.into(), images: vec![], skills: vec![] };
             if line == "RESET" { ParserOutput::Reset(vec![item]) } else { ParserOutput::Append(vec![item]) }
         }
     }
@@ -942,6 +944,7 @@ mod tests {
     #[test]
     fn serializes_ts_only_when_known() {
         let with = serde_json::to_value(ChatItem::User {
+id: None,
             text: "a".into(),
             images: vec![],
             skills: vec![],
@@ -950,6 +953,7 @@ mod tests {
         .unwrap();
         assert_eq!(with["ts"], "2026-10-03T00:00:00Z");
         let without = serde_json::to_value(ChatItem::User {
+id: None,
             text: "a".into(),
             images: vec![],
             skills: vec![],
@@ -960,8 +964,17 @@ mod tests {
     }
 
     #[test]
+    fn a_user_item_without_id_serializes_no_id() {
+        let v = serde_json::to_value(ChatItem::User { id: None, ts: None, text: "a".into(), images: vec![], skills: vec![] }).unwrap();
+        assert!(v.get("id").is_none());
+        let v = serde_json::to_value(ChatItem::User { id: Some("u1".into()), ts: None, text: "a".into(), images: vec![], skills: vec![] }).unwrap();
+        assert_eq!(v["id"], "u1");
+    }
+
+    #[test]
     fn omits_empty_images_and_skills() {
         let v = serde_json::to_value(ChatItem::User {
+id: None,
             text: "a".into(),
             images: vec![],
             skills: vec![],

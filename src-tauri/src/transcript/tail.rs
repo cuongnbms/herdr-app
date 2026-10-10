@@ -556,6 +556,7 @@ mod tests {
                 }])
             } else {
                 ParserOutput::Append(vec![ChatItem::User {
+id: None,
                     images: vec![],
                     skills: vec![],
                     ts: None,
@@ -578,6 +579,7 @@ mod tests {
                 return ParserOutput::None;
             }
             ParserOutput::Append(vec![ChatItem::User {
+id: None,
                 ts: None,
                 text: line.into(),
                 images: vec![],
@@ -711,7 +713,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         let ev = got.lock().unwrap();
         assert!(matches!(&ev[0], ChatEvent::Reset { items, total: 2 } if items.len() == 2));
-        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { ts: None, text: "c".into(), images: vec![], skills: vec![] }])));
+        assert!(ev.iter().any(|e| matches!(e, ChatEvent::Append { items } if items == &vec![ChatItem::User { id: None, ts: None, text: "c".into(), images: vec![], skills: vec![] }])));
         assert!(matches!(ev.last().unwrap(), ChatEvent::Reset { items, .. } if items.len() == 1));
         drop(ev);
         drop(h);
@@ -731,7 +733,7 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { ts: None, text: "a".into(), images: vec![], skills: vec![] } && items[2] == ChatItem::User { ts: None, text: "b".into(), images: vec![], skills: vec![] })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 3 } if items[0] == ChatItem::User { id: None, ts: None, text: "a".into(), images: vec![], skills: vec![] } && items[2] == ChatItem::User { id: None, ts: None, text: "b".into(), images: vec![], skills: vec![] })
         );
     }
     #[tokio::test]
@@ -802,13 +804,14 @@ mod tests {
         );
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         assert!(
-            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { ts: None, text: "m200".into(), images: vec![], skills: vec![] })
+            matches!(&got.lock().unwrap()[0], ChatEvent::Reset { items, total: 700 } if items.len() == 500 && items[0] == ChatItem::User { id: None, ts: None, text: "m200".into(), images: vec![], skills: vec![] })
         );
         let older = h.page(200, 200);
         assert_eq!(older.len(), 200);
         assert_eq!(
             older[0],
             ChatItem::User {
+id: None,
                 images: vec![],
                 skills: vec![],
                 ts: None,
@@ -1158,7 +1161,7 @@ mod tests {
     #[test]
     fn a_resumed_tail_without_a_header_keeps_what_it_read() {
         let mut st = state(Box::new(Lines));
-        st.items.lock().unwrap().push(ChatItem::User { text: "a".into(), ts: None, images: vec![], skills: vec![] });
+        st.items.lock().unwrap().push(ChatItem::User { id: None, text: "a".into(), ts: None, images: vec![], skills: vec![] });
         st.offset = 2;
         st.fresh = Some(Box::new(Lines));
         let slot = st.kept.clone();
