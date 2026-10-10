@@ -9,7 +9,7 @@ import { PromptPanel } from "./PromptPanel";
 import { pendingQuestions } from "./prompt/askedPreviews";
 import { emptyChat, prepend, reduce, type ChatState } from "./chatStore";
 import { ChatItemView } from "./ChatItemView";
-import { canFork, forkChat } from "./forkChat";
+import { canFork, forkChat, latestForkRow } from "./forkChat";
 import { ChatOpenContext, ChatPaneContext, revokeChatImages } from "./images";
 import { WorkBlockView } from "./WorkBlockView";
 import { buildRows } from "./workBlocks";
@@ -248,6 +248,16 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
     },
     [pane, forkAgent, forkPath],
   );
+  /** A fork from the latest entry is running, so the last answer's button shows busy. */
+  const [forkingLatest, setForkingLatest] = useState(false);
+  const onForkLatest = useCallback(async () => {
+    setForkingLatest(true);
+    try {
+      await forkChat(pane, forkAgent as "claude" | "pi", forkPath!, null);
+    } finally {
+      setForkingLatest(false);
+    }
+  }, [pane, forkAgent, forkPath]);
   const forkable = canFork(view.agent, located) && located?.agent === view.agent;
   // A thread belongs to the Transcript it forked; a lens that moved to another one drops it.
   const btwPathOf = useBtw((s) => s.threads[key]?.path);
@@ -258,6 +268,8 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
   const btwPath = forkable && located?.agent === "claude" ? forkPath : null;
   const btwMode = useBtw((s) => !!s.mode[key]);
   const live = view.status === "working" || view.status === "blocked";
+  // Mid-turn the newest entry can be a tool call still waiting for its result.
+  const latestRow = forkable ? latestForkRow(rows, live) : -1;
 
   const virt = useVirtualizer({
     count: rows.length,
@@ -539,7 +551,10 @@ export function ChatLens({ pane, view }: { pane: PaneRef; view: PaneView }) {
                     item={row.item}
                     copy
                     onFork={forkable ? onFork : undefined}
-                    forking={row.item.kind === "user" && !!row.item.id && row.item.id === forking}
+                    onForkLatest={v.index === latestRow ? onForkLatest : undefined}
+                    forking={
+                      v.index === latestRow ? forkingLatest : row.item.kind === "user" && !!row.item.id && row.item.id === forking
+                    }
                     result={row.item.kind === "tool_call" ? results.get(row.item.id) : undefined}
                   />
                 )}

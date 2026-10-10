@@ -1,5 +1,5 @@
 //! Cutting a Transcript: keep only the parent chain leading up to one entry, so the copy can
-//! start a new session that forks from just before that entry.
+//! start a new session that forks from just before that entry, or from the newest entry on.
 use crate::error::{AppError, AppResult};
 use crate::transport::{exec_bytes, exec_input, Transport};
 use serde::Serialize;
@@ -15,6 +15,13 @@ pub struct Cut {
     pub cwd: Option<String>,
 }
 
+/// Where a cut ends: just before one entry, or through the newest entry in the file.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CutAt<'a> {
+    Before(&'a str),
+    Latest,
+}
+
 /// The non-empty lines of `text`, each with its parsed JSON (None when it does not parse).
 fn parse(text: &str) -> Vec<(&str, Option<Value>)> {
     text.lines()
@@ -23,28 +30,46 @@ fn parse(text: &str) -> Vec<(&str, Option<Value>)> {
         .collect()
 }
 
-/// Indexes of the lines on the parent chain of `entry_id` (the entry itself excluded), in
-/// file order. The walk stops at a null parent or a parent id that is not in the file.
+/// Indexes of the lines on the parent chain where the cut ends, in file order, and the index
+/// of the first line past the cut. `Before` leaves its entry out; `Latest` starts at the last
+/// line with an id and keeps it. The walk stops at a null parent or a parent id that is not in
+/// the file.
 fn chain(
     parsed: &[(&str, Option<Value>)],
     id_key: &str,
     parent_key: &str,
-    entry_id: &str,
-) -> AppResult<Vec<usize>> {
+    at: CutAt,
+) -> AppResult<(Vec<usize>, usize)> {
     let mut by_id: HashMap<&str, usize> = HashMap::new();
     for (i, (_, v)) in parsed.iter().enumerate() {
         if let Some(id) = v.as_ref().and_then(|v| v[id_key].as_str()) {
             by_id.insert(id, i); // the later line wins
         }
     }
-    let start = *by_id.get(entry_id).ok_or_else(|| {
-        AppError::new(
-            "not_found",
-            format!("entry {entry_id} not found in transcript"),
-        )
-    })?;
+    let (start, end) = match at {
+        CutAt::Before(entry_id) => {
+            let i = *by_id.get(entry_id).ok_or_else(|| {
+                AppError::new(
+                    "not_found",
+                    format!("entry {entry_id} not found in transcript"),
+                )
+            })?;
+            (i, i)
+        }
+        CutAt::Latest => {
+            let i = parsed
+                .iter()
+                .rposition(|(_, v)| v.as_ref().is_some_and(|v| v[id_key].is_string()))
+                .ok_or_else(|| AppError::new("not_found", "the transcript has no entries"))?;
+            (i, parsed.len())
+        }
+    };
     let parent_of = |i: usize| parsed[i].1.as_ref().and_then(|v| v[parent_key].as_str());
-    let mut kept = Vec::new();
+    let mut kept = if at == CutAt::Latest {
+        vec![start]
+    } else {
+        Vec::new()
+    };
     let mut seen = HashSet::from([start]);
     let mut parent = parent_of(start);
     while let Some(&i) = parent.and_then(|p| by_id.get(p)) {
@@ -55,7 +80,7 @@ fn chain(
         parent = parent_of(i);
     }
     kept.sort_unstable();
-    Ok(kept)
+    Ok((kept, end))
 }
 
 fn join(lines: Vec<String>) -> String {
@@ -65,20 +90,15 @@ fn join(lines: Vec<String>) -> String {
 }
 
 /// Claude records parallel tool calls as branches, so the parent chain reaches only the last
-/// result. Before the forked entry's line, also keep every `user` line whose `tool_result`
-/// answers a `tool_use` in a kept assistant line, plus its `attachment` descendants
-/// (transitively, stopping at any user or assistant line). Leaves `kept` in file order.
+/// result. Before line `entry_at` (the first line past the cut), also keep every `user` line
+/// whose `tool_result` answers a `tool_use` in a kept assistant line, plus its `attachment`
+/// descendants (transitively, stopping at any user or assistant line). Leaves `kept` in file
+/// order.
 fn add_parallel_tool_results(
     parsed: &[(&str, Option<Value>)],
     kept: &mut Vec<usize>,
-    entry_id: &str,
+    entry_at: usize,
 ) {
-    let Some(entry_at) = parsed
-        .iter()
-        .rposition(|(_, v)| v.as_ref().is_some_and(|v| v["uuid"] == entry_id))
-    else {
-        return;
-    };
     let block_ids = |i: usize, kind: &str, key: &str| -> Vec<String> {
         let Some(Value::Array(blocks)) = parsed[i].1.as_ref().map(|v| &v["message"]["content"])
         else {
@@ -151,12 +171,12 @@ fn add_parallel_tool_results(
     kept.sort_unstable();
 }
 
-/// Cut a Claude Transcript to the chain before `entry_id`, re-keyed to session `new_id`.
+/// Cut a Claude Transcript to the chain ending `at`, re-keyed to session `new_id`.
 /// `Ok(None)` when that chain holds no user or assistant line.
-pub fn cut_claude(text: &str, entry_id: &str, new_id: &str) -> AppResult<Option<Cut>> {
+pub fn cut_claude(text: &str, at: CutAt, new_id: &str) -> AppResult<Option<Cut>> {
     let parsed = parse(text);
-    let mut kept = chain(&parsed, "uuid", "parentUuid", entry_id)?;
-    add_parallel_tool_results(&parsed, &mut kept, entry_id);
+    let (mut kept, end) = chain(&parsed, "uuid", "parentUuid", at)?;
+    add_parallel_tool_results(&parsed, &mut kept, end);
     let has_conversation = kept.iter().any(|&i| {
         matches!(
             parsed[i].1.as_ref().and_then(|v| v["type"].as_str()),
@@ -184,11 +204,11 @@ pub fn cut_claude(text: &str, entry_id: &str, new_id: &str) -> AppResult<Option<
     }))
 }
 
-/// Cut a pi Transcript to the chain before `entry_id`, behind a fresh session header made at
+/// Cut a pi Transcript to the chain ending `at`, behind a fresh session header made at
 /// `now`. `Ok(None)` when that chain holds no message line.
 pub fn cut_pi(
     text: &str,
-    entry_id: &str,
+    at: CutAt,
     new_id: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> AppResult<Option<Cut>> {
@@ -196,7 +216,8 @@ pub fn cut_pi(
     let header_at = parsed
         .iter()
         .position(|(_, v)| v.as_ref().is_some_and(|v| v["type"] == "session"));
-    let kept: Vec<usize> = chain(&parsed, "id", "parentId", entry_id)?
+    let kept: Vec<usize> = chain(&parsed, "id", "parentId", at)?
+        .0
         .into_iter()
         .filter(|&i| Some(i) != header_at)
         .collect();
@@ -225,7 +246,7 @@ pub fn cut_pi(
 }
 
 /// What a fork made: the new session's id, the file holding it, and the directory it ran in.
-/// All `None` when there was nothing before the entry to fork from.
+/// All `None` when there was nothing to fork from.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Forked {
     pub id: Option<String>,
@@ -233,9 +254,15 @@ pub struct Forked {
     pub cwd: Option<String>,
 }
 
-/// Fork the Transcript at `path` on the Machine from before `entry_id`, writing the cut copy as
-/// a new session file next to the original.
-pub async fn fork(t: &dyn Transport, agent: &str, path: &str, entry_id: &str) -> AppResult<Forked> {
+/// Fork the Transcript at `path` on the Machine from before `entry_id`, or from its newest
+/// entry on when there is none, writing the cut copy as a new session file next to the
+/// original.
+pub async fn fork(
+    t: &dyn Transport,
+    agent: &str,
+    path: &str,
+    entry_id: Option<&str>,
+) -> AppResult<Forked> {
     if !matches!(agent, "claude" | "pi") {
         return Err(AppError::new(
             "invalid",
@@ -258,10 +285,11 @@ pub async fn fork(t: &dyn Transport, agent: &str, path: &str, entry_id: &str) ->
     let text = String::from_utf8(out.stdout)
         .map_err(|_| AppError::new("invalid", "the transcript is not valid UTF-8"))?;
     let new_id = uuid::Uuid::new_v4().to_string();
+    let at = entry_id.map_or(CutAt::Latest, CutAt::Before);
     let cut = if agent == "claude" {
-        cut_claude(&text, entry_id, &new_id)?
+        cut_claude(&text, at, &new_id)?
     } else {
-        cut_pi(&text, entry_id, &new_id, chrono::Utc::now())?
+        cut_pi(&text, at, &new_id, chrono::Utc::now())?
     };
     let Some(cut) = cut else {
         return Ok(Forked {
@@ -337,7 +365,9 @@ mod tests {
 
     #[test]
     fn claude_keeps_the_parent_chain_without_abandoned_branches() {
-        let cut = cut_claude(CLAUDE, "u4", "new").unwrap().unwrap();
+        let cut = cut_claude(CLAUDE, CutAt::Before("u4"), "new")
+            .unwrap()
+            .unwrap();
         let kept = lines(&cut.text);
         let ids: Vec<&str> = kept.iter().map(|v| v["uuid"].as_str().unwrap()).collect();
         assert_eq!(ids, ["u1", "a1", "u3", "a3"]);
@@ -349,14 +379,66 @@ mod tests {
     }
 
     #[test]
+    fn claude_latest_keeps_the_newest_entry_and_its_chain() {
+        let cut = cut_claude(CLAUDE, CutAt::Latest, "new").unwrap().unwrap();
+        let ids: Vec<String> = lines(&cut.text)
+            .iter()
+            .map(|v| v["uuid"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, ["u1", "a1", "u3", "a3", "u4"]);
+        assert_eq!(cut.cwd.as_deref(), Some("/w/b"));
+    }
+
+    #[test]
+    fn claude_latest_ignores_trailing_lines_without_an_id() {
+        let t = format!("{CLAUDE}{}\n", r#"{"type":"summary","summary":"y"}"#);
+        let cut = cut_claude(&t, CutAt::Latest, "new").unwrap().unwrap();
+        assert_eq!(lines(&cut.text).last().unwrap()["uuid"], "u4");
+        assert_eq!(
+            cut_claude(r#"{"type":"summary"}"#, CutAt::Latest, "new")
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+    }
+
+    #[test]
+    fn claude_latest_keeps_results_of_parallel_tool_calls() {
+        let t = concat!(
+            r#"{"type":"user","uuid":"P","parentUuid":null,"sessionId":"old","message":{"content":"p"}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"A1","parentUuid":"P","sessionId":"old","message":{"content":[{"type":"tool_use","id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"A2","parentUuid":"A1","sessionId":"old","message":{"content":[{"type":"tool_use","id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R1","parentUuid":"A1","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T1"}]}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"R2","parentUuid":"A2","sessionId":"old","message":{"content":[{"type":"tool_result","tool_use_id":"T2"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","uuid":"END","parentUuid":"R2","sessionId":"old","message":{"content":[{"type":"text","text":"done"}]}}"#,
+            "\n",
+        );
+        let cut = cut_claude(t, CutAt::Latest, "new").unwrap().unwrap();
+        let ids: Vec<String> = lines(&cut.text)
+            .iter()
+            .map(|v| v["uuid"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, ["P", "A1", "A2", "R1", "R2", "END"]);
+    }
+
+    #[test]
     fn claude_first_message_has_nothing_to_keep() {
-        assert!(cut_claude(CLAUDE, "u1", "new").unwrap().is_none());
+        assert!(cut_claude(CLAUDE, CutAt::Before("u1"), "new")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn claude_unknown_entry_is_not_found() {
         assert_eq!(
-            cut_claude(CLAUDE, "nope", "new").unwrap_err().code,
+            cut_claude(CLAUDE, CutAt::Before("nope"), "new")
+                .unwrap_err()
+                .code,
             "not_found"
         );
     }
@@ -369,7 +451,7 @@ mod tests {
             r#"{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"old","message":{"content":"x"}}"#,
             "\n",
         );
-        let cut = cut_claude(t, "u2", "new").unwrap().unwrap();
+        let cut = cut_claude(t, CutAt::Before("u2"), "new").unwrap().unwrap();
         assert_eq!(lines(&cut.text).len(), 1);
         assert_eq!(cut.cwd, None);
     }
@@ -400,7 +482,7 @@ mod tests {
             r#"{"type":"user","uuid":"F","parentUuid":"AR2","sessionId":"old","message":{"content":"fork here"}}"#,
             "\n",
         );
-        let cut = cut_claude(t, "F", "new").unwrap().unwrap();
+        let cut = cut_claude(t, CutAt::Before("F"), "new").unwrap().unwrap();
         let ids: Vec<String> = lines(&cut.text)
             .iter()
             .map(|v| v["uuid"].as_str().unwrap().to_string())
@@ -437,7 +519,7 @@ mod tests {
             r#"{"type":"user","uuid":"F","parentUuid":"XR1","sessionId":"old","message":{"content":"next"}}"#,
             "\n",
         );
-        let cut = cut_claude(t, "F", "new").unwrap().unwrap();
+        let cut = cut_claude(t, CutAt::Before("F"), "new").unwrap().unwrap();
         let ids: Vec<String> = lines(&cut.text)
             .iter()
             .map(|v| v["uuid"].as_str().unwrap().to_string())
@@ -465,7 +547,9 @@ mod tests {
 
     #[test]
     fn pi_keeps_header_and_chain_and_renames_the_session() {
-        let cut = cut_pi(PI, "c", "new", at()).unwrap().unwrap();
+        let cut = cut_pi(PI, CutAt::Before("c"), "new", at())
+            .unwrap()
+            .unwrap();
         let out: Vec<&str> = cut.text.lines().collect();
         let src: Vec<&str> = PI.lines().collect();
         assert_eq!(out.len(), 4);
@@ -483,8 +567,21 @@ mod tests {
     }
 
     #[test]
+    fn pi_latest_keeps_the_newest_entry_and_its_chain() {
+        let cut = cut_pi(PI, CutAt::Latest, "new", at()).unwrap().unwrap();
+        let out: Vec<&str> = cut.text.lines().collect();
+        let src: Vec<&str> = PI.lines().collect();
+        assert_eq!(&out[1..], &[src[1], src[2], src[3], src[5]]);
+        assert!(cut_pi(&format!("{}\n", src[0]), CutAt::Latest, "new", at())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn pi_first_message_has_nothing_to_keep() {
-        assert!(cut_pi(PI, "a", "new", at()).unwrap().is_none());
+        assert!(cut_pi(PI, CutAt::Before("a"), "new", at())
+            .unwrap()
+            .is_none());
     }
 
     use crate::transport::local::LocalTransport;
@@ -496,7 +593,7 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let src = dir.join("old.jsonl");
         std::fs::write(&src, CLAUDE).unwrap();
-        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u4")
+        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), Some("u4"))
             .await
             .unwrap();
         let id = f.id.clone().unwrap();
@@ -509,10 +606,22 @@ mod tests {
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        let again = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u4")
+        let again = fork(&LocalTransport, "claude", src.to_str().unwrap(), Some("u4"))
             .await
             .unwrap();
         assert_ne!(again.path, f.path, "a second fork is a second session");
+    }
+
+    #[tokio::test]
+    async fn fork_latest_writes_the_whole_active_branch() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("old.jsonl");
+        std::fs::write(&src, CLAUDE).unwrap();
+        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), None)
+            .await
+            .unwrap();
+        let text = std::fs::read_to_string(f.path.unwrap()).unwrap();
+        assert_eq!(lines(&text).len(), 5);
     }
 
     #[tokio::test]
@@ -520,7 +629,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let src = d.path().join("old.jsonl");
         std::fs::write(&src, CLAUDE).unwrap();
-        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u1")
+        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), Some("u1"))
             .await
             .unwrap();
         assert_eq!(
@@ -548,14 +657,19 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
         assert_eq!(
-            fork(&LocalTransport, "codex", taken.to_str().unwrap(), "u1")
-                .await
-                .unwrap_err()
-                .code,
+            fork(
+                &LocalTransport,
+                "codex",
+                taken.to_str().unwrap(),
+                Some("u1")
+            )
+            .await
+            .unwrap_err()
+            .code,
             "invalid"
         );
         assert_eq!(
-            fork(&LocalTransport, "claude", "old.jsonl", "u4")
+            fork(&LocalTransport, "claude", "old.jsonl", Some("u4"))
                 .await
                 .unwrap_err()
                 .code,

@@ -99,7 +99,7 @@ export const chatOpen = (p: PaneRef, path: string | null, events: Channel<ChatEv
   invoke<Located>("chat_open", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, path, events });
 export const chatLocate = (p: PaneRef) =>
   invoke<Located>("chat_locate", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
-export const chatFork = (machineId: string, agent: string, path: string, entryId: string) =>
+export const chatFork = (machineId: string, agent: string, path: string, entryId: string | null) =>
   invoke<Forked>("chat_fork", { machineId, agent, path, entryId });
 export const chatBtwAsk = (machineId: string, path: string, question: string, forkId: string | null, askId: string, events: Channel<BtwEvent>) =>
   invoke<void>("chat_btw_ask", { machineId, path, question, forkId, askId, events });

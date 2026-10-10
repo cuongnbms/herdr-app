@@ -451,17 +451,18 @@ pub async fn chat_locate(
     locate_pane(&mgr, &pane_ref, None).await
 }
 
-/// Forks a Transcript from before a user message into a new session file on the Machine.
+/// Forks a Transcript from before a user message, or from its newest entry on when `entry_id`
+/// is absent, into a new session file on the Machine.
 #[tauri::command]
 pub async fn chat_fork(
     mgr: Mgr<'_>,
     machine_id: String,
     agent: String,
     path: String,
-    entry_id: String,
+    entry_id: Option<String>,
 ) -> Result<transcript::fork::Forked, AppError> {
     let t = mgr.transport(&machine_id)?;
-    transcript::fork::fork(&*t, &agent, &path, &entry_id).await
+    transcript::fork::fork(&*t, &agent, &path, entry_id.as_deref()).await
 }
 
 /// Asks a side question on a fork of the Transcript, streaming its events over `events`. The

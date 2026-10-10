@@ -7,7 +7,9 @@ import { paneKey, type Located, type MachineView } from "../lib/types";
 import { useApp } from "../store/app";
 import { showToast } from "../ui/Toast";
 import { readDraft } from "./drafts";
-import { canFork, forkChat } from "./forkChat";
+import { canFork, forkChat, latestForkRow } from "./forkChat";
+import { buildRows } from "./workBlocks";
+import type { ChatItem } from "../lib/types";
 
 const pane = { machine_id: "local", session: "default", pane_id: "w1:p1" };
 const fresh = { machine_id: "local", session: "default", pane_id: "w1:p9" };
@@ -34,6 +36,21 @@ describe("canFork", () => {
     expect(canFork("claude", null)).toBe(false);
     expect(canFork("claude", located({ pending: true }))).toBe(false);
     expect(canFork("claude", located({ ambiguous: true }))).toBe(false);
+  });
+});
+
+describe("latestForkRow", () => {
+  const rows = (items: ChatItem[]) => buildRows(items).rows;
+  const answered: ChatItem[] = [{ kind: "user", id: "u1", text: "hi" }, { kind: "assistant_text", markdown: "done" }];
+
+  it("is the last row when it is an answer and the agent is not live", () => {
+    expect(latestForkRow(rows(answered), false)).toBe(1);
+  });
+
+  it("is none while the agent is live, after a user message, or without rows", () => {
+    expect(latestForkRow(rows(answered), true)).toBe(-1);
+    expect(latestForkRow(rows([...answered, { kind: "user", id: "u2", text: "more" }]), false)).toBe(-1);
+    expect(latestForkRow([], false)).toBe(-1);
   });
 });
 
@@ -93,6 +110,17 @@ describe("forkChat", () => {
     vi.mocked(chatFork).mockResolvedValue({ id: "s3", path: "/p/s3.jsonl", cwd: "/w/b" });
     await forkChat(pane, "claude", "/p/old.jsonl", { id: "u4", text: "three" });
     expect(chatFork).toHaveBeenCalledTimes(2);
+  });
+
+  it("forks from the latest entry with an empty draft", async () => {
+    vi.mocked(chatFork).mockResolvedValue({ id: "s2", path: "/p/s2.jsonl", cwd: "/w/b" });
+    vi.mocked(herdrCall).mockImplementation(async (_m, _s, method) =>
+      method === "tab.create" ? { root_pane: { pane_id: "w1:p9" } } : { ok: true });
+    await forkChat(pane, "claude", "/p/old.jsonl", null);
+    expect(chatFork).toHaveBeenCalledWith("local", "claude", "/p/old.jsonl", null);
+    expect(herdrCall).toHaveBeenCalledWith("local", "default", "agent.start", { name: "claude", kind: "claude", pane_id: "w1:p9", args: ["--resume", "s2"] });
+    expect(readDraft(paneKey(fresh))).toBe("");
+    expect(useApp.getState().lensOverride[paneKey(fresh)]).toBe("chat");
   });
 
   it("toasts a failure", async () => {

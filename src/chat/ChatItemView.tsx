@@ -158,6 +158,7 @@ export const ChatItemView = memo(function ChatItemView({
   result,
   copy = false,
   onFork,
+  onForkLatest,
   forking = false,
 }: {
   item: ChatItem;
@@ -165,6 +166,8 @@ export const ChatItemView = memo(function ChatItemView({
   copy?: boolean;
   /** Fork the conversation from before this user message; the button shows only for a user item with an id. */
   onFork?: (item: { id: string; text: string }) => void;
+  /** Fork the conversation from its latest entry on; the button shows only on an answer. */
+  onForkLatest?: () => void;
   /** This message's fork is running: the button is disabled until it ends. */
   forking?: boolean;
 }) {
@@ -199,7 +202,24 @@ export const ChatItemView = memo(function ChatItemView({
       return (
         <div className="chat-row chat-assistant">
           <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={mdComponents}>{item.markdown}</Markdown>
-          {copy && <CopyButton text={item.markdown} />}
+          {(copy || onForkLatest) && (
+            <div className="chat-actions">
+              {copy && <CopyButton text={item.markdown} />}
+              {onForkLatest && (
+                <button
+                  type="button"
+                  className="chat-copy chat-fork"
+                  aria-label="Fork from latest"
+                  title="Fork from latest"
+                  disabled={forking}
+                  aria-busy={forking || undefined}
+                  onClick={onForkLatest}
+                >
+                  <ForkIcon />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       );
     case "thinking":

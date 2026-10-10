@@ -211,3 +211,25 @@ describe("Fork button", () => {
     expect(button.hasAttribute("aria-busy")).toBe(false);
   });
 });
+
+describe("Fork from latest button", () => {
+  it("shows on an answer given onForkLatest and forks from the latest entry", () => {
+    const onForkLatest = vi.fn();
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "done" }} copy onForkLatest={onForkLatest} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fork from latest" }));
+    expect(onForkLatest).toHaveBeenCalledTimes(1);
+  });
+
+  it("is absent without onForkLatest", () => {
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "done" }} copy />);
+    expect(screen.queryByRole("button", { name: "Fork from latest" })).toBeNull();
+  });
+
+  it("is disabled and busy while its fork runs", () => {
+    const onForkLatest = vi.fn();
+    render(<ChatItemView item={{ kind: "assistant_text", markdown: "done" }} copy onForkLatest={onForkLatest} forking />);
+    const button = screen.getByRole("button", { name: "Fork from latest" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+  });
+});
