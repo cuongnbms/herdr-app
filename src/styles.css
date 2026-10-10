@@ -767,7 +767,8 @@ kbd {
 .chat-outline button[aria-current="true"] { border-left-color: var(--accent); color: var(--fg); }
 .chat-scroll-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
-.chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
+/* `auto`, not the body's `default`: an I-beam over the text, an arrow over empty space. */
+.chat-row { padding: 8px 28px; max-width: 840px; margin: 0 auto; box-sizing: border-box; user-select: text; -webkit-user-select: text; cursor: auto; }
 /* A user turn stacks its images, the bubble line and its Skill chips, all at the right edge. */
 .chat-user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 /* Full row width, so the bubble's max-width stays a share of the row. */
@@ -844,7 +845,7 @@ kbd {
 .chat-code-head .chat-copy svg { width: 12px; height: 12px; }
 .chat-code:hover .chat-code-head .chat-copy, .chat-code-head .chat-copy:focus-visible, .chat-code-head .chat-copy[aria-label="Copied"] { opacity: 1; }
 .chat-assistant :not(pre) > code { padding: 1px 5px; border-radius: 4px; background: var(--active); color: var(--code-inline); }
-.chat-assistant a { color: var(--link); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent); }
+.chat-assistant a { cursor: pointer; color: var(--link); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent); }
 .chat-assistant a:hover { border-bottom-color: currentColor; }
 /* A file path opens in Files: the code keeps its look, underlined on hover. */
 .chat-assistant a.chat-file-link { border-bottom: none; }
