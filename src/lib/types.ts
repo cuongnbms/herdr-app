@@ -123,6 +123,13 @@ export interface GitStatus {
   changes: GitChange[];
 }
 
+/** A session forked from before a user message; all null when nothing precedes it. */
+export interface Forked {
+  id: string | null;
+  path: string | null;
+  cwd: string | null;
+}
+
 export interface Located {
   agent: string;
   path: string;

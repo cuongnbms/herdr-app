@@ -451,6 +451,19 @@ pub async fn chat_locate(
     locate_pane(&mgr, &pane_ref, None).await
 }
 
+/// Forks a Transcript from before a user message into a new session file on the Machine.
+#[tauri::command]
+pub async fn chat_fork(
+    mgr: Mgr<'_>,
+    machine_id: String,
+    agent: String,
+    path: String,
+    entry_id: String,
+) -> Result<transcript::fork::Forked, AppError> {
+    let t = mgr.transport(&machine_id)?;
+    transcript::fork::fork(&*t, &agent, &path, &entry_id).await
+}
+
 /// The Slash commands the Agent in a Pane offers, read on the Pane's Machine.
 #[tauri::command]
 pub async fn complete_commands(

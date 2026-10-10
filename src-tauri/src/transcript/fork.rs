@@ -1,6 +1,8 @@
 //! Cutting a Transcript: keep only the parent chain leading up to one entry, so the copy can
 //! start a new session that forks from just before that entry.
 use crate::error::{AppError, AppResult};
+use crate::transport::{exec_bytes, exec_input, Transport};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -134,6 +136,75 @@ pub fn cut_pi(
     }))
 }
 
+/// What a fork made: the new session's id, the file holding it, and the directory it ran in.
+/// All `None` when there was nothing before the entry to fork from.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Forked {
+    pub id: Option<String>,
+    pub path: Option<String>,
+    pub cwd: Option<String>,
+}
+
+/// Fork the Transcript at `path` on the Machine from before `entry_id`, writing the cut copy as
+/// a new session file next to the original.
+pub async fn fork(t: &dyn Transport, agent: &str, path: &str, entry_id: &str) -> AppResult<Forked> {
+    if !matches!(agent, "claude" | "pi") {
+        return Err(AppError::new(
+            "invalid",
+            format!("forking is not supported for {agent}"),
+        ));
+    }
+    let out = exec_bytes(t, &["cat".to_string(), path.to_string()]).await?;
+    if out.status != 0 {
+        return Err(AppError::new(
+            "io",
+            format!("reading the transcript failed: {}", out.stderr.trim()),
+        ));
+    }
+    let text = String::from_utf8(out.stdout)
+        .map_err(|_| AppError::new("invalid", "the transcript is not valid UTF-8"))?;
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let cut = if agent == "claude" {
+        cut_claude(&text, entry_id, &new_id)?
+    } else {
+        cut_pi(&text, entry_id, &new_id, chrono::Utc::now())?
+    };
+    let Some(cut) = cut else {
+        return Ok(Forked {
+            id: None,
+            path: None,
+            cwd: None,
+        });
+    };
+    let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let new_path = format!("{dir}/{}", cut.file_name);
+    write_new(t, &new_path, &cut.text).await?;
+    Ok(Forked {
+        id: Some(cut.id),
+        path: Some(new_path),
+        cwd: cut.cwd,
+    })
+}
+
+/// Write `text` to a new private file at `path`, failing if the file already exists.
+async fn write_new(t: &dyn Transport, path: &str, text: &str) -> AppResult<()> {
+    let argv: Vec<String> = vec![
+        "sh".into(),
+        "-c".into(),
+        "umask 077; set -C; cat > \"$1\"".into(),
+        "sh".into(),
+        path.into(),
+    ];
+    let out = exec_input(t, &argv, Some(text.as_bytes())).await?;
+    if out.status != 0 {
+        return Err(AppError::new(
+            "io",
+            format!("writing the fork failed: {}", out.stderr.trim()),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +314,74 @@ mod tests {
     #[test]
     fn pi_first_message_has_nothing_to_keep() {
         assert!(cut_pi(PI, "a", "new", at()).unwrap().is_none());
+    }
+
+    use crate::transport::local::LocalTransport;
+
+    #[tokio::test]
+    async fn fork_writes_a_private_copy_next_to_the_original() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("a dir");
+        std::fs::create_dir(&dir).unwrap();
+        let src = dir.join("old.jsonl");
+        std::fs::write(&src, CLAUDE).unwrap();
+        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u4")
+            .await
+            .unwrap();
+        let id = f.id.clone().unwrap();
+        let path = f.path.clone().unwrap();
+        assert_eq!(path, dir.join(format!("{id}.jsonl")).to_string_lossy());
+        assert_eq!(f.cwd.as_deref(), Some("/w/b"));
+        assert_eq!(lines(&std::fs::read_to_string(&path).unwrap()).len(), 4);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let again = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u4")
+            .await
+            .unwrap();
+        assert_ne!(again.path, f.path, "a second fork is a second session");
+    }
+
+    #[tokio::test]
+    async fn fork_at_the_first_message_writes_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("old.jsonl");
+        std::fs::write(&src, CLAUDE).unwrap();
+        let f = fork(&LocalTransport, "claude", src.to_str().unwrap(), "u1")
+            .await
+            .unwrap();
+        assert_eq!(
+            f,
+            Forked {
+                id: None,
+                path: None,
+                cwd: None
+            }
+        );
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn fork_never_overwrites_and_rejects_other_agents() {
+        let d = tempfile::tempdir().unwrap();
+        let taken = d.path().join("x.jsonl");
+        std::fs::write(&taken, "keep").unwrap();
+        assert_eq!(
+            write_new(&LocalTransport, taken.to_str().unwrap(), "new")
+                .await
+                .unwrap_err()
+                .code,
+            "io"
+        );
+        assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
+        assert_eq!(
+            fork(&LocalTransport, "codex", taken.to_str().unwrap(), "u1")
+                .await
+                .unwrap_err()
+                .code,
+            "invalid"
+        );
     }
 }

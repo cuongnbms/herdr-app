@@ -2,7 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { showToast } from "../ui/Toast";
-import type { AttachEvent, ChatEvent, ChatItem, FileContent, FileEntry, FileList, FileVersion, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
+import type { AttachEvent, ChatEvent, ChatItem, FileContent, FileEntry, FileList, FileVersion, Forked, GitStatus, Located, MachineView, PaneRef, PaneStatusEvent, QuotaOutcome, QuotaProvider, SlashCommand, WatchEvent } from "./types";
 
 export const machinesList = () => invoke<MachineView[]>("machines_list");
 export const machineConnect = (id: string) => invoke<void>("machine_connect", { id });
@@ -99,6 +99,8 @@ export const chatOpen = (p: PaneRef, path: string | null, events: Channel<ChatEv
   invoke<Located>("chat_open", { machineId: p.machine_id, session: p.session, paneId: p.pane_id, path, events });
 export const chatLocate = (p: PaneRef) =>
   invoke<Located>("chat_locate", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
+export const chatFork = (machineId: string, agent: string, path: string, entryId: string) =>
+  invoke<Forked>("chat_fork", { machineId, agent, path, entryId });
 export const completeCommands = (p: PaneRef) =>
   invoke<SlashCommand[]>("complete_commands", { machineId: p.machine_id, session: p.session, paneId: p.pane_id });
 export const completeFiles = (p: PaneRef) =>

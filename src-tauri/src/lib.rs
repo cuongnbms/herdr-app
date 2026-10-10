@@ -67,6 +67,7 @@ pub fn run() {
             commands::term_close,
             commands::chat_open,
             commands::chat_locate,
+            commands::chat_fork,
             commands::chat_page,
             commands::chat_image,
             commands::chat_close,
