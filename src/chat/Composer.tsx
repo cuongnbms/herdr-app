@@ -58,6 +58,7 @@ export function Composer({
   meta,
   onSend,
   btwPath,
+  btwOnly,
 }: {
   pane: PaneRef;
   agent: string | null;
@@ -73,9 +74,15 @@ export function Composer({
   onSend?: (text: string, previews: string[]) => (ok: boolean) => void;
   /** The located Claude Transcript's path when side questions (btw) are available; else none. */
   btwPath?: string | null;
+  /**
+   * Only side questions (beside a blocked Agent's prompt card): always in btw mode, with nothing
+   * that talks to the Agent; leaving the mode is the caller's cue to fold the box away.
+   */
+  btwOnly?: boolean;
 }) {
   const key = paneKey(pane);
-  const btwOn = !!btwPath && !!useBtw((s) => s.mode[key]);
+  const btwMode = useBtw((s) => !!s.mode[key]);
+  const btwOn = !!btwPath && (!!btwOnly || btwMode);
   const btwRunning = useBtw((s) => {
     const turns = s.threads[key]?.turns;
     return !!turns && turns.length > 0 && turns[turns.length - 1].running;
@@ -295,24 +302,27 @@ export function Composer({
 
   return (
     <div className={`composer${btwOn ? " btw" : ""}`}>
-      <div className="composer-top">
-        {!btwOn && showQuick && quickReplies.length > 0 && (
-          <div className="composer-quick" role="group" aria-label="Quick replies">
-            {quickReplies.map((reply, i) => (
-              <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
-                {reply}
+      {/* Quick replies and keys go to the Agent; the blocked prompt card has its own keys. */}
+      {!btwOnly && (
+        <div className="composer-top">
+          {!btwOn && showQuick && quickReplies.length > 0 && (
+            <div className="composer-quick" role="group" aria-label="Quick replies">
+              {quickReplies.map((reply, i) => (
+                <button key={`${i}:${reply}`} className="composer-quick-reply" title={`Send “${reply}”`} disabled={sending} onClick={() => sendQuick(reply)}>
+                  {reply}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="composer-keys">
+            {KEYS.map((k) => (
+              <button key={k.key} className="keycap" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: [k.key] }).catch(() => {})}>
+                {k.label}
               </button>
             ))}
           </div>
-        )}
-        <div className="composer-keys">
-          {KEYS.map((k) => (
-            <button key={k.key} className="keycap" onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: [k.key] }).catch(() => {})}>
-              {k.label}
-            </button>
-          ))}
         </div>
-      </div>
+      )}
       <div className="composer-box">
         {!btwOn && images.length > 0 && (
           <div className="composer-images">
@@ -413,7 +423,7 @@ export function Composer({
           }}
         />
         <div className="composer-bar">
-          <GitStatusLine pane={pane} status={status} />
+          {!btwOnly && <GitStatusLine pane={pane} status={status} />}
           {btwPath && (
             <button
               className="composer-btw"
@@ -424,7 +434,7 @@ export function Composer({
               btw
             </button>
           )}
-          {agent === "claude" ? (
+          {btwOnly ? null : agent === "claude" ? (
             // Claude takes /model and /effort with an argument; only while idle, since a turn would
             // queue them and a blocked prompt would take the text as its answer.
             <button
@@ -446,16 +456,19 @@ export function Composer({
           )}
           {/* Esc interrupts the agent's turn without killing it the way Ctrl+C can. Send stays
               usable beside it: the agent queues text sent while it works. Stop stays mounted,
-              disabled while idle, so the row doesn't shift when a turn starts or ends. */}
-          <button
-            className="stop"
-            aria-label="Stop"
-            title="Stop (Esc)"
-            disabled={status !== "working"}
-            onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: ["esc"] }).catch(() => {})}
-          >
-            <StopIcon />
-          </button>
+              disabled while idle, so the row doesn't shift when a turn starts or ends. Not in btw
+              mode: the side question has its own Stop on the card. */}
+          {!btwOn && (
+            <button
+              className="stop"
+              aria-label="Stop"
+              title="Stop (Esc)"
+              disabled={status !== "working"}
+              onClick={() => call("agent.send_keys", { target: pane.pane_id, keys: ["esc"] }).catch(() => {})}
+            >
+              <StopIcon />
+            </button>
+          )}
           <button className="send" aria-label="Send" disabled={!canSend} onClick={send}>
             <SendIcon />
           </button>

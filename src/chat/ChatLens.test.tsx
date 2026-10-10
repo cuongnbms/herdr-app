@@ -24,9 +24,9 @@ vi.mock("./chatSession", () => ({
 }));
 vi.mock("./btw", async (orig) => {
   const m = await orig<typeof import("./btw")>();
-  return { ...m, closeSide: vi.fn() };
+  return { ...m, closeSide: vi.fn(), askSide: vi.fn().mockResolvedValue(undefined) };
 });
-import { closeSide, useBtw } from "./btw";
+import { askSide, closeSide, useBtw } from "./btw";
 import { chatLocate, chatPage, herdrCall } from "../lib/ipc";
 import { paneKey, type PaneView } from "../lib/types";
 import { useApp, viewedItems } from "../store/app";
@@ -135,6 +135,40 @@ describe("ChatLens", () => {
     render(<ChatLens pane={pane} view={idlePi} />);
     await waitFor(() => expect(closeSide).toHaveBeenCalledWith(pane));
     useBtw.setState({ threads: {}, mode: {} });
+  });
+
+  it("offers a side question below the prompt card while the Agent is blocked", async () => {
+    opened = Promise.resolve({ agent: "claude", path: "/p/t1.jsonl", ambiguous: false, candidates: ["/p/t1.jsonl"], pending: false });
+    useBtw.setState({ threads: {}, mode: {} });
+    vi.mocked(askSide).mockClear();
+    // the blocked card's screen mirror asks for matchMedia
+    window.matchMedia ??= ((query: string) =>
+      ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList);
+    const { container } = render(<ChatLens pane={pane} view={{ status: "blocked", agent: "claude", title: "claude" } as PaneView} />);
+    const open = await screen.findByRole("button", { name: "btw — hỏi bên lề" });
+    const composer = () => container.querySelector<HTMLTextAreaElement>(".composer textarea");
+    expect(container.querySelector(".blocked-panel")).toBeTruthy();
+    expect(composer()).toBeNull();
+    fireEvent.click(open);
+    const box = composer()!;
+    expect(box.getAttribute("placeholder")).toBe("Hỏi bên lề (không vào Transcript)…");
+    expect(container.querySelector(".blocked-panel")).toBeTruthy();
+    fireEvent.change(box, { target: { value: "why?" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(askSide).toHaveBeenCalledWith(pane, "/p/t1.jsonl", "why?");
+    expect(vi.mocked(herdrCall).mock.calls.some(([, , m]) => m === "agent.prompt")).toBe(false);
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "btw — hỏi bên lề" })).toBeTruthy();
+    expect(composer()).toBeNull();
+    useBtw.setState({ threads: {}, mode: {} });
+  });
+
+  it("offers no side question while blocked without a located Claude transcript", async () => {
+    window.matchMedia ??= ((query: string) =>
+      ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList);
+    render(<ChatLens pane={pane} view={{ status: "blocked", agent: "pi", title: "pi" } as PaneView} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: "btw — hỏi bên lề" })).toBeNull();
   });
 
   it("does not locate again after an open that located, or a reattach to the same file", async () => {
