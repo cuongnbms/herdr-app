@@ -1,0 +1,247 @@
+//! Cutting a Transcript: keep only the parent chain leading up to one entry, so the copy can
+//! start a new session that forks from just before that entry.
+use crate::error::{AppError, AppResult};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+
+/// A cut copy of a Transcript, ready to be written as a new session file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cut {
+    pub id: String,
+    pub file_name: String,
+    pub text: String,
+    pub cwd: Option<String>,
+}
+
+/// The non-empty lines of `text`, each with its parsed JSON (None when it does not parse).
+fn parse(text: &str) -> Vec<(&str, Option<Value>)> {
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| (l, serde_json::from_str(l).ok()))
+        .collect()
+}
+
+/// Indexes of the lines on the parent chain of `entry_id` (the entry itself excluded), in
+/// file order. The walk stops at a null parent or a parent id that is not in the file.
+fn chain(
+    parsed: &[(&str, Option<Value>)],
+    id_key: &str,
+    parent_key: &str,
+    entry_id: &str,
+) -> AppResult<Vec<usize>> {
+    let mut by_id: HashMap<&str, usize> = HashMap::new();
+    for (i, (_, v)) in parsed.iter().enumerate() {
+        if let Some(id) = v.as_ref().and_then(|v| v[id_key].as_str()) {
+            by_id.insert(id, i); // the later line wins
+        }
+    }
+    let start = *by_id.get(entry_id).ok_or_else(|| {
+        AppError::new(
+            "not_found",
+            format!("entry {entry_id} not found in transcript"),
+        )
+    })?;
+    let parent_of = |i: usize| parsed[i].1.as_ref().and_then(|v| v[parent_key].as_str());
+    let mut kept = Vec::new();
+    let mut seen = HashSet::from([start]);
+    let mut parent = parent_of(start);
+    while let Some(&i) = parent.and_then(|p| by_id.get(p)) {
+        if !seen.insert(i) {
+            break; // a cycle; never loop forever on a corrupt file
+        }
+        kept.push(i);
+        parent = parent_of(i);
+    }
+    kept.sort_unstable();
+    Ok(kept)
+}
+
+fn join(lines: Vec<String>) -> String {
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// Cut a Claude Transcript to the chain before `entry_id`, re-keyed to session `new_id`.
+/// `Ok(None)` when that chain holds no user or assistant line.
+pub fn cut_claude(text: &str, entry_id: &str, new_id: &str) -> AppResult<Option<Cut>> {
+    let parsed = parse(text);
+    let kept = chain(&parsed, "uuid", "parentUuid", entry_id)?;
+    let has_conversation = kept.iter().any(|&i| {
+        matches!(
+            parsed[i].1.as_ref().and_then(|v| v["type"].as_str()),
+            Some("user" | "assistant")
+        )
+    });
+    if !has_conversation {
+        return Ok(None);
+    }
+    let mut cwd = None;
+    let mut out = Vec::with_capacity(kept.len());
+    for i in kept {
+        let mut v = parsed[i].1.clone().unwrap_or(Value::Null);
+        if let Some(c) = v["cwd"].as_str() {
+            cwd = Some(c.to_string());
+        }
+        v["sessionId"] = json!(new_id);
+        out.push(v.to_string());
+    }
+    Ok(Some(Cut {
+        id: new_id.to_string(),
+        file_name: format!("{new_id}.jsonl"),
+        text: join(out),
+        cwd,
+    }))
+}
+
+/// Cut a pi Transcript to the chain before `entry_id`, behind a fresh session header made at
+/// `now`. `Ok(None)` when that chain holds no message line.
+pub fn cut_pi(
+    text: &str,
+    entry_id: &str,
+    new_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> AppResult<Option<Cut>> {
+    let parsed = parse(text);
+    let header_at = parsed
+        .iter()
+        .position(|(_, v)| v.as_ref().is_some_and(|v| v["type"] == "session"));
+    let kept: Vec<usize> = chain(&parsed, "id", "parentId", entry_id)?
+        .into_iter()
+        .filter(|&i| Some(i) != header_at)
+        .collect();
+    let has_conversation = kept
+        .iter()
+        .any(|&i| parsed[i].1.as_ref().is_some_and(|v| v["type"] == "message"));
+    if !has_conversation {
+        return Ok(None);
+    }
+    let mut cwd = None;
+    let mut out = Vec::with_capacity(kept.len() + 1);
+    if let Some(h) = header_at {
+        let mut head = parsed[h].1.clone().unwrap_or(Value::Null);
+        cwd = head["cwd"].as_str().map(str::to_string);
+        head["id"] = json!(new_id);
+        head["timestamp"] = json!(now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
+        out.push(head.to_string());
+    }
+    out.extend(kept.into_iter().map(|i| parsed[i].0.to_string()));
+    Ok(Some(Cut {
+        id: new_id.to_string(),
+        file_name: format!("{}_{new_id}.jsonl", now.format("%Y-%m-%dT%H-%M-%S-%3fZ")),
+        text: join(out),
+        cwd,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn lines(t: &str) -> Vec<Value> {
+        t.lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+    fn at() -> chrono::DateTime<chrono::Utc> {
+        "2026-10-10T08:09:10.123Z".parse().unwrap()
+    }
+
+    const CLAUDE: &str = concat!(
+        r#"{"type":"summary","summary":"x"}"#,
+        "\n",
+        r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"old","cwd":"/w/a","message":{"content":"one"}}"#,
+        "\n",
+        r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"old","cwd":"/w/a","message":{"content":[{"type":"text","text":"r1"}]}}"#,
+        "\n",
+        r#"{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"old","cwd":"/w/a","message":{"content":"abandoned"}}"#,
+        "\n",
+        r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","sessionId":"old","cwd":"/w/a","message":{"content":[{"type":"text","text":"r2"}]}}"#,
+        "\n",
+        r#"{"type":"user","uuid":"u3","parentUuid":"a1","sessionId":"old","cwd":"/w/b","message":{"content":"two"}}"#,
+        "\n",
+        r#"{"type":"assistant","uuid":"a3","parentUuid":"u3","sessionId":"old","cwd":"/w/b","message":{"content":[{"type":"text","text":"r3"}]}}"#,
+        "\n",
+        r#"{"type":"user","uuid":"u4","parentUuid":"a3","sessionId":"old","cwd":"/w/b","message":{"content":"three"}}"#,
+        "\n",
+    );
+
+    #[test]
+    fn claude_keeps_the_parent_chain_without_abandoned_branches() {
+        let cut = cut_claude(CLAUDE, "u4", "new").unwrap().unwrap();
+        let kept = lines(&cut.text);
+        let ids: Vec<&str> = kept.iter().map(|v| v["uuid"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["u1", "a1", "u3", "a3"]);
+        assert!(kept.iter().all(|v| v["sessionId"] == "new"));
+        assert_eq!(cut.id, "new");
+        assert_eq!(cut.file_name, "new.jsonl");
+        assert_eq!(cut.cwd.as_deref(), Some("/w/b"));
+        assert!(cut.text.ends_with('\n'));
+    }
+
+    #[test]
+    fn claude_first_message_has_nothing_to_keep() {
+        assert!(cut_claude(CLAUDE, "u1", "new").unwrap().is_none());
+    }
+
+    #[test]
+    fn claude_unknown_entry_is_not_found() {
+        assert_eq!(
+            cut_claude(CLAUDE, "nope", "new").unwrap_err().code,
+            "not_found"
+        );
+    }
+
+    #[test]
+    fn claude_walk_stops_at_a_missing_parent() {
+        let t = concat!(
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"gone","sessionId":"old","message":{"content":[]}}"#,
+            "\n",
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"old","message":{"content":"x"}}"#,
+            "\n",
+        );
+        let cut = cut_claude(t, "u2", "new").unwrap().unwrap();
+        assert_eq!(lines(&cut.text).len(), 1);
+        assert_eq!(cut.cwd, None);
+    }
+
+    const PI: &str = concat!(
+        r#"{"type":"session","version":3,"id":"old","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/w/app"}"#,
+        "\n",
+        r#"{"type":"model_change","id":"m","parentId":null,"modelId":"x"}"#,
+        "\n",
+        r#"{"type":"message","id":"a","parentId":"m","message":{"role":"user","content":"hi"}}"#,
+        "\n",
+        r#"{"type":"message","id":"b","parentId":"a","message":{"role":"assistant","content":[]}}"#,
+        "\n",
+        r#"{"type":"message","id":"x","parentId":"b","message":{"role":"user","content":"abandoned"}}"#,
+        "\n",
+        r#"{"type":"message","id":"c","parentId":"b","message":{"role":"user","content":"again"}}"#,
+        "\n",
+    );
+
+    #[test]
+    fn pi_keeps_header_and_chain_and_renames_the_session() {
+        let cut = cut_pi(PI, "c", "new", at()).unwrap().unwrap();
+        let out: Vec<&str> = cut.text.lines().collect();
+        let src: Vec<&str> = PI.lines().collect();
+        assert_eq!(out.len(), 4);
+        let head: Value = serde_json::from_str(out[0]).unwrap();
+        assert_eq!(head["id"], "new");
+        assert_eq!(head["timestamp"], "2026-10-10T08:09:10.123Z");
+        assert_eq!(head["cwd"], "/w/app");
+        assert_eq!(
+            &out[1..],
+            &[src[1], src[2], src[3]],
+            "chain lines are copied byte for byte"
+        );
+        assert_eq!(cut.file_name, "2026-10-10T08-09-10-123Z_new.jsonl");
+        assert_eq!(cut.cwd.as_deref(), Some("/w/app"));
+    }
+
+    #[test]
+    fn pi_first_message_has_nothing_to_keep() {
+        assert!(cut_pi(PI, "a", "new", at()).unwrap().is_none());
+    }
+}
